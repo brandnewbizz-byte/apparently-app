@@ -9,7 +9,7 @@ import {
   X,
   Bookmark,
   Trophy,
-  ShoppingBag,
+  MessageCircle,
   Sparkles,
   Wrench,
   Star,
@@ -1340,10 +1340,10 @@ export default function HomeScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity 
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleNavigate('/(tabs)/book')}
+              onPress={() => handleNavigate('/(tabs)/inbox')}
               activeOpacity={0.8}
             >
-              <ShoppingBag size={20} color={colors.text} />
+              <MessageCircle size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>

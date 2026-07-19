@@ -1,5 +1,6 @@
 import { Bookmark, Camera, Heart, ImagePlus, MessageCircle, MoreHorizontal, Send, Share2, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -805,6 +806,7 @@ function FeedPost({
 // ── Main Feed Screen ────────────────────────────────────────────────────────
 
 export default function FeedScreen() {
+  const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { hideTabBar, showTabBar } = useTabBar();
@@ -991,10 +993,24 @@ export default function FeedScreen() {
     );
   }, []);
 
+  const openInbox = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    router.push('/(tabs)/inbox' as any);
+  }, [router]);
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.headerBar, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+      <View style={[styles.headerBar, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}> 
         <Text style={[styles.headerTitle, { color: colors.text }]}>Feed</Text>
+        <TouchableOpacity
+          style={[styles.headerIconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={openInbox}
+          activeOpacity={0.8}
+        >
+          <MessageCircle size={20} color={colors.text} />
+        </TouchableOpacity>
       </View>
       <FlatList
         data={posts}
@@ -1096,8 +1112,9 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  headerBar: { paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerBar: { paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { fontSize: 28, fontWeight: '800', letterSpacing: -0.6 },
+  headerIconButton: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   composerCard: { marginHorizontal: 12, marginTop: 12, marginBottom: 14, borderWidth: 1, borderRadius: 18, padding: 12 },
   composerTopRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   composerAvatar: { width: 38, height: 38, borderRadius: 19 },

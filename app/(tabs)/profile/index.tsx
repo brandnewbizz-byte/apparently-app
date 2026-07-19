@@ -9,6 +9,7 @@ import {
   Package,
   Eye,
   MessageSquare,
+  ShoppingBag,
   Edit3,
   Star,
   TrendingUp,
@@ -241,6 +242,13 @@ export default function ProfileScreen() {
               style={[styles.headerGradient, { paddingTop: insets.top + 16 }]}
             >
               <TouchableOpacity 
+                style={styles.shopButton}
+                onPress={() => router.push('/(tabs)/book' as any)}
+              >
+                <ShoppingBag size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity 
                 style={styles.settingsButton}
                 onPress={() => router.push('/profile/settings' as any)}
               >
@@ -458,6 +466,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
+  },
+  shopButton: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingsButton: {
     position: 'absolute',
