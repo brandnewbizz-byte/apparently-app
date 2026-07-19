@@ -67,7 +67,7 @@ interface BundlePlan {
   id: string;
   title: string;
   price: number;
-  items: number;
+  items: number | string[];
   type: string;
   image: string;
   distance: number;
@@ -75,6 +75,8 @@ interface BundlePlan {
   pickupTime?: string;
   status: 'available' | 'grabbed';
   creatorId?: string;
+  creatorName?: string;
+  creatorAvatar?: string;
   creator?: {
     name: string;
     avatar: string;
@@ -82,6 +84,11 @@ interface BundlePlan {
     reviews: number;
   };
   summary?: string[];
+  description?: string;
+  imageUrl?: string;
+  category?: string;
+  grabCount?: number;
+  location?: string;
 }
 
 interface LifestyleCategory {
@@ -227,10 +234,16 @@ interface SkillDeal {
   distance: number;
   expiresIn: number;
   creatorId?: string;
+  creatorName?: string;
+  creatorAvatar?: string;
   provider: {
     name: string;
     avatar: string;
   };
+  description?: string;
+  imageUrl?: string;
+  category?: string;
+  grabCount?: number;
 }
 
 const MOCK_SKILL_DEALS: SkillDeal[] = [
@@ -1581,10 +1594,16 @@ export default function HomeScreen() {
         title: dealTitle.trim(),
         description: dealDesc.trim(),
         price,
+        originalPrice: price,
+        rating: 5.0,
+        image: dealImage || 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=400',
+        distance: 0,
+        expiresIn: 0,
         icon: dealIcon,
         imageUrl: dealImage || undefined,
         category: 'Skill',
         grabCount: 0,
+        provider: { name: userInfo.name, avatar: userInfo.avatar },
       };
       setCreatedSkills(prev => [newSkill, ...prev]);
       try { await localApi.createSkillDeal({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, icon: dealIcon, image_url: dealImage || undefined, category: 'Skill' }); } catch {}
@@ -1597,8 +1616,12 @@ export default function HomeScreen() {
         title: dealTitle.trim(),
         description: dealDesc.trim(),
         price,
+        image: dealImage || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400',
         imageUrl: dealImage || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400',
         items: dealItems,
+        type: 'Bundle',
+        distance: 0,
+        status: 'available',
         category: 'Bundle',
         grabCount: 0,
         location: 'Created by you',
