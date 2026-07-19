@@ -270,13 +270,13 @@ interface SwipeableBundlesProps {
 }
 
 const BUNDLE_LIMIT = 7;
-const COOLDOWN_SECONDS = 7 * 60;
+const COOLDOWN_SECONDS = 60;
 
 const SKILL_LIMIT = 10;
 const SKILL_COOLDOWN_SECONDS = 3 * 60;
 
 function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: SwipeableBundlesProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(COOLDOWN_SECONDS);
   const [bundleRound, setBundleRound] = useState(0);
@@ -294,15 +294,25 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
     return result;
   }, [bundles, bundleRound]);
 
-  const currentBundle = limitedBundles[currentIndex];
-  const nextBundle = limitedBundles[currentIndex + 1];
+  const visibleBundles = useMemo(
+    () => limitedBundles.filter((bundle) => !dismissedIds.includes(bundle.id)),
+    [dismissedIds, limitedBundles]
+  );
+
+  const currentBundle = visibleBundles[0];
+  const nextBundle = visibleBundles[1];
+  const completedCount = limitedBundles.length - visibleBundles.length;
 
   useEffect(() => {
-    if (currentIndex >= BUNDLE_LIMIT || currentIndex >= limitedBundles.length) {
+    setDismissedIds((prev) => prev.filter((id) => limitedBundles.some((bundle) => bundle.id === id)));
+  }, [limitedBundles]);
+
+  useEffect(() => {
+    if (!isOnCooldown && limitedBundles.length > 0 && visibleBundles.length === 0) {
       setIsOnCooldown(true);
       setCooldownRemaining(COOLDOWN_SECONDS);
     }
-  }, [currentIndex, limitedBundles.length]);
+  }, [isOnCooldown, limitedBundles.length, visibleBundles.length]);
 
   useEffect(() => {
     if (!isOnCooldown) return;
@@ -312,7 +322,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         if (prev <= 1) {
           clearInterval(interval);
           setIsOnCooldown(false);
-          setCurrentIndex(0);
+          setDismissedIds([]);
           setBundleRound(r => r + 1);
           return COOLDOWN_SECONDS;
         }
@@ -329,6 +339,28 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
     opacityAnim.setValue(1);
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
+
+  const dismissBundle = useCallback((bundleId: string) => {
+    setDismissedIds((prev) => (prev.includes(bundleId) ? prev : [...prev, bundleId]));
+  }, []);
+
+  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+    if (!currentBundle) return;
+
+    if (action === 'save') {
+      onSave(currentBundle);
+      console.log('Card action:', 'save_bundle', currentBundle.id);
+    } else if (action === 'skip') {
+      onSkip(currentBundle);
+      console.log('Card action:', 'skip_bundle', currentBundle.id);
+    } else {
+      onGrab(currentBundle);
+      console.log('Card action:', 'grab_bundle', currentBundle.id);
+    }
+
+    dismissBundle(currentBundle.id);
+    resetCard();
+  }, [currentBundle, dismissBundle, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
@@ -350,23 +382,35 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         useNativeDriver: true,
       }),
     ]).start(() => {
-      if (currentBundle) {
-        if (direction === 'right') {
-          onSave(currentBundle);
-          console.log('Card action:', 'save_bundle', currentBundle.id);
-        } else {
-          onSkip(currentBundle);
-          console.log('Card action:', 'skip_bundle', currentBundle.id);
-        }
-      }
-      setCurrentIndex(prev => prev + 1);
-      resetCard();
+      completeAction(direction === 'right' ? 'save' : 'skip');
     });
 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [currentBundle, onSave, onSkip, swipeAnim.x, opacityAnim, nextCardScale, resetCard]);
+  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+
+  const grabCurrentBundle = useCallback(() => {
+    if (!currentBundle) return;
+
+    Animated.parallel([
+      Animated.timing(opacityAnim, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(swipeAnim.y, {
+        toValue: -30,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.spring(nextCardScale, {
+        toValue: 1,
+        friction: 6,
+        useNativeDriver: true,
+      }),
+    ]).start(() => completeAction('grab'));
+  }, [completeAction, currentBundle, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -505,7 +549,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         
         <TouchableOpacity 
           style={styles.swipeGrabBtn} 
-          onPress={() => onGrab(currentBundle)}
+          onPress={grabCurrentBundle}
           activeOpacity={0.8}
         >
           <LinearGradient
@@ -534,8 +578,8 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
             style={[
               styles.swipeDot, 
               { backgroundColor: colors.border },
-              i === currentIndex && styles.swipeDotActive,
-              i < currentIndex && styles.swipeDotDone,
+              i === completedCount && currentBundle && styles.swipeDotActive,
+              i < completedCount && styles.swipeDotDone,
             ]} 
           />
         ))}
@@ -671,7 +715,7 @@ function formatCountdown(seconds: number): string {
 }
 
 function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSkillsProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(SKILL_COOLDOWN_SECONDS);
   const [skillRound, setSkillRound] = useState(0);
@@ -689,15 +733,25 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
     return result;
   }, [skills, skillRound]);
 
-  const currentSkill = limitedSkills[currentIndex];
-  const nextSkill = limitedSkills[currentIndex + 1];
+  const visibleSkills = useMemo(
+    () => limitedSkills.filter((skill) => !dismissedIds.includes(skill.id)),
+    [dismissedIds, limitedSkills]
+  );
+
+  const currentSkill = visibleSkills[0];
+  const nextSkill = visibleSkills[1];
+  const completedCount = limitedSkills.length - visibleSkills.length;
 
   useEffect(() => {
-    if (currentIndex >= SKILL_LIMIT || currentIndex >= limitedSkills.length) {
+    setDismissedIds((prev) => prev.filter((id) => limitedSkills.some((skill) => skill.id === id)));
+  }, [limitedSkills]);
+
+  useEffect(() => {
+    if (!isOnCooldown && limitedSkills.length > 0 && visibleSkills.length === 0) {
       setIsOnCooldown(true);
       setCooldownRemaining(SKILL_COOLDOWN_SECONDS);
     }
-  }, [currentIndex, limitedSkills.length]);
+  }, [isOnCooldown, limitedSkills.length, visibleSkills.length]);
 
   useEffect(() => {
     if (!isOnCooldown) return;
@@ -707,7 +761,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
         if (prev <= 1) {
           clearInterval(interval);
           setIsOnCooldown(false);
-          setCurrentIndex(0);
+          setDismissedIds([]);
           setSkillRound(r => r + 1);
           return SKILL_COOLDOWN_SECONDS;
         }
@@ -724,6 +778,25 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
     opacityAnim.setValue(1);
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
+
+  const dismissSkill = useCallback((skillId: string) => {
+    setDismissedIds((prev) => (prev.includes(skillId) ? prev : [...prev, skillId]));
+  }, []);
+
+  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+    if (!currentSkill) return;
+
+    if (action === 'save') {
+      onSave(currentSkill);
+    } else if (action === 'skip') {
+      onSkip(currentSkill);
+    } else {
+      onGrab(currentSkill);
+    }
+
+    dismissSkill(currentSkill.id);
+    resetCard();
+  }, [currentSkill, dismissSkill, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
@@ -745,21 +818,23 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
         useNativeDriver: true,
       }),
     ]).start(() => {
-      if (currentSkill) {
-        if (direction === 'right') {
-          onSave(currentSkill);
-        } else {
-          onSkip(currentSkill);
-        }
-      }
-      setCurrentIndex(prev => prev + 1);
-      resetCard();
+      completeAction(direction === 'right' ? 'save' : 'skip');
     });
 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [currentSkill, onSave, onSkip, swipeAnim.x, opacityAnim, nextCardScale, resetCard]);
+  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+
+  const grabCurrentSkill = useCallback(() => {
+    if (!currentSkill) return;
+
+    Animated.parallel([
+      Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
+      Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
+    ]).start(() => completeAction('grab'));
+  }, [completeAction, currentSkill, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -856,7 +931,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
           <X size={20} color="#EF4444" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.skillGrabBtn} onPress={() => onGrab(currentSkill)}>
+        <TouchableOpacity style={styles.skillGrabBtn} onPress={grabCurrentSkill}>
           <LinearGradient colors={['#F59E0B', '#FBBF24']} style={styles.skillGrabGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Text style={styles.skillGrabText}>Grab</Text>
           </LinearGradient>
@@ -872,7 +947,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
 
       <View style={styles.skillSwipeIndicator}>
         {limitedSkills.map((_, i) => (
-          <View key={i} style={[styles.swipeDot, { backgroundColor: colors.border }, i === currentIndex && styles.skillDotActive, i < currentIndex && styles.swipeDotDone]} />
+          <View key={i} style={[styles.swipeDot, { backgroundColor: colors.border }, i === completedCount && currentSkill && styles.skillDotActive, i < completedCount && styles.swipeDotDone]} />
         ))}
       </View>
     </View>
@@ -927,15 +1002,24 @@ interface SwipeableServiceRequestsProps {
 }
 
 function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: SwipeableServiceRequestsProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const nextCardScale = useRef(new Animated.Value(0.95)).current;
 
-  const actualIndex = currentIndex % requests.length;
-  const currentRequest = requests[actualIndex];
-  const nextRequest = requests[(actualIndex + 1) % requests.length];
+  const visibleRequests = useMemo(
+    () => requests.filter((request) => !dismissedIds.includes(request.id)),
+    [dismissedIds, requests]
+  );
+
+  const currentRequest = visibleRequests[0];
+  const nextRequest = visibleRequests[1];
+  const completedCount = requests.length - visibleRequests.length;
+
+  useEffect(() => {
+    setDismissedIds((prev) => prev.filter((id) => requests.some((request) => request.id === id)));
+  }, [requests]);
 
   const resetCard = useCallback(() => {
     swipeAnim.setValue({ x: 0, y: 0 });
@@ -943,6 +1027,25 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
     opacityAnim.setValue(1);
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
+
+  const dismissRequest = useCallback((requestId: string) => {
+    setDismissedIds((prev) => (prev.includes(requestId) ? prev : [...prev, requestId]));
+  }, []);
+
+  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+    if (!currentRequest) return;
+
+    if (action === 'save') {
+      onSave(currentRequest);
+    } else if (action === 'skip') {
+      onSkip(currentRequest);
+    } else {
+      onGrab(currentRequest);
+    }
+
+    dismissRequest(currentRequest.id);
+    resetCard();
+  }, [currentRequest, dismissRequest, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
@@ -952,21 +1055,23 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
       Animated.timing(opacityAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
       Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
     ]).start(() => {
-      if (currentRequest) {
-        if (direction === 'right') {
-          onSave(currentRequest);
-        } else {
-          onSkip(currentRequest);
-        }
-      }
-      setCurrentIndex(prev => prev + 1);
-      resetCard();
+      completeAction(direction === 'right' ? 'save' : 'skip');
     });
 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [currentRequest, onSave, onSkip, swipeAnim.x, opacityAnim, nextCardScale, resetCard]);
+  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+
+  const grabCurrentRequest = useCallback(() => {
+    if (!currentRequest) return;
+
+    Animated.parallel([
+      Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
+      Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
+    ]).start(() => completeAction('grab'));
+  }, [completeAction, currentRequest, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -1000,7 +1105,15 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
   const skipOpacity = swipeAnim.x.interpolate({ inputRange: [-SCREEN_WIDTH * 0.3, 0], outputRange: [1, 0], extrapolate: 'clamp' });
   const saveOpacity = swipeAnim.x.interpolate({ inputRange: [0, SCREEN_WIDTH * 0.3], outputRange: [0, 1], extrapolate: 'clamp' });
 
-
+  if (!currentRequest) {
+    return (
+      <View style={[styles.serviceEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Clock size={36} color="#3B82F6" />
+        <Text style={[styles.swipeEmptyText, { color: colors.text }]}>No more requests!</Text>
+        <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>Check back in a minute for new opportunities.</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.serviceSwipeContainer}>
@@ -1036,7 +1149,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
           <X size={20} color="#EF4444" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.serviceGrabBtn} onPress={() => onGrab(currentRequest)}>
+        <TouchableOpacity style={styles.serviceGrabBtn} onPress={grabCurrentRequest}>
           <LinearGradient colors={['#3B82F6', '#60A5FA']} style={styles.serviceGrabGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Text style={styles.serviceGrabText}>Grab</Text>
           </LinearGradient>
@@ -1052,7 +1165,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
 
       <View style={styles.serviceSwipeIndicator}>
         {requests.map((_, i) => (
-          <View key={i} style={[styles.swipeDot, { backgroundColor: colors.border }, i === actualIndex && styles.serviceDotActive]} />
+          <View key={i} style={[styles.swipeDot, { backgroundColor: colors.border }, i === completedCount && currentRequest && styles.serviceDotActive, i < completedCount && styles.swipeDotDone]} />
         ))}
       </View>
     </View>
