@@ -4,6 +4,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -112,6 +113,11 @@ function CommentsSheet({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.sheetOverlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          style={styles.sheetKeyboardWrap}
+        >
         <View style={[styles.sheetCard, { backgroundColor: colors.surface, paddingBottom: Math.max(insets.bottom, 16) }]}>
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
           <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}> 
@@ -138,6 +144,8 @@ function CommentsSheet({
             data={comments}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             contentContainerStyle={styles.sheetCommentsContent}
             ListEmptyComponent={
               <View style={styles.sheetEmptyWrap}>
@@ -177,6 +185,7 @@ function CommentsSheet({
             </TouchableOpacity>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -706,6 +715,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  sheetKeyboardWrap: {
+    justifyContent: 'flex-end',
   },
   sheetCard: {
     maxHeight: SCREEN_HEIGHT * 0.78,
