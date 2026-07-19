@@ -2,10 +2,22 @@ import createContextHook from '@nkzw/create-context-hook';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Share, Platform } from 'react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 
-import { Post, Story } from '@/mocks/data';
+import { Post, Story, mockPosts, mockStories, mockUsers } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
+import * as localApi from '@/lib/api';
+
+function timeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export interface SocialComment {
   id: string;
@@ -368,6 +380,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     console.log('[SocialContext] Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
+    // Persist to local API
+    localApi.toggleLike(postId, 'u-dev').catch(() => {});
   }, [ensureInteraction, interactions, persistState]);
 
   const addComment = useCallback((postId: string, text: string, parentId?: string) => {
@@ -411,6 +425,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     console.log('[SocialContext] Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
+    // Persist to local API
+    localApi.addComment(postId, 'u-dev', text, parentId).catch(() => {});
   }, [ensureInteraction, interactions, persistState]);
 
   const toggleCommentLike = useCallback((postId: string, commentId: string) => {
@@ -495,9 +511,42 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     persistState(next);
   }, [ensureInteraction, interactions, persistState, sharePayload]);
 
-  const getComments = useCallback((postId: string) => {
-    return getInteraction(postId).comments;
-  }, [getInteraction]);
+  const getComments = useCallback((postId: string): SocialComment[] => {
+    const local = getInteraction(postId).comments;
+    // Try to load from API in background
+    localApi.getComments(postId).then((apiComments: any[]) => {
+      if (apiComments && apiComments.length > 0) {
+        const mapped: SocialComment[] = apiComments.map((c: any) => ({
+          id: c.id,
+          authorId: c.author_id,
+          authorName: c.author_name || 'Unknown',
+          authorAvatar: c.author_avatar || '',
+          text: c.text,
+          timestamp: c.created_at ? timeAgo(new Date(c.created_at)) : c.timestamp || 'unknown',
+          likes: c.likes || 0,
+          isLiked: false,
+          replies: (c.replies || []).map((r: any) => ({
+            id: r.id,
+            authorId: r.author_id,
+            authorName: r.author_name || 'Unknown',
+            authorAvatar: r.author_avatar || '',
+            text: r.text,
+            timestamp: r.created_at ? timeAgo(new Date(r.created_at)) : r.timestamp || 'unknown',
+            likes: r.likes || 0,
+            isLiked: false,
+            replies: [],
+            parentId: c.id,
+          })),
+        }));
+        // Merge API comments into state
+        const current = ensureInteraction(postId);
+        const updated = { ...current, comments: mapped };
+        const next = { ...interactions, [postId]: updated };
+        setInteractions(next);
+      }
+    }).catch(() => {});
+    return local;
+  }, [getInteraction, ensureInteraction, interactions]);
 
   const ensureStoryInteraction = useCallback((storyId: string): StoryInteraction => {
     if (storyInteractions[storyId]) {
@@ -577,9 +626,39 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const createPostMutate = createPostMutation.mutate;
 
   const createPost = useCallback((content: string, imageUrl?: string) => {
-    console.log('[SocialContext] Creating post in Supabase...');
+    console.log('[SocialContext] Creating post...');
     createPostMutate({ content, imageUrl });
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+    // Save to local API
+    localApi.createPost('u-dev', content, imageUrl).then((saved) => {
+      console.log('[SocialContext] Post saved to local API:', saved?.id);
+      // Refresh posts from API
+      apiLoaded.current = false;
+      localApi.getPosts().then((rawPosts: any[]) => {
+        const mapped: Post[] = rawPosts.map((p: any) => ({
+          id: p.id,
+          user: {
+            id: p.user_id,
+            name: p.author_name || 'Unknown',
+            username: p.author_username || 'unknown',
+            avatar: p.author_avatar || '',
+            isVerified: !!p.author_verified,
+            followersCount: p.author_followers || 0,
+            relationshipCategory: p.author_relationship,
+          },
+          content: p.content,
+          imageUrl: p.image_url,
+          timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
+          likes: p.likes || 0,
+          comments: p.comments || 0,
+          shares: p.shares || 0,
+        }));
+        setApiPosts(mapped);
+        setInteractions(buildDefaultState(mapped));
+      }).catch(() => {});
+    }).catch(err => {
+      console.log('[SocialContext] Failed to save post to local API:', err.message);
+    });
   }, [createPostMutate, queryClient]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
@@ -606,9 +685,47 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     });
   }, [queryClient]);
 
+  // ─── API-backed data loading ───
+  const [apiPosts, setApiPosts] = useState<Post[] | null>(null);
+  const apiLoaded = useRef(false);
+
+  useEffect(() => {
+    if (apiLoaded.current) return;
+    apiLoaded.current = true;
+    localApi.getPosts().then((rawPosts: any[]) => {
+      const mapped: Post[] = rawPosts.map((p: any) => ({
+        id: p.id,
+        user: {
+          id: p.user_id,
+          name: p.author_name || 'Unknown',
+          username: p.author_username || 'unknown',
+          avatar: p.author_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+          isVerified: !!p.author_verified,
+          followersCount: p.author_followers || 0,
+          relationshipCategory: p.author_relationship,
+        },
+        content: p.content,
+        imageUrl: p.image_url,
+        timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
+        likes: p.likes || 0,
+        comments: p.comments || 0,
+        shares: p.shares || 0,
+        isApparently: !!p.is_apparently,
+        apparentlyTag: p.apparently_tag,
+      }));
+      console.log('[SocialContext] Loaded', mapped.length, 'posts from local API');
+      setApiPosts(mapped);
+      setInteractions(buildDefaultState(mapped));
+    }).catch(err => {
+      console.log('[SocialContext] Local API unavailable, using mock data:', err.message);
+    });
+  }, []);
+
   const getAllPosts = useCallback((): Post[] => {
-    return [...feedPosts];
-  }, [feedPosts]);
+    if (apiPosts && apiPosts.length > 0) return [...apiPosts];
+    if (feedPosts && feedPosts.length > 0) return [...feedPosts];
+    return [...mockPosts];
+  }, [apiPosts, feedPosts]);
 
   const getAllStories = useCallback((): Story[] => {
     return [...feedStories];

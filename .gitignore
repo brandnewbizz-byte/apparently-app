@@ -41,4 +41,5 @@ yarn-error.*
 .rork
 .env
 rork-eslint.config.js
-core
+core*.db
+logs/
