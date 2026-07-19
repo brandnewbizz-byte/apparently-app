@@ -56,18 +56,12 @@ type ComposerMeta = {
 };
 
 const HOME_CATEGORY_OPTIONS = [
-  'Home',
-  'Cleaning',
-  'Moving',
-  'Events',
-  'Photography',
-  'Food',
-  'Beauty',
-  'Pets',
-  'Tech',
-  'Design',
-  'Business',
-  'Transport',
+  'Wellness',
+  'Fitness',
+  'Entertainment',
+  'Creative',
+  'Dining',
+  'Travel',
 ] as const;
 
 const viewer = {
@@ -434,7 +428,7 @@ function CreatePostModal({
   const [caption, setCaption] = useState('');
   const [postMode, setPostMode] = useState<PostMode>('feed');
   const [postKind, setPostKind] = useState<'post' | 'sell'>('post');
-  const [selectedCategory, setSelectedCategory] = useState<string>('Home');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Wellness');
   const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
@@ -443,7 +437,7 @@ function CreatePostModal({
       setCaption('');
       setPostMode('feed');
       setPostKind('post');
-      setSelectedCategory('Home');
+      setSelectedCategory('Wellness');
       setIsUploading(false);
     }
   }, [visible]);
@@ -777,22 +771,11 @@ function FeedPost({
       </View>
 
       <View style={styles.postMetaBlock}>
-        {(post.postKind === 'sell' || post.category) ? (
+        {post.postKind === 'sell' ? (
           <View style={styles.postBadgeRow}>
-            {post.postKind === 'sell' ? (
-              <View style={[styles.postBadge, styles.postBadgeSell]}>
-                <Text style={styles.postBadgeSellText}>SELLING</Text>
-              </View>
-            ) : (
-              <View style={[styles.postBadge, styles.postBadgePost, { borderColor: colors.border }]}> 
-                <Text style={[styles.postBadgePostText, { color: colors.textSecondary }]}>POST</Text>
-              </View>
-            )}
-            {post.category ? (
-              <View style={[styles.postBadge, styles.postCategoryBadge, { borderColor: colors.border }]}> 
-                <Text style={[styles.postCategoryBadgeText, { color: colors.text }]}>{post.category}</Text>
-              </View>
-            ) : null}
+            <View style={[styles.postBadge, styles.postBadgeSell]}>
+              <Text style={styles.postBadgeSellText}>SELLING</Text>
+            </View>
           </View>
         ) : null}
         <Text style={[styles.likesText, { color: colors.text }]}>{likeCount.toLocaleString()} likes</Text>
