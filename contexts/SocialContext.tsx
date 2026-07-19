@@ -73,7 +73,7 @@ interface SocialState {
   getStoryInteraction: (storyId: string) => StoryInteraction;
   updatePost: (postId: string, content: string) => void;
   deletePost: (postId: string) => void;
-  createPost: (content: string, imageUrl?: string) => void;
+  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string }) => void;
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
@@ -625,14 +625,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const createPostMutate = createPostMutation.mutate;
 
-  const createPost = useCallback((content: string, imageUrl?: string) => {
+  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string }) => {
     console.log('[SocialContext] Creating post...');
     createPostMutate({ content, imageUrl });
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-    // Save to local API
-    localApi.createPost('u-dev', content, imageUrl).then((saved) => {
+    localApi.createPost('u-dev', content, imageUrl, options).then((saved) => {
       console.log('[SocialContext] Post saved to local API:', saved?.id);
-      // Refresh posts from API
       apiLoaded.current = false;
       localApi.getPosts().then((rawPosts: any[]) => {
         const mapped: Post[] = rawPosts.map((p: any) => ({
@@ -652,6 +650,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           likes: p.likes || 0,
           comments: p.comments || 0,
           shares: p.shares || 0,
+          category: p.category || undefined,
+          postKind: p.post_kind || 'post',
+          renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
         }));
         setApiPosts(mapped);
         setInteractions(buildDefaultState(mapped));
@@ -710,6 +711,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         likes: p.likes || 0,
         comments: p.comments || 0,
         shares: p.shares || 0,
+        category: p.category || undefined,
+        postKind: p.post_kind || 'post',
+        renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
         isApparently: !!p.is_apparently,
         apparentlyTag: p.apparently_tag,
       }));

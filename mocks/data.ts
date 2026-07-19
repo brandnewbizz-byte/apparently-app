@@ -30,6 +30,12 @@ export interface Post {
   likes: number;
   comments: number;
   shares: number;
+  category?: string;
+  postKind?: 'post' | 'sell';
+  imageWidth?: number;
+  imageHeight?: number;
+  imageAspectRatio?: number;
+  renderFullImage?: boolean;
   isApparently?: boolean;
   apparentlyTag?: string;
   relevance?: PostRelevance;

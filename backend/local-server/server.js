@@ -62,11 +62,20 @@ app.get('/api/posts', (_, res) => {
 });
 
 app.post('/api/posts', (req, res) => {
-  const { user_id, content, image_url } = req.body;
+  const { user_id, content, image_url, post_kind, category } = req.body;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  execute(`INSERT INTO posts (id, user_id, content, image_url, likes, comments, shares, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?)`, [id, user_id, content, image_url || null, now, now]);
+  execute(`INSERT INTO posts (id, user_id, content, image_url, likes, comments, shares, post_kind, category, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`, [
+    id,
+    user_id,
+    content,
+    image_url || null,
+    post_kind || 'post',
+    category || null,
+    now,
+    now,
+  ]);
   const post = queryOne('SELECT * FROM posts WHERE id = ?', [id]);
   res.status(201).json(post);
 });

@@ -26,10 +26,21 @@ export async function getPosts() {
   return fetchJSON(`${API_BASE}/posts`);
 }
 
-export async function createPost(userId: string, content: string, imageUrl?: string) {
+export async function createPost(
+  userId: string,
+  content: string,
+  imageUrl?: string,
+  options?: { postKind?: 'post' | 'sell'; category?: string }
+) {
   return fetchJSON(`${API_BASE}/posts`, {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId || DEFAULT_USER_ID, content, image_url: imageUrl }),
+    body: JSON.stringify({
+      user_id: userId || DEFAULT_USER_ID,
+      content,
+      image_url: imageUrl,
+      post_kind: options?.postKind || 'post',
+      category: options?.category,
+    }),
   });
 }
 

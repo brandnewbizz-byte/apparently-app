@@ -39,6 +39,8 @@ type FeedItem = Post & {
   imageAspectRatio?: number;
   renderFullImage?: boolean;
   isStory?: boolean;
+  category?: string;
+  postKind?: 'post' | 'sell';
 };
 
 type SelectedImageState = {
@@ -47,6 +49,26 @@ type SelectedImageState = {
   height?: number;
   aspectRatio?: number;
 };
+
+type ComposerMeta = {
+  category?: string;
+  postKind: 'post' | 'sell';
+};
+
+const HOME_CATEGORY_OPTIONS = [
+  'Home',
+  'Cleaning',
+  'Moving',
+  'Events',
+  'Photography',
+  'Food',
+  'Beauty',
+  'Pets',
+  'Tech',
+  'Design',
+  'Business',
+  'Transport',
+] as const;
 
 const viewer = {
   id: 'local-viewer',
@@ -405,15 +427,26 @@ function CreatePostModal({
   visible, colors, onClose, onPublish,
 }: {
   visible: boolean; colors: any; onClose: () => void;
-  onPublish: (content: string, image?: SelectedImageState, postMode?: PostMode) => void;
+  onPublish: (content: string, image: SelectedImageState | undefined, postMode: PostMode, meta: ComposerMeta) => void;
 }) {
   const insets = useSafeAreaInsets();
   const [selectedImage, setSelectedImage] = useState<SelectedImageState | null>(null);
   const [caption, setCaption] = useState('');
   const [postMode, setPostMode] = useState<PostMode>('feed');
+  const [postKind, setPostKind] = useState<'post' | 'sell'>('post');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Home');
   const [isUploading, setIsUploading] = useState(false);
 
-  useEffect(() => { if (!visible) { setSelectedImage(null); setCaption(''); setPostMode('feed'); setIsUploading(false); } }, [visible]);
+  useEffect(() => {
+    if (!visible) {
+      setSelectedImage(null);
+      setCaption('');
+      setPostMode('feed');
+      setPostKind('post');
+      setSelectedCategory('Home');
+      setIsUploading(false);
+    }
+  }, [visible]);
 
   const pickFromGallery = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -442,10 +475,13 @@ function CreatePostModal({
     if (!caption.trim() && !selectedImage) return;
     setIsUploading(true);
     setTimeout(() => {
-      onPublish(caption.trim(), selectedImage ?? undefined, postMode);
+      onPublish(caption.trim(), selectedImage ?? undefined, postMode, {
+        postKind,
+        category: selectedCategory,
+      });
       onClose();
     }, 400);
-  }, [caption, selectedImage, postMode, onPublish, onClose]);
+  }, [caption, selectedImage, postMode, postKind, selectedCategory, onPublish, onClose]);
 
   const canPublish = caption.trim().length > 0 || Boolean(selectedImage);
 
@@ -563,6 +599,56 @@ function CreatePostModal({
               maxLength={2200}
               textAlignVertical="top"
             />
+
+            <View style={styles.composerMetaSection}>
+              <Text style={[styles.composerMetaLabel, { color: colors.text }]}>Post type</Text>
+              <View style={styles.composerMetaRow}>
+                {(['post', 'sell'] as const).map((kind) => {
+                  const active = postKind === kind;
+                  return (
+                    <TouchableOpacity
+                      key={kind}
+                      onPress={() => setPostKind(kind)}
+                      style={[
+                        styles.composerMetaChip,
+                        {
+                          backgroundColor: active ? colors.accent : colors.backgroundSecondary,
+                          borderColor: active ? colors.accent : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.composerMetaChipText, { color: active ? '#FFFFFF' : colors.text }]}>
+                        {kind === 'sell' ? 'Selling' : 'Just Posting'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.composerMetaSection}>
+              <Text style={[styles.composerMetaLabel, { color: colors.text }]}>Category</Text>
+              <View style={styles.categoryChipWrap}>
+                {HOME_CATEGORY_OPTIONS.map((category) => {
+                  const active = selectedCategory === category;
+                  return (
+                    <TouchableOpacity
+                      key={category}
+                      onPress={() => setSelectedCategory(category)}
+                      style={[
+                        styles.categoryChip,
+                        {
+                          backgroundColor: active ? colors.accent : colors.backgroundSecondary,
+                          borderColor: active ? colors.accent : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.categoryChipText, { color: active ? '#FFFFFF' : colors.text }]}>{category}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
           </ScrollView>
         </KeyboardAvoidingView>
 
@@ -691,6 +777,24 @@ function FeedPost({
       </View>
 
       <View style={styles.postMetaBlock}>
+        {(post.postKind === 'sell' || post.category) ? (
+          <View style={styles.postBadgeRow}>
+            {post.postKind === 'sell' ? (
+              <View style={[styles.postBadge, styles.postBadgeSell]}>
+                <Text style={styles.postBadgeSellText}>SELLING</Text>
+              </View>
+            ) : (
+              <View style={[styles.postBadge, styles.postBadgePost, { borderColor: colors.border }]}> 
+                <Text style={[styles.postBadgePostText, { color: colors.textSecondary }]}>POST</Text>
+              </View>
+            )}
+            {post.category ? (
+              <View style={[styles.postBadge, styles.postCategoryBadge, { borderColor: colors.border }]}> 
+                <Text style={[styles.postCategoryBadgeText, { color: colors.text }]}>{post.category}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         <Text style={[styles.likesText, { color: colors.text }]}>{likeCount.toLocaleString()} likes</Text>
         <Text style={[styles.captionLine, { color: colors.text }]} numberOfLines={3}>
           <Text style={styles.captionUser}>{post.user.username}</Text>
@@ -721,10 +825,11 @@ export default function FeedScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { hideTabBar, showTabBar } = useTabBar();
-  const { getAllPosts, getAllStories, createPost, getComments, addComment, sharePost } = useSocial();
+  const { getAllPosts, getAllStories, createPost, createStory, getComments, addComment, sharePost } = useSocial();
 
   const [draft, setDraft] = useState('');
   const [localPosts, setLocalPosts] = useState<FeedItem[]>([]);
+  const [localStories, setLocalStories] = useState<Story[]>([]);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
@@ -740,7 +845,7 @@ export default function FeedScreen() {
   const socialPosts = getAllPosts() as FeedItem[];
   const socialStories = getAllStories();
   const basePosts = (socialPosts.length ? socialPosts : mockPosts) as FeedItem[];
-  const stories = useMemo(() => (socialStories.length ? socialStories : mockStories).slice(0, 10), [socialStories]);
+  const stories = useMemo(() => [...localStories, ...(socialStories.length ? socialStories : mockStories)].slice(0, 10), [localStories, socialStories]);
   const posts = useMemo(() => [...localPosts, ...basePosts], [localPosts, basePosts]);
   const activeCommentPost = useMemo(() => posts.find((p) => p.id === commentsPostId) ?? null, [posts, commentsPostId]);
   const activeViewerPost = useMemo(() => posts.find((p) => p.id === viewerPostId) ?? null, [posts, viewerPostId]);
@@ -760,7 +865,27 @@ export default function FeedScreen() {
   }, []);
 
   // ── Publish from composer ──
-  const handleComposerPublish = useCallback((content: string, image?: SelectedImageState, postMode?: 'feed' | 'story') => {
+  const handleComposerPublish = useCallback((
+    content: string,
+    image: SelectedImageState | undefined,
+    postMode: 'feed' | 'story',
+    meta: ComposerMeta,
+  ) => {
+    if (postMode === 'story') {
+      if (image?.uri) {
+        setLocalStories((prev) => [{
+          id: `local-story-${Date.now()}`,
+          user: viewer,
+          imageUrl: image.uri,
+          timestamp: 'Just now',
+          viewed: false,
+        }, ...prev]);
+        createStory(image.uri, undefined, content || undefined);
+      }
+      impact(Haptics.ImpactFeedbackStyle.Heavy);
+      return;
+    }
+
     setLocalPosts((prev) => [{
       id: `local-${Date.now()}`,
       user: viewer,
@@ -770,16 +895,17 @@ export default function FeedScreen() {
       imageHeight: image?.height,
       imageAspectRatio: image?.aspectRatio,
       renderFullImage: Boolean(image?.uri),
+      category: meta.category,
+      postKind: meta.postKind,
       timestamp: 'Just now',
       likes: 0,
       comments: 0,
       shares: 0,
-      isStory: postMode === 'story',
     }, ...prev]);
     setDraft('');
-    createPost(content, image?.uri);
+    createPost(content, image?.uri, { postKind: meta.postKind, category: meta.category });
     impact(Haptics.ImpactFeedbackStyle.Heavy);
-  }, [createPost]);
+  }, [createPost, createStory]);
 
   // ── Legacy text-only publish ──
   const handleLegacyPublish = useCallback(() => {
@@ -1019,6 +1145,14 @@ const styles = StyleSheet.create({
   postActionsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   iconButton: { padding: 2 },
   postMetaBlock: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 14 },
+  postBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  postBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1 },
+  postBadgeSell: { backgroundColor: '#FFE4D6', borderColor: '#FF6B35' },
+  postBadgeSellText: { color: '#C2410C', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  postBadgePost: { backgroundColor: 'transparent' },
+  postBadgePostText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
+  postCategoryBadge: { backgroundColor: 'rgba(255,255,255,0.06)' },
+  postCategoryBadgeText: { fontSize: 11, fontWeight: '700' },
   likesText: { fontSize: 14, fontWeight: '700' },
   captionLine: { marginTop: 4, fontSize: 14, lineHeight: 20 },
   captionUser: { fontWeight: '700' },
@@ -1104,6 +1238,14 @@ const styles = StyleSheet.create({
   createPlaceholderIcon: { fontSize: 48 },
   createPlaceholderText: { marginTop: 10, fontSize: 14 },
   createCaptionInput: { fontSize: 16, minHeight: 80, paddingVertical: 8, lineHeight: 22 },
+  composerMetaSection: { marginTop: 8, gap: 10 },
+  composerMetaLabel: { fontSize: 13, fontWeight: '700' },
+  composerMetaRow: { flexDirection: 'row', gap: 10 },
+  composerMetaChip: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1 },
+  composerMetaChipText: { fontSize: 13, fontWeight: '700' },
+  categoryChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  categoryChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
+  categoryChipText: { fontSize: 12, fontWeight: '700' },
   createToolbar: {},
   createToolbarRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 14, paddingHorizontal: 20, borderTopWidth: StyleSheet.hairlineWidth },
   createTool: { alignItems: 'center', gap: 6, paddingVertical: 6 },

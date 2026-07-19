@@ -8,6 +8,20 @@ const DB_PATH = join(__dirname, 'apparently.db');
 
 let db = null;
 
+function hasColumn(tableName, columnName) {
+  if (!db) return false;
+  const result = db.exec(`PRAGMA table_info(${tableName})`);
+  if (!result.length) return false;
+  const nameIndex = result[0].columns.indexOf('name');
+  return result[0].values.some((row) => row[nameIndex] === columnName);
+}
+
+function ensureColumn(tableName, columnName, definition) {
+  if (!hasColumn(tableName, columnName)) {
+    db.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 export function getDB() {
   if (!db) throw new Error('DB not initialized. Call initDB() first.');
   return db;
@@ -49,12 +63,17 @@ export async function initDB() {
       likes INTEGER DEFAULT 0,
       comments INTEGER DEFAULT 0,
       shares INTEGER DEFAULT 0,
+      post_kind TEXT DEFAULT 'post',
+      category TEXT,
       is_apparently INTEGER DEFAULT 0,
       apparently_tag TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  ensureColumn('posts', 'post_kind', "TEXT DEFAULT 'post'");
+  ensureColumn('posts', 'category', 'TEXT');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS stories (
