@@ -1,10 +1,12 @@
+import { Bookmark, Heart, MessageCircle, Repeat, X } from 'lucide-react-native';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
   Image,
   ImageBackground,
+  Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +23,9 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Post, Story, mockPosts, mockStories } from '@/mocks/data';
 
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MEDIA_HEIGHT = Math.min(SCREEN_WIDTH * 1.12, 520);
+
 const viewer = {
   id: 'local-viewer',
   name: 'You',
@@ -30,99 +35,23 @@ const viewer = {
   followersCount: 0,
 };
 
-function PulseGlyph({ active, color }: { active?: boolean; color: string }) {
+function StoryCard({ story, colors }: { story: Story; colors: any }) {
   return (
-    <View style={styles.pulseGlyph}>
-      <View style={[styles.pulseGlyphOuter, { borderColor: color, opacity: active ? 1 : 0.7 }]} />
-      <View style={[styles.pulseGlyphInner, { backgroundColor: color }]} />
-    </View>
-  );
-}
-
-function EchoGlyph({ color }: { color: string }) {
-  return (
-    <View style={styles.echoGlyph}>
-      <View style={[styles.echoDot, { backgroundColor: color }]} />
-      <View style={[styles.echoLineLong, { backgroundColor: color }]} />
-      <View style={[styles.echoLineShort, { backgroundColor: color }]} />
-    </View>
-  );
-}
-
-function DriftGlyph({ color }: { color: string }) {
-  return (
-    <View style={styles.driftGlyph}>
-      <View style={[styles.driftDotTop, { backgroundColor: color }]} />
-      <View style={[styles.driftConnector, { backgroundColor: color }]} />
-      <View style={[styles.driftDotBottom, { backgroundColor: color }]} />
-    </View>
-  );
-}
-
-function VaultGlyph({ active, color }: { active?: boolean; color: string }) {
-  return (
-    <View style={[styles.vaultGlyph, { borderColor: color }]}> 
-      <View style={[styles.vaultGlyphStripe, { backgroundColor: active ? color : 'transparent', borderColor: color }]} />
-    </View>
-  );
-}
-
-function ReactionChip({
-  label,
-  count,
-  active,
-  colors,
-  glyph,
-  onPress,
-}: {
-  label: string;
-  count: number;
-  active?: boolean;
-  colors: any;
-  glyph: React.ReactNode;
-  onPress?: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={onPress}
-      style={[
-        styles.reactionChip,
-        {
-          backgroundColor: active ? colors.accentGlow : colors.backgroundSecondary,
-          borderColor: active ? colors.accent : colors.border,
-        },
-      ]}
-    >
-      {glyph}
-      <Text style={[styles.reactionChipLabel, { color: active ? colors.accent : colors.text }]}>{label}</Text>
-      <Text style={[styles.reactionChipCount, { color: active ? colors.accent : colors.textSecondary }]}>{count}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function WaveCard({ story, colors }: { story: Story; colors: any }) {
-  return (
-    <TouchableOpacity activeOpacity={0.88} style={[styles.waveCard, { borderColor: colors.border }]}> 
+    <TouchableOpacity activeOpacity={0.9} style={[styles.storyCard, { borderColor: colors.border }]}> 
       <ImageBackground
         source={{ uri: story.imageUrl || story.user.avatar }}
-        style={styles.waveCardImage}
-        imageStyle={styles.waveCardImageInner}
+        style={styles.storyCardImage}
+        imageStyle={styles.storyCardImageInner}
       >
-        <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.68)']}
-          style={styles.waveCardOverlay}
-        >
-          <View style={styles.waveMetaTop}>
-            <View style={[styles.waveBadge, { backgroundColor: story.viewed ? 'rgba(255,255,255,0.18)' : '#1F8BFF' }]}> 
-              <Text style={styles.waveBadgeText}>{story.viewed ? 'Seen' : 'Now'}</Text>
-            </View>
+        <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.72)']} style={styles.storyCardOverlay}>
+          <View style={[styles.storyCardBadge, { backgroundColor: story.viewed ? 'rgba(255,255,255,0.18)' : '#1F8BFF' }]}>
+            <Text style={styles.storyCardBadgeText}>{story.viewed ? 'Seen' : 'Live now'}</Text>
           </View>
-          <View style={styles.waveMetaBottom}>
-            <Image source={{ uri: story.user.avatar }} style={styles.waveAvatar} />
-            <View style={styles.waveTextWrap}>
-              <Text style={styles.waveUser} numberOfLines={1}>{story.user.username}</Text>
-              <Text style={styles.waveTime}>{story.timestamp}</Text>
+          <View style={styles.storyCardFooter}>
+            <Image source={{ uri: story.user.avatar }} style={styles.storyCardAvatar} />
+            <View style={styles.storyCardTextWrap}>
+              <Text style={styles.storyCardUser} numberOfLines={1}>{story.user.username}</Text>
+              <Text style={styles.storyCardTime}>{story.timestamp}</Text>
             </View>
           </View>
         </LinearGradient>
@@ -131,95 +60,235 @@ function WaveCard({ story, colors }: { story: Story; colors: any }) {
   );
 }
 
-function PulseCard({
+function ActionButton({
+  icon,
+  label,
+  count,
+  active,
+  colors,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  active?: boolean;
+  colors: any;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.86}
+      onPress={onPress}
+      style={[
+        styles.actionButton,
+        {
+          backgroundColor: active ? colors.accentGlow : colors.backgroundSecondary,
+          borderColor: active ? colors.accent : colors.border,
+        },
+      ]}
+    >
+      {icon}
+      <Text style={[styles.actionLabel, { color: active ? colors.accent : colors.text }]}>{label}</Text>
+      <Text style={[styles.actionCount, { color: active ? colors.accent : colors.textSecondary }]}>{count}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function FeedCard({
   post,
   colors,
   liked,
   saved,
-  pulseCount,
+  likeCount,
   onToggleLike,
   onToggleSave,
+  onOpen,
 }: {
   post: Post;
   colors: any;
   liked: boolean;
   saved: boolean;
-  pulseCount: number;
+  likeCount: number;
   onToggleLike: () => void;
   onToggleSave: () => void;
+  onOpen: () => void;
 }) {
-  const hasImage = Boolean(post.imageUrl);
+  const hasMedia = Boolean(post.imageUrl);
 
   return (
-    <View style={[styles.pulseCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-      <View style={styles.pulseCardTopRow}>
-        <View style={styles.pulseAuthorRow}>
-          <Image source={{ uri: post.user.avatar }} style={styles.pulseAuthorAvatar} />
-          <View style={styles.pulseAuthorTextWrap}>
-            <Text style={[styles.pulseAuthorName, { color: colors.text }]}>{post.user.name}</Text>
-            <Text style={[styles.pulseAuthorHandle, { color: colors.textSecondary }]}>@{post.user.username}</Text>
+    <View style={[styles.feedCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+      <View style={styles.feedCardHeader}>
+        <View style={styles.feedCardAuthorRow}>
+          <Image source={{ uri: post.user.avatar }} style={styles.feedCardAvatar} />
+          <View style={styles.feedCardAuthorText}>
+            <Text style={[styles.feedCardName, { color: colors.text }]}>{post.user.name}</Text>
+            <Text style={[styles.feedCardMeta, { color: colors.textSecondary }]}>@{post.user.username} • {post.timestamp}</Text>
           </View>
         </View>
-        <View style={styles.pulseTagStack}>
-          {post.isApparently && post.apparentlyTag ? (
-            <View style={[styles.postTagPill, { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}> 
-              <Text style={[styles.postTagPillText, { color: colors.accent }]}>{post.apparentlyTag}</Text>
-            </View>
-          ) : null}
-          <Text style={[styles.pulseTimestamp, { color: colors.textTertiary }]}>{post.timestamp}</Text>
-        </View>
-      </View>
-
-      <View style={[styles.pulseBody, !hasImage && styles.pulseBodyNoImage]}>
-        <View style={styles.pulseCopyWrap}>
-          <View style={[styles.signalPill, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}> 
-            <View style={[styles.signalPillDot, { backgroundColor: colors.accent }]} />
-            <Text style={[styles.signalPillText, { color: colors.textSecondary }]}>Fresh signal</Text>
+        {post.apparentlyTag ? (
+          <View style={[styles.feedTag, { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}> 
+            <Text style={[styles.feedTagText, { color: colors.accent }]}>{post.apparentlyTag}</Text>
           </View>
-          <Text style={[styles.pulseHeadline, { color: colors.text }]} numberOfLines={hasImage ? 4 : 7}>
-            {post.content}
-          </Text>
-        </View>
-
-        {hasImage ? (
-          <Image source={{ uri: post.imageUrl }} style={styles.pulseSideImage} resizeMode="cover" />
         ) : null}
       </View>
 
-      <View style={styles.pulseFooterRow}>
-        <ReactionChip
-          label="Pulse"
-          count={pulseCount}
-          active={liked}
-          colors={colors}
-          glyph={<PulseGlyph active={liked} color={liked ? colors.accent : colors.textSecondary} />}
-          onPress={onToggleLike}
-        />
-        <ReactionChip
-          label="Echo"
-          count={post.comments}
-          colors={colors}
-          glyph={<EchoGlyph color={colors.textSecondary} />}
-        />
-        <ReactionChip
-          label="Drift"
-          count={post.shares}
-          colors={colors}
-          glyph={<DriftGlyph color={colors.textSecondary} />}
-        />
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={onToggleSave}
-          style={[
-            styles.saveButton,
-            {
-              backgroundColor: saved ? colors.accentGlow : colors.backgroundSecondary,
-              borderColor: saved ? colors.accent : colors.border,
-            },
-          ]}
-        >
-          <VaultGlyph active={saved} color={saved ? colors.accent : colors.textSecondary} />
+      {hasMedia ? (
+        <TouchableOpacity activeOpacity={0.95} onPress={onOpen} style={styles.mediaTapWrap}>
+          <ImageBackground
+            source={{ uri: post.imageUrl }}
+            style={styles.feedMedia}
+            imageStyle={styles.feedMediaImage}
+          >
+            <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.18)']} style={styles.feedMediaOverlay}>
+              <View style={[styles.mediaHint, { backgroundColor: 'rgba(10,10,10,0.58)' }]}>
+                <Text style={styles.mediaHintText}>Swipe mode</Text>
+              </View>
+            </LinearGradient>
+          </ImageBackground>
         </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          activeOpacity={0.92}
+          onPress={onOpen}
+          style={[styles.textPanel, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
+        >
+          <Text style={[styles.textPanelCopy, { color: colors.text }]} numberOfLines={6}>{post.content}</Text>
+        </TouchableOpacity>
+      )}
+
+      <View style={styles.feedCardBody}>
+        {hasMedia ? (
+          <Text style={[styles.feedCardCopy, { color: colors.text }]} numberOfLines={3}>{post.content}</Text>
+        ) : null}
+
+        <View style={styles.feedCardActions}>
+          <ActionButton
+            label="Like"
+            count={likeCount}
+            active={liked}
+            colors={colors}
+            onPress={onToggleLike}
+            icon={<Heart size={18} color={liked ? colors.accent : colors.textSecondary} fill={liked ? colors.accent : 'none'} />}
+          />
+          <ActionButton
+            label="Comment"
+            count={post.comments}
+            colors={colors}
+            icon={<MessageCircle size={18} color={colors.textSecondary} />}
+          />
+          <ActionButton
+            label="Repost"
+            count={post.shares}
+            colors={colors}
+            icon={<Repeat size={18} color={colors.textSecondary} />}
+          />
+          <TouchableOpacity
+            activeOpacity={0.86}
+            onPress={onToggleSave}
+            style={[
+              styles.saveButton,
+              {
+                backgroundColor: saved ? colors.accentGlow : colors.backgroundSecondary,
+                borderColor: saved ? colors.accent : colors.border,
+              },
+            ]}
+          >
+            <Bookmark size={18} color={saved ? colors.accent : colors.textSecondary} fill={saved ? colors.accent : 'none'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ViewerSlide({
+  post,
+  colors,
+  liked,
+  saved,
+  likeCount,
+  onToggleLike,
+  onToggleSave,
+  index,
+  total,
+}: {
+  post: Post;
+  colors: any;
+  liked: boolean;
+  saved: boolean;
+  likeCount: number;
+  onToggleLike: () => void;
+  onToggleSave: () => void;
+  index: number;
+  total: number;
+}) {
+  const hasMedia = Boolean(post.imageUrl);
+
+  return (
+    <View style={[styles.viewerSlide, { height: SCREEN_HEIGHT }]}> 
+      <View style={styles.viewerMetaTop}>
+        <View style={[styles.viewerCounter, { backgroundColor: 'rgba(12,12,12,0.54)' }]}>
+          <Text style={styles.viewerCounterText}>{index + 1} / {total}</Text>
+        </View>
+      </View>
+
+      <View style={styles.viewerContentWrap}>
+        {hasMedia ? (
+          <Image source={{ uri: post.imageUrl }} style={styles.viewerMedia} resizeMode="cover" />
+        ) : (
+          <LinearGradient colors={['#111827', '#1F2937']} style={styles.viewerTextOnlyCard}>
+            <Text style={styles.viewerTextOnlyCopy}>{post.content}</Text>
+          </LinearGradient>
+        )}
+
+        <View style={[styles.viewerDetailsCard, { backgroundColor: 'rgba(10,10,10,0.72)', borderColor: 'rgba(255,255,255,0.08)' }]}>
+          <View style={styles.viewerAuthorRow}>
+            <Image source={{ uri: post.user.avatar }} style={styles.viewerAuthorAvatar} />
+            <View style={styles.viewerAuthorTextWrap}>
+              <Text style={styles.viewerAuthorName}>{post.user.name}</Text>
+              <Text style={styles.viewerAuthorMeta}>@{post.user.username} • {post.timestamp}</Text>
+            </View>
+          </View>
+          <Text style={styles.viewerCopy}>{post.content}</Text>
+
+          <View style={styles.viewerActions}>
+            <ActionButton
+              label="Like"
+              count={likeCount}
+              active={liked}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              onPress={onToggleLike}
+              icon={<Heart size={18} color={liked ? '#4AA8FF' : 'rgba(255,255,255,0.8)'} fill={liked ? '#4AA8FF' : 'none'} />}
+            />
+            <ActionButton
+              label="Comment"
+              count={post.comments}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              icon={<MessageCircle size={18} color={'rgba(255,255,255,0.8)'} />}
+            />
+            <ActionButton
+              label="Repost"
+              count={post.shares}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              icon={<Repeat size={18} color={'rgba(255,255,255,0.8)'} />}
+            />
+            <TouchableOpacity
+              activeOpacity={0.86}
+              onPress={onToggleSave}
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor: saved ? 'rgba(31,139,255,0.18)' : 'rgba(255,255,255,0.08)',
+                  borderColor: saved ? '#1F8BFF' : 'rgba(255,255,255,0.14)',
+                },
+              ]}
+            >
+              <Bookmark size={18} color={saved ? '#4AA8FF' : 'rgba(255,255,255,0.8)'} fill={saved ? '#4AA8FF' : 'none'} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.viewerSwipeHint}>Swipe up for the next post</Text>
+        </View>
       </View>
     </View>
   );
@@ -235,23 +304,25 @@ export default function FeedScreen() {
   const [localPosts, setLocalPosts] = useState<Post[]>([]);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
-  const [pulseCounts, setPulseCounts] = useState<Record<string, number>>({});
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [viewerPostId, setViewerPostId] = useState<string | null>(null);
   const lastOffsetRef = useRef(0);
 
   const socialPosts = getAllPosts();
   const socialStories = getAllStories();
 
   const basePosts = socialPosts.length ? socialPosts : mockPosts;
-  const stories = useMemo(() => (socialStories.length ? socialStories : mockStories).slice(0, 10), [socialStories]);
   const posts = useMemo(() => [...localPosts, ...basePosts], [localPosts, basePosts]);
+  const stories = useMemo(() => (socialStories.length ? socialStories : mockStories).slice(0, 10), [socialStories]);
+  const viewerIndex = useMemo(() => Math.max(posts.findIndex((post) => post.id === viewerPostId), 0), [posts, viewerPostId]);
 
-  const pulseCountFor = useCallback((post: Post) => pulseCounts[post.id] ?? post.likes, [pulseCounts]);
-
-  const triggerHaptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
+  const impact = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(style);
     }
   };
+
+  const getLikeCount = useCallback((post: Post) => likeCounts[post.id] ?? post.likes, [likeCounts]);
 
   const handlePublish = useCallback(() => {
     const clean = draft.trim();
@@ -267,10 +338,10 @@ export default function FeedScreen() {
       shares: 0,
     };
 
-    setLocalPosts(prev => [optimisticPost, ...prev]);
+    setLocalPosts((prev) => [optimisticPost, ...prev]);
     setDraft('');
     createPost(clean);
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    impact(Haptics.ImpactFeedbackStyle.Medium);
   }, [createPost, draft]);
 
   const handleScroll = useCallback((event: any) => {
@@ -285,18 +356,29 @@ export default function FeedScreen() {
 
   const toggleLike = useCallback((post: Post) => {
     const nextLiked = !likedMap[post.id];
-    setLikedMap(prev => ({ ...prev, [post.id]: nextLiked }));
-    setPulseCounts(prev => ({
+    setLikedMap((prev) => ({ ...prev, [post.id]: nextLiked }));
+    setLikeCounts((prev) => ({
       ...prev,
       [post.id]: (prev[post.id] ?? post.likes) + (nextLiked ? 1 : -1),
     }));
-    triggerHaptic();
+    impact();
   }, [likedMap]);
 
   const toggleSave = useCallback((postId: string) => {
-    setSavedMap(prev => ({ ...prev, [postId]: !prev[postId] }));
-    triggerHaptic();
+    setSavedMap((prev) => ({ ...prev, [postId]: !prev[postId] }));
+    impact();
   }, []);
+
+  const openViewer = useCallback((postId: string) => {
+    setViewerPostId(postId);
+    hideTabBar();
+    impact(Haptics.ImpactFeedbackStyle.Medium);
+  }, [hideTabBar]);
+
+  const closeViewer = useCallback(() => {
+    setViewerPostId(null);
+    showTabBar();
+  }, [showTabBar]);
 
   const header = (
     <View>
@@ -305,20 +387,13 @@ export default function FeedScreen() {
         style={[styles.headerShell, { paddingTop: insets.top + 10, borderBottomColor: colors.border }]}
       >
         <View style={styles.headerTopRow}>
-          <View>
+          <View style={styles.headerCopyWrap}>
             <Text style={[styles.headerEyebrow, { color: colors.textSecondary }]}>SOCIAL FEED</Text>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Pulse Board</Text>
-            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-              Drop updates, spot momentum, and keep your circle moving.
-            </Text>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Big media, familiar actions, and swipe-through browsing.</Text>
           </View>
-          <View style={styles.headerGlyphCluster}>
-            <View style={[styles.headerGlyphBubble, { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}>
-              <PulseGlyph active color={colors.accent} />
-            </View>
-            <View style={[styles.headerGlyphBubble, { backgroundColor: colors.background, borderColor: colors.border }]}>
-              <EchoGlyph color={colors.textSecondary} />
-            </View>
+          <View style={[styles.headerBadge, { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}> 
+            <Text style={[styles.headerBadgeText, { color: colors.accent }]}>Live</Text>
           </View>
         </View>
 
@@ -326,13 +401,13 @@ export default function FeedScreen() {
           <View style={styles.composerTopRow}>
             <Image source={{ uri: viewer.avatar }} style={styles.composerAvatar} />
             <View style={styles.composerPromptWrap}>
-              <Text style={[styles.composerPromptTitle, { color: colors.text }]}>What are you building right now?</Text>
-              <Text style={[styles.composerPromptSubtitle, { color: colors.textSecondary }]}>Keep it quick, visual, or straight to the point.</Text>
+              <Text style={[styles.composerPromptTitle, { color: colors.text }]}>Post something people can react to</Text>
+              <Text style={[styles.composerPromptSubtitle, { color: colors.textSecondary }]}>A quick update, a photo moment, a win, or something worth sharing.</Text>
             </View>
           </View>
           <TextInput
             multiline
-            placeholder="Drop a win, ask for help, or share a moment..."
+            placeholder="What’s happening?"
             placeholderTextColor={colors.textTertiary}
             style={[
               styles.composerInput,
@@ -347,10 +422,10 @@ export default function FeedScreen() {
             textAlignVertical="top"
           />
           <View style={styles.composerFooter}>
-            <View style={styles.composerModes}>
-              {['Photo', 'Ask', 'Win'].map((mode, index) => (
+            <View style={styles.composerModeRow}>
+              {['Photo first', 'Question', 'Update'].map((label, index) => (
                 <View
-                  key={mode}
+                  key={label}
                   style={[
                     styles.modeChip,
                     {
@@ -359,15 +434,11 @@ export default function FeedScreen() {
                     },
                   ]}
                 >
-                  <Text style={[styles.modeChipText, { color: index === 0 ? colors.accent : colors.textSecondary }]}>{mode}</Text>
+                  <Text style={[styles.modeChipText, { color: index === 0 ? colors.accent : colors.textSecondary }]}>{label}</Text>
                 </View>
               ))}
             </View>
-            <TouchableOpacity
-              activeOpacity={0.88}
-              onPress={handlePublish}
-              style={[styles.publishButton, { backgroundColor: colors.text }]}
-            >
+            <TouchableOpacity activeOpacity={0.88} onPress={handlePublish} style={[styles.publishButton, { backgroundColor: colors.text }]}>
               <Text style={[styles.publishButtonText, { color: colors.background }]}>Post</Text>
             </TouchableOpacity>
           </View>
@@ -377,25 +448,19 @@ export default function FeedScreen() {
       <View style={styles.sectionWrap}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Current waves</Text>
-          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Fast snapshots from your people</Text>
+          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Quick visual updates from your people</Text>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.waveScrollContent}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyScrollContent}>
           {stories.map((story) => (
-            <WaveCard key={story.id} story={story} colors={colors} />
+            <StoryCard key={story.id} story={story} colors={colors} />
           ))}
         </ScrollView>
       </View>
 
       <View style={styles.sectionWrap}>
-        <View style={styles.sectionHeaderRowCompact}>
-          <View>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Fresh signals</Text>
-            <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>A cleaner, card-first layout built for this app</Text>
-          </View>
-          <View style={[styles.liveStrip, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}> 
-            <View style={[styles.liveStripDot, { backgroundColor: colors.accent }]} />
-            <Text style={[styles.liveStripText, { color: colors.textSecondary }]}>{posts.length} drops</Text>
-          </View>
+        <View style={[styles.sectionHeader, styles.sectionHeaderTight]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Fresh posts</Text>
+          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Tap a post, then swipe up to move through the feed.</Text>
         </View>
       </View>
     </View>
@@ -407,22 +472,55 @@ export default function FeedScreen() {
         data={posts}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
-        contentContainerStyle={styles.feedContent}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
         onScroll={handleScroll}
+        contentContainerStyle={styles.feedContent}
         renderItem={({ item }) => (
-          <PulseCard
+          <FeedCard
             post={item}
             colors={colors}
             liked={Boolean(likedMap[item.id])}
             saved={Boolean(savedMap[item.id])}
-            pulseCount={pulseCountFor(item)}
+            likeCount={getLikeCount(item)}
             onToggleLike={() => toggleLike(item)}
             onToggleSave={() => toggleSave(item.id)}
+            onOpen={() => openViewer(item.id)}
           />
         )}
       />
+
+      <Modal visible={Boolean(viewerPostId)} animationType="fade" presentationStyle="fullScreen" onRequestClose={closeViewer}>
+        <View style={styles.viewerShell}>
+          <TouchableOpacity activeOpacity={0.85} onPress={closeViewer} style={[styles.viewerClose, { top: insets.top + 10 }]}>
+            <X size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <FlatList
+            key={viewerPostId ?? 'viewer'}
+            data={posts}
+            pagingEnabled
+            initialScrollIndex={viewerIndex}
+            getItemLayout={(_, index) => ({ length: SCREEN_HEIGHT, offset: SCREEN_HEIGHT * index, index })}
+            keyExtractor={(item) => `viewer-${item.id}`}
+            showsVerticalScrollIndicator={false}
+            decelerationRate="fast"
+            renderItem={({ item, index }) => (
+              <ViewerSlide
+                post={item}
+                colors={colors}
+                index={index}
+                total={posts.length}
+                liked={Boolean(likedMap[item.id])}
+                saved={Boolean(savedMap[item.id])}
+                likeCount={getLikeCount(item)}
+                onToggleLike={() => toggleLike(item)}
+                onToggleSave={() => toggleSave(item.id)}
+              />
+            )}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -442,7 +540,11 @@ const styles = StyleSheet.create({
   headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 16,
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  headerCopyWrap: {
+    flex: 1,
   },
   headerEyebrow: {
     fontSize: 11,
@@ -459,20 +561,17 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 14,
     lineHeight: 20,
-    maxWidth: 260,
+    maxWidth: 270,
   },
-  headerGlyphCluster: {
-    flexDirection: 'column',
-    gap: 10,
-    paddingTop: 6,
-  },
-  headerGlyphBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerBadge: {
     borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  headerBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   composerCard: {
     marginTop: 18,
@@ -514,21 +613,21 @@ const styles = StyleSheet.create({
   },
   composerFooter: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     gap: 12,
   },
-  composerModes: {
+  composerModeRow: {
     flexDirection: 'row',
     gap: 8,
     flexWrap: 'wrap',
     flex: 1,
   },
   modeChip: {
+    borderWidth: 1,
+    borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
   },
   modeChipText: {
     fontSize: 12,
@@ -550,13 +649,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     marginBottom: 12,
   },
-  sectionHeaderRowCompact: {
-    paddingHorizontal: 18,
-    marginBottom: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
+  sectionHeaderTight: {
+    marginBottom: 8,
   },
   sectionTitle: {
     fontSize: 19,
@@ -567,303 +661,299 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 13,
   },
-  waveScrollContent: {
+  storyScrollContent: {
     paddingHorizontal: 18,
-    gap: 12,
     paddingBottom: 4,
   },
-  waveCard: {
-    width: 148,
-    height: 188,
-    borderRadius: 26,
+  storyCard: {
+    width: 156,
+    height: 194,
+    borderRadius: 28,
     overflow: 'hidden',
     borderWidth: 1,
     marginRight: 12,
   },
-  waveCardImage: {
+  storyCardImage: {
     flex: 1,
   },
-  waveCardImageInner: {
-    borderRadius: 26,
+  storyCardImageInner: {
+    borderRadius: 28,
   },
-  waveCardOverlay: {
+  storyCardOverlay: {
     flex: 1,
     justifyContent: 'space-between',
     padding: 14,
   },
-  waveMetaTop: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-  },
-  waveMetaBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  waveBadge: {
+  storyCardBadge: {
+    alignSelf: 'flex-start',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  waveBadgeText: {
+  storyCardBadgeText: {
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '800',
   },
-  waveAvatar: {
+  storyCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  storyCardAvatar: {
     width: 34,
     height: 34,
     borderRadius: 14,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.75)',
   },
-  waveTextWrap: {
+  storyCardTextWrap: {
     flex: 1,
   },
-  waveUser: {
+  storyCardUser: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
   },
-  waveTime: {
+  storyCardTime: {
     color: 'rgba(255,255,255,0.82)',
     fontSize: 11,
     marginTop: 2,
   },
-  liveStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-  },
-  liveStripDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  liveStripText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  pulseCard: {
+  feedCard: {
     marginHorizontal: 18,
-    marginBottom: 16,
+    marginBottom: 18,
     borderRadius: 28,
     borderWidth: 1,
-    padding: 16,
-    gap: 16,
+    overflow: 'hidden',
   },
-  pulseCardTopRow: {
+  feedCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 10,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    gap: 12,
   },
-  pulseAuthorRow: {
+  feedCardAuthorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     flex: 1,
   },
-  pulseAuthorAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
+  feedCardAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
   },
-  pulseAuthorTextWrap: {
+  feedCardAuthorText: {
     flex: 1,
   },
-  pulseAuthorName: {
+  feedCardName: {
     fontSize: 15,
     fontWeight: '700',
   },
-  pulseAuthorHandle: {
+  feedCardMeta: {
     marginTop: 2,
     fontSize: 12,
   },
-  pulseTagStack: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  postTagPill: {
+  feedTag: {
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  postTagPillText: {
+  feedTagText: {
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
-  pulseTimestamp: {
-    fontSize: 11,
-    fontWeight: '600',
+  mediaTapWrap: {
+    paddingHorizontal: 12,
   },
-  pulseBody: {
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'stretch',
+  feedMedia: {
+    height: MEDIA_HEIGHT,
+    borderRadius: 24,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
   },
-  pulseBodyNoImage: {
-    flexDirection: 'column',
+  feedMediaImage: {
+    borderRadius: 24,
   },
-  pulseCopyWrap: {
+  feedMediaOverlay: {
     flex: 1,
-    gap: 12,
+    justifyContent: 'flex-end',
+    padding: 14,
   },
-  signalPill: {
+  mediaHint: {
     alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     borderRadius: 999,
-    borderWidth: 1,
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingVertical: 6,
   },
-  signalPillDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  signalPillText: {
+  mediaHintText: {
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '700',
   },
-  pulseHeadline: {
-    fontSize: 17,
-    lineHeight: 24,
+  textPanel: {
+    marginHorizontal: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 22,
+    minHeight: 220,
+    justifyContent: 'center',
+  },
+  textPanelCopy: {
+    fontSize: 24,
+    lineHeight: 32,
     fontWeight: '600',
   },
-  pulseSideImage: {
-    width: 118,
-    minHeight: 138,
-    borderRadius: 22,
+  feedCardBody: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
+    gap: 14,
   },
-  pulseFooterRow: {
+  feedCardCopy: {
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: '500',
+  },
+  feedCardActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
     gap: 10,
+    flexWrap: 'wrap',
   },
-  reactionChip: {
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
+    gap: 7,
     borderWidth: 1,
+    borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  reactionChipLabel: {
+  actionLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  reactionChipCount: {
+  actionCount: {
     fontSize: 12,
     fontWeight: '700',
   },
   saveButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerShell: {
+    flex: 1,
+    backgroundColor: '#050505',
+  },
+  viewerClose: {
+    position: 'absolute',
+    right: 18,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(20,20,20,0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerSlide: {
+    paddingTop: 68,
+    paddingHorizontal: 14,
+    paddingBottom: 26,
+    justifyContent: 'space-between',
+  },
+  viewerMetaTop: {
+    alignItems: 'flex-start',
+  },
+  viewerCounter: {
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  viewerCounterText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerContentWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 16,
+  },
+  viewerMedia: {
+    width: '100%',
+    height: SCREEN_HEIGHT * 0.56,
+    borderRadius: 30,
+    backgroundColor: '#161616',
+  },
+  viewerTextOnlyCard: {
+    minHeight: SCREEN_HEIGHT * 0.4,
+    borderRadius: 30,
+    padding: 28,
+    justifyContent: 'center',
+  },
+  viewerTextOnlyCopy: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    lineHeight: 36,
+    fontWeight: '700',
+  },
+  viewerDetailsCard: {
+    borderWidth: 1,
+    borderRadius: 26,
+    padding: 16,
+    gap: 14,
+  },
+  viewerAuthorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  viewerAuthorAvatar: {
     width: 44,
     height: 44,
-    borderRadius: 14,
+    borderRadius: 16,
+  },
+  viewerAuthorTextWrap: {
+    flex: 1,
+  },
+  viewerAuthorName: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  viewerAuthorMeta: {
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+    fontSize: 12,
+  },
+  viewerCopy: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+  },
+  viewerActions: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
+    gap: 10,
+    flexWrap: 'wrap',
   },
-  pulseGlyph: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pulseGlyphOuter: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-  },
-  pulseGlyphInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  echoGlyph: {
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-  },
-  echoDot: {
-    position: 'absolute',
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    left: 0,
-    top: 6,
-  },
-  echoLineLong: {
-    position: 'absolute',
-    left: 6,
-    top: 4,
-    width: 10,
-    height: 3,
-    borderRadius: 99,
-  },
-  echoLineShort: {
-    position: 'absolute',
-    left: 6,
-    top: 9,
-    width: 7,
-    height: 3,
-    borderRadius: 99,
-  },
-  driftGlyph: {
-    width: 16,
-    height: 16,
-    position: 'relative',
-  },
-  driftDotTop: {
-    position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    top: 1,
-    left: 1,
-  },
-  driftConnector: {
-    position: 'absolute',
-    width: 9,
-    height: 2,
-    transform: [{ rotate: '38deg' }],
-    top: 7,
-    left: 3,
-    borderRadius: 99,
-  },
-  driftDotBottom: {
-    position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    bottom: 1,
-    right: 1,
-  },
-  vaultGlyph: {
-    width: 14,
-    height: 16,
-    borderRadius: 4,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  vaultGlyphStripe: {
-    width: 8,
-    height: 2,
-    borderRadius: 99,
-    borderWidth: 1,
+  viewerSwipeHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
 });
