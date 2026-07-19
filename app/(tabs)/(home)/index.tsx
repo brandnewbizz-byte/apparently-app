@@ -1,4 +1,4 @@
-import { 
+import {
   ArrowRight, 
   Calendar, 
   ChevronLeft,
@@ -21,6 +21,9 @@ import {
   Palette,
   Clock,
   Briefcase,
+  Plus,
+  Camera,
+  ImagePlus,
 } from 'lucide-react-native';
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
@@ -37,6 +40,8 @@ import {
   PanResponder,
   ImageBackground,
   Image,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -49,6 +54,8 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 import { supabase } from '@/lib/supabase';
+import * as localApi from '@/lib/api';
+import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
@@ -376,7 +383,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
-    
+
     Animated.parallel([
       Animated.timing(swipeAnim.x, {
         toValue,
@@ -514,11 +521,11 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>Waiting for new bundles to appear...</Text>
         <View style={styles.cooldownProgressContainer}>
           <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
-            <View 
+            <View
               style={[
-                styles.cooldownProgressFill, 
+                styles.cooldownProgressFill,
                 { width: `${((COOLDOWN_SECONDS - cooldownRemaining) / COOLDOWN_SECONDS) * 100}%` }
-              ]} 
+              ]}
             />
           </View>
         </View>
@@ -533,7 +540,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
           <SwipeBundleCardContent bundle={nextBundle} colors={colors} />
         </Animated.View>
       )}
-      
+
       <Animated.View
         style={[
           styles.swipeCardWrapper,
@@ -564,16 +571,16 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
       </Animated.View>
 
       <View style={styles.swipeActions}>
-        <TouchableOpacity 
-          style={[styles.swipeActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+        <TouchableOpacity
+          style={[styles.swipeActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('left')}
           activeOpacity={0.8}
         >
           <X size={22} color="#EF4444" />
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.swipeGrabBtn} 
+
+        <TouchableOpacity
+          style={styles.swipeGrabBtn}
           onPress={grabCurrentBundle}
           activeOpacity={0.8}
         >
@@ -586,9 +593,9 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
             <Text style={styles.swipeGrabText}>Grab</Text>
           </LinearGradient>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.swipeActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+
+        <TouchableOpacity
+          style={[styles.swipeActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('right')}
           activeOpacity={0.8}
         >
@@ -598,14 +605,14 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
 
       <View style={styles.swipeIndicator}>
         {limitedBundles.map((_, i) => (
-          <View 
-            key={i} 
+          <View
+            key={i}
             style={[
-              styles.swipeDot, 
+              styles.swipeDot,
               { backgroundColor: colors.border },
               i === completedCount && currentBundle && styles.swipeDotActive,
               i < completedCount && styles.swipeDotDone,
-            ]} 
+            ]}
           />
         ))}
       </View>
@@ -827,7 +834,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
-    
+
     Animated.parallel([
       Animated.timing(swipeAnim.x, {
         toValue,
@@ -919,11 +926,11 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
         <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>Waiting for new skill deals...</Text>
         <View style={styles.skillCooldownProgressContainer}>
           <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
-            <View 
+            <View
               style={[
-                styles.skillCooldownProgressFill, 
+                styles.skillCooldownProgressFill,
                 { width: `${((SKILL_COOLDOWN_SECONDS - cooldownRemaining) / SKILL_COOLDOWN_SECONDS) * 100}%` }
-              ]} 
+              ]}
             />
           </View>
         </View>
@@ -938,7 +945,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
           <SkillDealCard skill={nextSkill} colors={colors} />
         </Animated.View>
       )}
-      
+
       <Animated.View
         style={[
           styles.skillSwipeCardWrapper,
@@ -963,21 +970,21 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
       </Animated.View>
 
       <View style={styles.skillSwipeActions}>
-        <TouchableOpacity 
-          style={[styles.skillActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+        <TouchableOpacity
+          style={[styles.skillActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('left')}
         >
           <X size={20} color="#EF4444" />
         </TouchableOpacity>
-        
+
         <TouchableOpacity style={styles.skillGrabBtn} onPress={grabCurrentSkill}>
           <LinearGradient colors={['#F59E0B', '#FBBF24']} style={styles.skillGrabGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Text style={styles.skillGrabText}>Grab</Text>
           </LinearGradient>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.skillActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+
+        <TouchableOpacity
+          style={[styles.skillActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('right')}
         >
           <Bookmark size={20} color="#10B981" />
@@ -1090,7 +1097,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
-    
+
     Animated.parallel([
       Animated.timing(swipeAnim.x, { toValue, duration: 250, useNativeDriver: true }),
       Animated.timing(opacityAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
@@ -1170,7 +1177,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
           <ServiceRequestCard request={nextRequest} colors={colors} />
         </Animated.View>
       )}
-      
+
       <Animated.View
         style={[
           styles.serviceSwipeCardWrapper,
@@ -1195,21 +1202,21 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
       </Animated.View>
 
       <View style={styles.serviceSwipeActions}>
-        <TouchableOpacity 
-          style={[styles.serviceActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+        <TouchableOpacity
+          style={[styles.serviceActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('left')}
         >
           <X size={20} color="#EF4444" />
         </TouchableOpacity>
-        
+
         <TouchableOpacity style={styles.serviceGrabBtn} onPress={grabCurrentRequest}>
           <LinearGradient colors={['#3B82F6', '#60A5FA']} style={styles.serviceGrabGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Text style={styles.serviceGrabText}>Grab</Text>
           </LinearGradient>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.serviceActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} 
+
+        <TouchableOpacity
+          style={[styles.serviceActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('right')}
         >
           <Bookmark size={20} color="#10B981" />
@@ -1317,7 +1324,7 @@ export default function HomeScreen() {
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
   const { sendMessage } = useMessaging();
-  
+
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
   const [bundleSetIndex, setBundleSetIndex] = useState(0);
@@ -1327,6 +1334,19 @@ export default function HomeScreen() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [confettiAmount, setConfettiAmount] = useState(0);
 
+  // ─── Create Deal Modal State ───
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createMode, setCreateMode] = useState<'skill' | 'bundle'>('skill');
+  const [dealTitle, setDealTitle] = useState('');
+  const [dealDesc, setDealDesc] = useState('');
+  const [dealPrice, setDealPrice] = useState('');
+  const [dealIcon, setDealIcon] = useState('🛠️');
+  const [dealImage, setDealImage] = useState<string | null>(null);
+  const [dealItems, setDealItems] = useState<string[]>([]);
+  const [dealItemText, setDealItemText] = useState('');
+  const [createdSkills, setCreatedSkills] = useState<SkillDeal[]>([]);
+  const [createdBundles, setCreatedBundles] = useState<BundlePlan[]>([]);
+
   const updateAnim = useRef(new Animated.Value(0)).current;
 
   const { data: grabbedBundles } = useQuery<GrabbedBundle[]>({
@@ -1334,7 +1354,7 @@ export default function HomeScreen() {
     queryFn: async ({ signal }) => {
       if (!user?.id) return [];
       console.log('Grid load:', ['grabbedBundles']);
-      
+
       try {
         const { data, error } = await withAbortSignal(
           supabase
@@ -1495,8 +1515,86 @@ export default function HomeScreen() {
   }, [grabbedBundles]);
 
   const allBundles = useMemo(() => {
-    return [...currentBundleSet.data, ...myGrabbedBundles];
-  }, [currentBundleSet.data, myGrabbedBundles]);
+    return [...currentBundleSet.data, ...myGrabbedBundles, ...createdBundles];
+  }, [currentBundleSet.data, myGrabbedBundles, createdBundles]);
+
+  const allSkills = useMemo(() => {
+    return [...MOCK_SKILL_DEALS, ...createdSkills];
+  }, [createdSkills]);
+
+  // ─── Create Handlers ───
+  const resetDealForm = () => {
+    setDealTitle('');
+    setDealDesc('');
+    setDealPrice('');
+    setDealIcon('🛠️');
+    setDealImage(null);
+    setDealItems([]);
+    setDealItemText('');
+  };
+
+  const pickDealImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setDealImage(result.assets[0].uri);
+    }
+  };
+
+  const handleCreateDeal = async () => {
+    if (!dealTitle.trim()) {
+      Alert.alert('Missing', 'Please enter a title.');
+      return;
+    }
+    const price = parseFloat(dealPrice) || 0;
+    const userInfo = {
+      id: user?.id || 'u-dev',
+      name: user?.fullName || 'You',
+      avatar: user?.avatar || 'https://i.pravatar.cc/150?u=me',
+    };
+
+    if (createMode === 'skill') {
+      const newSkill: SkillDeal = {
+        id: `skill-${Date.now()}`,
+        creatorId: userInfo.id,
+        creatorName: userInfo.name,
+        creatorAvatar: userInfo.avatar,
+        title: dealTitle.trim(),
+        description: dealDesc.trim(),
+        price,
+        icon: dealIcon,
+        imageUrl: dealImage || undefined,
+        category: 'Skill',
+        grabCount: 0,
+      };
+      setCreatedSkills(prev => [newSkill, ...prev]);
+      try { await localApi.createSkillDeal({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, icon: dealIcon, image_url: dealImage || undefined, category: 'Skill' }); } catch {}
+    } else {
+      const newBundle: BundlePlan = {
+        id: `bundle-${Date.now()}`,
+        creatorId: userInfo.id,
+        creatorName: userInfo.name,
+        creatorAvatar: userInfo.avatar,
+        title: dealTitle.trim(),
+        description: dealDesc.trim(),
+        price,
+        imageUrl: dealImage || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400',
+        items: dealItems,
+        category: 'Bundle',
+        grabCount: 0,
+        location: 'Created by you',
+      };
+      setCreatedBundles(prev => [newBundle, ...prev]);
+      try { await localApi.createBundle({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, items: dealItems, image_url: dealImage || undefined, category: 'Bundle' }); } catch {}
+    }
+
+    resetDealForm();
+    setShowCreateModal(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1509,7 +1607,7 @@ export default function HomeScreen() {
             <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
           </View>
           <View style={styles.headerActions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => handleNavigate('/(tabs)/inbox')}
               activeOpacity={0.8}
@@ -1518,10 +1616,10 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        
-        <Animated.View 
+
+        <Animated.View
           style={[
-            styles.liveTicker, 
+            styles.liveTicker,
             { backgroundColor: colors.surface, borderColor: colors.border },
             { opacity: updateAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.5, 1] }) }
           ]}
@@ -1531,7 +1629,7 @@ export default function HomeScreen() {
             <Text style={styles.liveText}>LIVE</Text>
           </View>
           <Text style={[styles.tickerText, { color: colors.textSecondary }]}>
-            {currentUpdate.name} {currentUpdate.action} ${currentUpdate.amount} {currentUpdate.service} — {currentUpdate.time}
+            {currentUpdate.name} {currentUpdate.action} ${currentUpdate.amount} {currentUpdate.service} - {currentUpdate.time}
           </Text>
         </Animated.View>
       </View>
@@ -1546,7 +1644,7 @@ export default function HomeScreen() {
         onScroll={handleScroll}
         scrollEventThrottle={16}
       >
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.planDayCard}
           onPress={() => handleNavigate('/(tabs)/planner')}
           activeOpacity={0.9}
@@ -1580,17 +1678,17 @@ export default function HomeScreen() {
               <Text style={styles.seeAllText}>See all</Text>
             </TouchableOpacity>
           </View>
-          
-          <ScrollView 
-            horizontal 
+
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.lifestyleScroll}
           >
             {LIFESTYLE_CATEGORIES.map((category) => {
               const IconComponent = category.icon;
               return (
-                <TouchableOpacity 
-                  key={category.id} 
+                <TouchableOpacity
+                  key={category.id}
                   style={[styles.lifestyleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   activeOpacity={0.8}
                   onPress={() => handleNavigate('/(tabs)/book')}
@@ -1627,17 +1725,17 @@ export default function HomeScreen() {
             </View>
             <View style={styles.bundleTabs}>
               {CAROUSEL_SETS.bundles.map((set, i) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={set.key}
                   style={[
-                    styles.bundleTab, 
+                    styles.bundleTab,
                     { backgroundColor: colors.surface, borderColor: colors.border },
                     i === bundleSetIndex && styles.bundleTabActive
                   ]}
                   onPress={() => setBundleSetIndex(i)}
                 >
                   <Text style={[
-                    styles.bundleTabText, 
+                    styles.bundleTabText,
                     { color: colors.textTertiary },
                     i === bundleSetIndex && styles.bundleTabTextActive
                   ]}>
@@ -1651,9 +1749,15 @@ export default function HomeScreen() {
                   <Text style={styles.savedBundleBadgeText}>{savedBundles.length}</Text>
                 </View>
               )}
+              <TouchableOpacity
+                style={[styles.createBtn, { backgroundColor: colors.accent }]}
+                onPress={() => { setCreateMode('bundle'); setShowCreateModal(true); }}
+              >
+                <Plus size={14} color="#FFF" />
+              </TouchableOpacity>
             </View>
           </View>
-          
+
           <SwipeableBundles
             bundles={allBundles}
             onGrab={handleGrabBundle}
@@ -1675,9 +1779,15 @@ export default function HomeScreen() {
                 <Text style={styles.savedSkillBadgeText}>{savedSkills.length}</Text>
               </View>
             )}
+            <TouchableOpacity
+              style={[styles.createBtn, { backgroundColor: colors.accent }]}
+              onPress={() => { setCreateMode('skill'); setShowCreateModal(true); }}
+            >
+              <Plus size={14} color="#FFF" />
+            </TouchableOpacity>
           </View>
           <SwipeableSkills
-            skills={MOCK_SKILL_DEALS}
+            skills={allSkills}
             onGrab={handleGrabSkill}
             onSkip={handleSkipSkill}
             onSave={handleSaveSkill}
@@ -1710,10 +1820,149 @@ export default function HomeScreen() {
         <View style={styles.bottomSpacing} />
       </ScrollView>
 
-      <ConfettiModal 
-        visible={showConfetti} 
-        amount={confettiAmount} 
-        onClose={() => setShowConfetti(false)} 
+      {/* CreateDealModal */}
+      <Modal visible={showCreateModal} animationType="slide" transparent statusBarTranslucent>
+        <View style={creatDealModalStyles.backdrop}>
+          <View style={[creatDealModalStyles.sheet, { backgroundColor: colors.background }]}>
+            {/* Header */}
+            <View style={creatDealModalStyles.sheetHeader}>
+              <Text style={[creatDealModalStyles.sheetTitle, { color: colors.text }]}>
+                Create {createMode === 'skill' ? 'Skill Deal' : 'Bundle'}
+              </Text>
+              <TouchableOpacity onPress={() => { resetDealForm(); setShowCreateModal(false); }}>
+                <X size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Mode Toggle */}
+            <View style={creatDealModalStyles.modeToggle}>
+              <TouchableOpacity
+                style={[creatDealModalStyles.modeBtn, { backgroundColor: colors.surface, borderColor: colors.border }, createMode === 'skill' && { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}
+                onPress={() => setCreateMode('skill')}
+              >
+                <Wrench size={15} color={createMode === 'skill' ? colors.accent : colors.textSecondary} />
+                <Text style={[creatDealModalStyles.modeBtnText, { color: createMode === 'skill' ? colors.accent : colors.textSecondary }]}>Skill</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[creatDealModalStyles.modeBtn, { backgroundColor: colors.surface, borderColor: colors.border }, createMode === 'bundle' && { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}
+                onPress={() => setCreateMode('bundle')}
+              >
+                <Gift size={15} color={createMode === 'bundle' ? colors.accent : colors.textSecondary} />
+                <Text style={[creatDealModalStyles.modeBtnText, { color: createMode === 'bundle' ? colors.accent : colors.textSecondary }]}>Bundle</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={creatDealModalStyles.form} showsVerticalScrollIndicator={false}>
+              {/* Image */}
+              <TouchableOpacity style={[creatDealModalStyles.imgPicker, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={pickDealImage}>
+                {dealImage ? (
+                  <Image source={{ uri: dealImage }} style={creatDealModalStyles.previewImg} />
+                ) : (
+                  <>
+                    <ImagePlus size={28} color={colors.textTertiary} />
+                    <Text style={[creatDealModalStyles.imgPickerText, { color: colors.textTertiary }]}>Add image</Text>
+                  </>
+                )}
+                {dealImage && (
+                  <TouchableOpacity style={creatDealModalStyles.removeImg} onPress={() => setDealImage(null)}>
+                    <X size={12} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+
+              {/* Title */}
+              <TextInput
+                style={[creatDealModalStyles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                placeholder={createMode === 'skill' ? 'What skill are you offering?' : 'Name your bundle'}
+                placeholderTextColor={colors.textTertiary}
+                value={dealTitle}
+                onChangeText={setDealTitle}
+              />
+
+              {/* Description */}
+              <TextInput
+                style={[creatDealModalStyles.input, creatDealModalStyles.textArea, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                placeholder="Describe what's included..."
+                placeholderTextColor={colors.textTertiary}
+                value={dealDesc}
+                onChangeText={setDealDesc}
+                multiline
+                numberOfLines={3}
+              />
+
+              {/* Price */}
+              <View style={creatDealModalStyles.priceRow}>
+                <Text style={[creatDealModalStyles.priceLabel, { color: colors.textSecondary }]}>$</Text>
+                <TextInput
+                  style={[creatDealModalStyles.priceInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                  placeholder="0"
+                  placeholderTextColor={colors.textTertiary}
+                  value={dealPrice}
+                  onChangeText={setDealPrice}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+
+              {/* Bundle items */}
+              {createMode === 'bundle' && (
+                <View style={creatDealModalStyles.itemsSection}>
+                  <Text style={[creatDealModalStyles.itemsLabel, { color: colors.textSecondary }]}>Bundle Items</Text>
+                  <View style={creatDealModalStyles.addItemRow}>
+                    <TextInput
+                      style={[creatDealModalStyles.itemInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                      placeholder="e.g. Hotel room, Dinner, Chauffeur..."
+                      placeholderTextColor={colors.textTertiary}
+                      value={dealItemText}
+                      onChangeText={setDealItemText}
+                      onSubmitEditing={() => {
+                        if (dealItemText.trim()) {
+                          setDealItems(prev => [...prev, dealItemText.trim()]);
+                          setDealItemText('');
+                        }
+                      }}
+                    />
+                    <TouchableOpacity
+                      style={[creatDealModalStyles.addItemBtn, { backgroundColor: colors.accent }]}
+                      onPress={() => {
+                        if (dealItemText.trim()) {
+                          setDealItems(prev => [...prev, dealItemText.trim()]);
+                          setDealItemText('');
+                        }
+                      }}
+                    >
+                      <Plus size={16} color="#FFF" />
+                    </TouchableOpacity>
+                  </View>
+                  {dealItems.map((item, i) => (
+                    <View key={i} style={[creatDealModalStyles.itemTag, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[creatDealModalStyles.itemTagText, { color: colors.text }]}>{item}</Text>
+                      <TouchableOpacity onPress={() => setDealItems(prev => prev.filter((_, idx) => idx !== i))}>
+                        <X size={12} color={colors.textTertiary} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Post Button */}
+            <TouchableOpacity
+              style={[creatDealModalStyles.postBtn, !dealTitle.trim() && { opacity: 0.5 }, { backgroundColor: colors.accent }]}
+              onPress={handleCreateDeal}
+              disabled={!dealTitle.trim()}
+            >
+              <Text style={creatDealModalStyles.postBtnText}>
+                Post {createMode === 'skill' ? 'Skill Deal' : 'Bundle'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ConfettiModal
+        visible={showConfetti}
+        amount={confettiAmount}
+        onClose={() => setShowConfetti(false)}
       />
     </View>
   );
@@ -2659,4 +2908,34 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700' as const,
   },
+});
+
+const creatDealModalStyles = StyleSheet.create({
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40, maxHeight: '90%' },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 12 },
+  sheetTitle: { fontSize: 20, fontWeight: '700' },
+  modeToggle: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, marginBottom: 16 },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
+  modeBtnText: { fontSize: 13, fontWeight: '600' },
+  form: { paddingHorizontal: 20 },
+  imgPicker: { height: 140, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 14, overflow: 'hidden' },
+  previewImg: { width: '100%', height: '100%', borderRadius: 14 },
+  imgPickerText: { fontSize: 13, marginTop: 6 },
+  removeImg: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  input: { borderRadius: 12, borderWidth: 1, padding: 14, fontSize: 15, marginBottom: 10 },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  priceLabel: { fontSize: 22, fontWeight: '700' },
+  priceInput: { flex: 1, borderRadius: 12, borderWidth: 1, padding: 14, fontSize: 22, fontWeight: '700' },
+  itemsSection: { marginBottom: 10 },
+  itemsLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8 },
+  addItemRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  itemInput: { flex: 1, borderRadius: 12, borderWidth: 1, padding: 14, fontSize: 14 },
+  addItemBtn: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  itemTag: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, borderRadius: 10, borderWidth: 1, marginBottom: 6 },
+  itemTagText: { fontSize: 14 },
+  postBtn: { marginHorizontal: 20, marginTop: 16, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  postBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  createBtn: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });

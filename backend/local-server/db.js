@@ -369,6 +369,46 @@ export async function initDB() {
     )
   `);
 
+  // Skill deals (skills posted for hire)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS skill_deals (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      creator_name TEXT,
+      creator_avatar TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      price REAL NOT NULL DEFAULT 0,
+      icon TEXT DEFAULT '🛠️',
+      image_url TEXT,
+      category TEXT,
+      status TEXT DEFAULT 'active',
+      grab_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Bundles (packaged deals)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS bundles (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      creator_name TEXT,
+      creator_avatar TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      price REAL NOT NULL DEFAULT 0,
+      items TEXT DEFAULT '[]',
+      image_url TEXT,
+      category TEXT,
+      status TEXT DEFAULT 'active',
+      grab_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   saveDB();
   console.log(`📦 Database ready at ${DB_PATH}`);
 }

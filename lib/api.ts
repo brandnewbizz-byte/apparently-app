@@ -5,7 +5,7 @@ const getApiBase = () => {
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_LOCAL_API_URL) {
     return process.env.EXPO_PUBLIC_LOCAL_API_URL;
   }
-  return 'https://late-dodos-wait.loca.lt/api';
+  return 'https://great-cloths-feel.loca.lt/api';
 };
 
 export const LOCAL_API = getApiBase();
@@ -200,6 +200,32 @@ export async function createConnectionRequest(req: any) {
 // ─── Income Sources ───
 export async function createIncomeSource(source: any) {
   return fetchJSON(`${API_BASE}/income-sources`, { method: 'POST', body: JSON.stringify(source) });
+}
+
+// ─── Skill Deals ───
+export async function getSkillDeals() {
+  return fetchJSON(`${API_BASE}/skill-deals`);
+}
+
+export async function createSkillDeal(deal: {
+  creator_id: string; creator_name: string; creator_avatar: string;
+  title: string; description: string; price: number; icon: string;
+  image_url?: string; category?: string;
+}) {
+  return fetchJSON(`${API_BASE}/skill-deals`, { method: 'POST', body: JSON.stringify(deal) });
+}
+
+// ─── Bundles ───
+export async function getBundles() {
+  return fetchJSON(`${API_BASE}/bundles`);
+}
+
+export async function createBundle(bundle: {
+  creator_id: string; creator_name: string; creator_avatar: string;
+  title: string; description: string; price: number;
+  items: string[]; image_url?: string; category?: string;
+}) {
+  return fetchJSON(`${API_BASE}/bundles`, { method: 'POST', body: JSON.stringify(bundle) });
 }
 
 export { DEFAULT_USER_ID };

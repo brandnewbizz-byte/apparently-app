@@ -486,6 +486,36 @@ app.put('/api/connection-requests/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Skill Deals ───
+app.get('/api/skill-deals', (_, res) => {
+  res.json(queryAll("SELECT * FROM skill_deals WHERE status = 'active' ORDER BY created_at DESC"));
+});
+
+app.post('/api/skill-deals', (req, res) => {
+  const s = req.body;
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  execute(`INSERT INTO skill_deals (id, creator_id, creator_name, creator_avatar, title, description, price, icon, image_url, category, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    [id, s.creator_id, s.creator_name, s.creator_avatar, s.title, s.description, s.price, s.icon || '🛠️', s.image_url || null, s.category || null, now, now]);
+  res.status(201).json({ id });
+});
+
+// ─── Bundles ───
+app.get('/api/bundles', (_, res) => {
+  res.json(queryAll("SELECT * FROM bundles WHERE status = 'active' ORDER BY created_at DESC"));
+});
+
+app.post('/api/bundles', (req, res) => {
+  const b = req.body;
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  execute(`INSERT INTO bundles (id, creator_id, creator_name, creator_avatar, title, description, price, items, image_url, category, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    [id, b.creator_id, b.creator_name, b.creator_avatar, b.title, b.description, b.price, JSON.stringify(b.items || []), b.image_url || null, b.category || null, now, now]);
+  res.status(201).json({ id });
+});
+
 // ─── Init & Start ───
 await initDB();
 seedAll();
