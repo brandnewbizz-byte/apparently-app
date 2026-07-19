@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Gift,
+  Handshake,
   MapPin,
   Package,
   X,
@@ -1399,6 +1400,29 @@ export default function HomeScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
+        {/* Quick Swap Access */}
+        <TouchableOpacity
+          style={styles.swapQuickCard}
+          onPress={() => handleNavigate('/(tabs)/swap')}
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={['#7B61FF', '#A855F7']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.swapQuickGradient}
+          >
+            <View style={styles.planDayIcon}>
+              <Handshake size={24} color="#FFF" />
+            </View>
+            <View style={styles.planDayTextContent}>
+              <Text style={styles.planDayTitle}>Swap Gigs</Text>
+              <Text style={styles.planDaySubtitle}>Trade services & earn</Text>
+            </View>
+            <ArrowRight size={22} color="#FFF" />
+          </LinearGradient>
+        </TouchableOpacity>
+
         <View style={styles.lifestyleSection}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
@@ -1671,6 +1695,23 @@ const styles = StyleSheet.create({
   planDaySubtitle: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
+  },
+  swapQuickCard: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#A855F7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  swapQuickGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
   },
   lifestyleSection: {
     marginBottom: 28,

@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Handshake, CalendarDays, User } from 'lucide-react-native';
+import { Home, Newspaper, CalendarDays, User } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -59,14 +59,21 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="swap"
+          name="feed"
           options={{
-            title: 'Swap',
+            title: 'Feed',
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <Handshake size={24} color={color} />
+                <Newspaper size={24} color={color} />
               </View>
             ),
+          }}
+        />
+        <Tabs.Screen
+          name="swap"
+          options={{
+            href: null,
+            title: 'Swap',
           }}
         />
         <Tabs.Screen
