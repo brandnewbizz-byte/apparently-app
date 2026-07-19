@@ -1,5 +1,5 @@
 import { Bookmark, Heart, MessageCircle, Repeat, X } from 'lucide-react-native';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -18,14 +18,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
-import { useSocial } from '@/contexts/SocialContext';
+import { SocialComment, useSocial } from '@/contexts/SocialContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Post, Story, mockPosts, mockStories } from '@/mocks/data';
+import { Post, Story, mockPosts, mockStories, mockUsers } from '@/mocks/data';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MEDIA_HEIGHT = Math.min(SCREEN_WIDTH * 1.12, 520);
 const DOUBLE_TAP_DELAY = 220;
+
+const seededCommentLines = [
+  'This is fire 🔥',
+  'Love how this came out.',
+  'Need more posts like this.',
+  'This caught my eye right away.',
+  'Okay, this is clean.',
+  'Now this is worth commenting on.',
+];
 
 const viewer = {
   id: 'local-viewer',
@@ -36,6 +45,27 @@ const viewer = {
   followersCount: 0,
 };
 
+function buildSeededComments(post: Post): SocialComment[] {
+  if (post.comments <= 0 || post.id.startsWith('local-')) {
+    return [];
+  }
+
+  return mockUsers
+    .filter((user) => user.id !== post.user.id)
+    .slice(0, 2)
+    .map((user, index) => ({
+      id: `seed-${post.id}-${user.id}`,
+      authorId: user.id,
+      authorName: user.name,
+      authorAvatar: user.avatar,
+      text: seededCommentLines[(Number(post.id || '0') + index) % seededCommentLines.length],
+      timestamp: index === 0 ? '1m' : '8m',
+      likes: 0,
+      isLiked: false,
+      replies: [],
+    }));
+}
+
 function StoryCard({ story, colors }: { story: Story; colors: any }) {
   return (
     <TouchableOpacity activeOpacity={0.9} style={[styles.storyCard, { borderColor: colors.border }]}> 
@@ -45,7 +75,7 @@ function StoryCard({ story, colors }: { story: Story; colors: any }) {
         imageStyle={styles.storyCardImageInner}
       >
         <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.72)']} style={styles.storyCardOverlay}>
-          <View style={[styles.storyCardBadge, { backgroundColor: story.viewed ? 'rgba(255,255,255,0.18)' : '#1F8BFF' }]}>
+          <View style={[styles.storyCardBadge, { backgroundColor: story.viewed ? 'rgba(255,255,255,0.18)' : '#1F8BFF' }]}> 
             <Text style={styles.storyCardBadgeText}>{story.viewed ? 'Seen' : 'Live now'}</Text>
           </View>
           <View style={styles.storyCardFooter}>
@@ -92,26 +122,65 @@ function ActionButton({
   );
 }
 
+function CommentPreview({
+  colors,
+  comments,
+  commentCount,
+  onPress,
+}: {
+  colors: any;
+  comments: SocialComment[];
+  commentCount: number;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity activeOpacity={0.82} onPress={onPress} style={styles.commentPreviewBlock}>
+      <Text style={[styles.commentPreviewHeading, { color: colors.textSecondary }]}>Comments</Text>
+      {comments.length > 0 ? (
+        comments.slice(0, 2).map((comment) => (
+          <View key={comment.id} style={styles.commentPreviewRow}>
+            <Text style={[styles.commentPreviewAuthor, { color: colors.text }]}>{comment.authorName}</Text>
+            <Text style={[styles.commentPreviewText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {' '}{comment.text}
+            </Text>
+          </View>
+        ))
+      ) : (
+        <Text style={[styles.commentPreviewEmpty, { color: colors.textTertiary }]}>Be the first to comment.</Text>
+      )}
+      <Text style={[styles.commentPreviewFooter, { color: colors.textTertiary }]}>
+        {commentCount > 0 ? `View all ${commentCount} comments` : 'Tap to open comments'}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 function FeedCard({
   post,
   colors,
   liked,
   saved,
   likeCount,
+  commentCount,
+  comments,
   onToggleLike,
   onQuickLike,
   onToggleSave,
   onOpen,
+  onCommentPress,
 }: {
   post: Post;
   colors: any;
   liked: boolean;
   saved: boolean;
   likeCount: number;
+  commentCount: number;
+  comments: SocialComment[];
   onToggleLike: () => void;
   onQuickLike: () => void;
   onToggleSave: () => void;
   onOpen: () => void;
+  onCommentPress: () => void;
 }) {
   const hasMedia = Boolean(post.imageUrl);
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,7 +224,7 @@ function FeedCard({
             imageStyle={styles.feedMediaImage}
           >
             <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.18)']} style={styles.feedMediaOverlay}>
-              <View style={[styles.mediaHint, { backgroundColor: 'rgba(10,10,10,0.58)' }]}>
+              <View style={[styles.mediaHint, { backgroundColor: 'rgba(10,10,10,0.58)' }]}> 
                 <Text style={styles.mediaHintText}>Tap to open • double tap to like</Text>
               </View>
             </LinearGradient>
@@ -185,8 +254,9 @@ function FeedCard({
             icon={<Heart size={18} color={liked ? colors.accent : colors.textSecondary} fill={liked ? colors.accent : 'none'} />}
           />
           <ActionButton
-            count={post.comments}
+            count={commentCount}
             colors={colors}
+            onPress={onCommentPress}
             icon={<MessageCircle size={18} color={colors.textSecondary} />}
           />
           <ActionButton
@@ -208,6 +278,13 @@ function FeedCard({
             <Bookmark size={18} color={saved ? colors.accent : colors.textSecondary} fill={saved ? colors.accent : 'none'} />
           </TouchableOpacity>
         </View>
+
+        <CommentPreview
+          colors={colors}
+          comments={comments}
+          commentCount={commentCount}
+          onPress={onCommentPress}
+        />
       </View>
     </View>
   );
@@ -219,6 +296,13 @@ function ViewerSlide({
   liked,
   saved,
   likeCount,
+  commentCount,
+  comments,
+  commentDraft,
+  focusComposer,
+  onChangeComment,
+  onSubmitComment,
+  onFocusComment,
   onToggleLike,
   onToggleSave,
   index,
@@ -229,17 +313,35 @@ function ViewerSlide({
   liked: boolean;
   saved: boolean;
   likeCount: number;
+  commentCount: number;
+  comments: SocialComment[];
+  commentDraft: string;
+  focusComposer: boolean;
+  onChangeComment: (text: string) => void;
+  onSubmitComment: () => void;
+  onFocusComment: () => void;
   onToggleLike: () => void;
   onToggleSave: () => void;
   index: number;
   total: number;
 }) {
   const hasMedia = Boolean(post.imageUrl);
+  const inputRef = useRef<TextInput | null>(null);
+
+  useEffect(() => {
+    if (!focusComposer) return;
+
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 260);
+
+    return () => clearTimeout(timer);
+  }, [focusComposer]);
 
   return (
     <View style={[styles.viewerSlide, { height: SCREEN_HEIGHT }]}> 
       <View style={styles.viewerMetaTop}>
-        <View style={[styles.viewerCounter, { backgroundColor: 'rgba(12,12,12,0.54)' }]}>
+        <View style={[styles.viewerCounter, { backgroundColor: 'rgba(12,12,12,0.54)' }]}> 
           <Text style={styles.viewerCounterText}>{index + 1} / {total}</Text>
         </View>
       </View>
@@ -253,7 +355,7 @@ function ViewerSlide({
           </LinearGradient>
         )}
 
-        <View style={[styles.viewerDetailsCard, { backgroundColor: 'rgba(10,10,10,0.72)', borderColor: 'rgba(255,255,255,0.08)' }]}>
+        <View style={[styles.viewerDetailsCard, { backgroundColor: 'rgba(10,10,10,0.72)', borderColor: 'rgba(255,255,255,0.08)' }]}> 
           <View style={styles.viewerAuthorRow}>
             <Image source={{ uri: post.user.avatar }} style={styles.viewerAuthorAvatar} />
             <View style={styles.viewerAuthorTextWrap}>
@@ -261,24 +363,26 @@ function ViewerSlide({
               <Text style={styles.viewerAuthorMeta}>@{post.user.username} • {post.timestamp}</Text>
             </View>
           </View>
+
           <Text style={styles.viewerCopy}>{post.content}</Text>
 
           <View style={styles.viewerActions}>
             <ActionButton
               count={likeCount}
               active={liked}
-              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)', accent: '#4AA8FF' }}
               onPress={onToggleLike}
               icon={<Heart size={18} color={liked ? '#4AA8FF' : 'rgba(255,255,255,0.8)'} fill={liked ? '#4AA8FF' : 'none'} />}
             />
             <ActionButton
-              count={post.comments}
-              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              count={commentCount}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)', accent: '#4AA8FF' }}
+              onPress={onFocusComment}
               icon={<MessageCircle size={18} color={'rgba(255,255,255,0.8)'} />}
             />
             <ActionButton
               count={post.shares}
-              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
+              colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)', accent: '#4AA8FF' }}
               icon={<Repeat size={18} color={'rgba(255,255,255,0.8)'} />}
             />
             <TouchableOpacity
@@ -296,6 +400,47 @@ function ViewerSlide({
             </TouchableOpacity>
           </View>
 
+          <View style={styles.viewerCommentsSection}>
+            <View style={styles.viewerCommentsHeader}>
+              <Text style={styles.viewerCommentsTitle}>Comments</Text>
+              <Text style={styles.viewerCommentsMeta}>{commentCount > 0 ? `${commentCount} total` : 'No comments yet'}</Text>
+            </View>
+
+            {comments.length > 0 ? (
+              comments.slice(0, 3).map((comment) => (
+                <View key={comment.id} style={styles.viewerCommentRow}>
+                  <Image source={{ uri: comment.authorAvatar }} style={styles.viewerCommentAvatar} />
+                  <View style={styles.viewerCommentTextWrap}>
+                    <Text style={styles.viewerCommentLine}>
+                      <Text style={styles.viewerCommentAuthor}>{comment.authorName}</Text>
+                      <Text style={styles.viewerCommentBody}> {comment.text}</Text>
+                    </Text>
+                    <Text style={styles.viewerCommentTime}>{comment.timestamp}</Text>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.viewerCommentEmpty}>No comments yet, start the conversation.</Text>
+            )}
+
+            <View style={styles.viewerCommentComposer}>
+              <TextInput
+                ref={inputRef}
+                value={commentDraft}
+                onChangeText={onChangeComment}
+                placeholder="Write a comment..."
+                placeholderTextColor="rgba(255,255,255,0.45)"
+                style={styles.viewerCommentInput}
+                returnKeyType="send"
+                onSubmitEditing={onSubmitComment}
+                autoFocus={focusComposer}
+              />
+              <TouchableOpacity activeOpacity={0.86} onPress={onSubmitComment} style={styles.viewerCommentSend}>
+                <Text style={styles.viewerCommentSendText}>Send</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <Text style={styles.viewerSwipeHint}>Swipe up for the next post</Text>
         </View>
       </View>
@@ -307,7 +452,7 @@ export default function FeedScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { hideTabBar, showTabBar } = useTabBar();
-  const { getAllPosts, getAllStories, createPost } = useSocial();
+  const { getAllPosts, getAllStories, createPost, getComments, addComment } = useSocial();
 
   const [draft, setDraft] = useState('');
   const [localPosts, setLocalPosts] = useState<Post[]>([]);
@@ -315,6 +460,8 @@ export default function FeedScreen() {
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [viewerPostId, setViewerPostId] = useState<string | null>(null);
+  const [focusCommentPostId, setFocusCommentPostId] = useState<string | null>(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const lastOffsetRef = useRef(0);
 
   const socialPosts = getAllPosts();
@@ -332,6 +479,16 @@ export default function FeedScreen() {
   };
 
   const getLikeCount = useCallback((post: Post) => likeCounts[post.id] ?? post.likes, [likeCounts]);
+
+  const getDisplayComments = useCallback((post: Post) => {
+    const liveComments = getComments(post.id);
+    return liveComments.length > 0 ? liveComments : buildSeededComments(post);
+  }, [getComments]);
+
+  const getCommentCount = useCallback((post: Post) => {
+    const liveComments = getComments(post.id);
+    return liveComments.length > 0 ? post.comments + liveComments.length : post.comments;
+  }, [getComments]);
 
   const handlePublish = useCallback(() => {
     const clean = draft.trim();
@@ -392,16 +549,37 @@ export default function FeedScreen() {
     impact();
   }, []);
 
-  const openViewer = useCallback((postId: string) => {
+  const openViewer = useCallback((postId: string, focusComments = false) => {
     setViewerPostId(postId);
+    setFocusCommentPostId(focusComments ? postId : null);
     hideTabBar();
     impact(Haptics.ImpactFeedbackStyle.Medium);
   }, [hideTabBar]);
 
   const closeViewer = useCallback(() => {
     setViewerPostId(null);
+    setFocusCommentPostId(null);
     showTabBar();
   }, [showTabBar]);
+
+  const focusCommentInput = useCallback((postId: string) => {
+    setFocusCommentPostId(postId);
+    impact(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const updateCommentDraft = useCallback((postId: string, text: string) => {
+    setCommentDrafts((prev) => ({ ...prev, [postId]: text }));
+  }, []);
+
+  const submitComment = useCallback((post: Post) => {
+    const value = (commentDrafts[post.id] ?? '').trim();
+    if (!value) return;
+
+    addComment(post.id, value);
+    setCommentDrafts((prev) => ({ ...prev, [post.id]: '' }));
+    setFocusCommentPostId(post.id);
+    impact(Haptics.ImpactFeedbackStyle.Medium);
+  }, [addComment, commentDrafts]);
 
   const header = (
     <View>
@@ -413,7 +591,7 @@ export default function FeedScreen() {
           <View style={styles.headerCopyWrap}>
             <Text style={[styles.headerEyebrow, { color: colors.textSecondary }]}>SOCIAL FEED</Text>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Pulse Board</Text>
-            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Big media, familiar actions, and swipe-through browsing.</Text>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Big media, familiar actions, and comments that open ready to type.</Text>
           </View>
           <View style={[styles.headerBadge, { backgroundColor: colors.accentGlow, borderColor: colors.accent }]}> 
             <Text style={[styles.headerBadgeText, { color: colors.accent }]}>Live</Text>
@@ -461,7 +639,7 @@ export default function FeedScreen() {
                 </View>
               ))}
             </View>
-            <TouchableOpacity activeOpacity={0.88} onPress={handlePublish} style={[styles.publishButton, { backgroundColor: colors.text }]}>
+            <TouchableOpacity activeOpacity={0.88} onPress={handlePublish} style={[styles.publishButton, { backgroundColor: colors.text }]}> 
               <Text style={[styles.publishButtonText, { color: colors.background }]}>Post</Text>
             </TouchableOpacity>
           </View>
@@ -483,7 +661,7 @@ export default function FeedScreen() {
       <View style={styles.sectionWrap}>
         <View style={[styles.sectionHeader, styles.sectionHeaderTight]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Fresh posts</Text>
-          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Single tap opens it, double tap likes it, then swipe up through the feed.</Text>
+          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Single tap opens it, double tap likes it, and comments are ready as soon as you tap in.</Text>
         </View>
       </View>
     </View>
@@ -506,10 +684,13 @@ export default function FeedScreen() {
             liked={Boolean(likedMap[item.id])}
             saved={Boolean(savedMap[item.id])}
             likeCount={getLikeCount(item)}
+            commentCount={getCommentCount(item)}
+            comments={getDisplayComments(item)}
             onToggleLike={() => toggleLike(item)}
             onQuickLike={() => quickLike(item)}
             onToggleSave={() => toggleSave(item.id)}
             onOpen={() => openViewer(item.id)}
+            onCommentPress={() => openViewer(item.id, true)}
           />
         )}
       />
@@ -538,6 +719,13 @@ export default function FeedScreen() {
                 liked={Boolean(likedMap[item.id])}
                 saved={Boolean(savedMap[item.id])}
                 likeCount={getLikeCount(item)}
+                commentCount={getCommentCount(item)}
+                comments={getDisplayComments(item)}
+                commentDraft={commentDrafts[item.id] ?? ''}
+                focusComposer={focusCommentPostId === item.id}
+                onChangeComment={(text) => updateCommentDraft(item.id, text)}
+                onSubmitComment={() => submitComment(item)}
+                onFocusComment={() => focusCommentInput(item.id)}
                 onToggleLike={() => toggleLike(item)}
                 onToggleSave={() => toggleSave(item.id)}
               />
@@ -860,10 +1048,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  actionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
   actionCount: {
     fontSize: 12,
     fontWeight: '700',
@@ -875,6 +1059,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  commentPreviewBlock: {
+    gap: 5,
+  },
+  commentPreviewHeading: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  commentPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  commentPreviewAuthor: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  commentPreviewText: {
+    flex: 1,
+    fontSize: 13,
+  },
+  commentPreviewEmpty: {
+    fontSize: 13,
+  },
+  commentPreviewFooter: {
+    marginTop: 2,
+    fontSize: 12,
   },
   viewerShell: {
     flex: 1,
@@ -973,6 +1183,87 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flexWrap: 'wrap',
+  },
+  viewerCommentsSection: {
+    gap: 10,
+  },
+  viewerCommentsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  viewerCommentsTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  viewerCommentsMeta: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 12,
+  },
+  viewerCommentRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  viewerCommentAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    marginTop: 2,
+  },
+  viewerCommentTextWrap: {
+    flex: 1,
+  },
+  viewerCommentLine: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  viewerCommentAuthor: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  viewerCommentBody: {
+    color: 'rgba(255,255,255,0.88)',
+  },
+  viewerCommentTime: {
+    marginTop: 2,
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+  },
+  viewerCommentEmpty: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 13,
+  },
+  viewerCommentComposer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  viewerCommentInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    color: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+  },
+  viewerCommentSend: {
+    borderRadius: 16,
+    backgroundColor: '#1F8BFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  viewerCommentSendText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   viewerSwipeHint: {
     color: 'rgba(255,255,255,0.6)',
