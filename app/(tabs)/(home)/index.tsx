@@ -426,7 +426,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 2000);
+    }, 800);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentBundle, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
@@ -865,7 +865,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 2000);
+    }, 800);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentSkill, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
@@ -1116,7 +1116,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 2000);
+    }, 800);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentRequest, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
