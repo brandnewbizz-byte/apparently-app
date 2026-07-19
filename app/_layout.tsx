@@ -125,6 +125,14 @@ function RootLayoutNav() {
         animation: 'slide_from_bottom',
       }}
     />
+    <Stack.Screen
+      name="manage"
+      options={{
+        headerShown: false,
+        presentation: 'fullScreenModal',
+        animation: 'slide_from_right',
+      }}
+    />
     </Stack>
   );
 }

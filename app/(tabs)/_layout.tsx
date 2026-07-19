@@ -96,13 +96,6 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="manage"
-          options={{
-            title: 'Manage Deals',
-            tabBarButton: () => null,
-          }}
-        />
-        <Tabs.Screen
           name="profile"
           options={{
             title: 'Profile',

@@ -1662,7 +1662,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleNavigate('/(tabs)/manage')}
+              onPress={() => handleNavigate('/manage')}
               activeOpacity={0.8}
             >
               <BarChart3 size={20} color={colors.text} />
