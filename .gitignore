@@ -43,3 +43,4 @@ yarn-error.*
 rork-eslint.config.js
 core*.db
 logs/
+backend/local-server/*.db
