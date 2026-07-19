@@ -55,7 +55,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="book"
           options={{
-            tabBarButton: () => null,
+            href: null,
           }}
         />
         <Tabs.Screen
@@ -72,8 +72,8 @@ export default function TabLayout() {
         <Tabs.Screen
           name="swap"
           options={{
+            href: null,
             title: 'Swap',
-            tabBarButton: () => null,
           }}
         />
         <Tabs.Screen
@@ -92,13 +92,6 @@ export default function TabLayout() {
           name="inbox"
           options={{
             title: 'Inbox',
-            tabBarButton: () => null,
-          }}
-        />
-        <Tabs.Screen
-          name="manage"
-          options={{
-            title: 'Manage Deals',
             tabBarButton: () => null,
           }}
         />
