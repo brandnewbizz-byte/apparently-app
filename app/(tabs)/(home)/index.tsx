@@ -321,6 +321,13 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   const nextBundle = visibleBundles[1];
   const completedCount = limitedBundles.length - visibleBundles.length;
 
+  // Track view when a new bundle is shown
+  useEffect(() => {
+    if (currentBundle?.id) {
+      localApi.trackDealStat('bundle', currentBundle.id, 'view');
+    }
+  }, [currentBundle?.id]);
+
   useEffect(() => {
     setDismissedIds((prev) => prev.filter((id) => limitedBundles.some((bundle) => bundle.id === id)));
   }, [limitedBundles]);
@@ -365,15 +372,16 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
     if (!currentBundle) return;
 
+    // Track analytics
+    if (action === 'grab') localApi.trackDealStat('bundle', currentBundle.id, 'grab');
+    else if (action === 'skip') localApi.trackDealStat('bundle', currentBundle.id, 'skip');
+
     if (action === 'save') {
       onSave(currentBundle);
-      console.log('Card action:', 'save_bundle', currentBundle.id);
     } else if (action === 'skip') {
       onSkip(currentBundle);
-      console.log('Card action:', 'skip_bundle', currentBundle.id);
     } else {
       onGrab(currentBundle);
-      console.log('Card action:', 'grab_bundle', currentBundle.id);
     }
 
     dismissBundle(currentBundle.id);
@@ -776,6 +784,10 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
   const completedCount = limitedSkills.length - visibleSkills.length;
 
   useEffect(() => {
+    if (currentSkill?.id) localApi.trackDealStat('skill', currentSkill.id, 'view');
+  }, [currentSkill?.id]);
+
+  useEffect(() => {
     setDismissedIds((prev) => prev.filter((id) => limitedSkills.some((skill) => skill.id === id)));
   }, [limitedSkills]);
 
@@ -818,6 +830,9 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
 
   const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
     if (!currentSkill) return;
+
+    if (action === 'grab') localApi.trackDealStat('skill', currentSkill.id, 'grab');
+    else if (action === 'skip') localApi.trackDealStat('skill', currentSkill.id, 'skip');
 
     if (action === 'save') {
       onSave(currentSkill);
@@ -1749,12 +1764,17 @@ export default function HomeScreen() {
                   <Text style={styles.savedBundleBadgeText}>{savedBundles.length}</Text>
                 </View>
               )}
-              <TouchableOpacity
-                style={[styles.createBtn, { backgroundColor: colors.accent }]}
-                onPress={() => { setCreateMode('bundle'); setShowCreateModal(true); }}
-              >
-                <Plus size={14} color="#FFF" />
-              </TouchableOpacity>
+              <View style={styles.createRow}>
+                <TouchableOpacity onPress={() => handleNavigate('/(tabs)/manage')}>
+                  <Text style={[styles.manageLink, { color: colors.accent }]}>Manage</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.createBtn, { backgroundColor: colors.accent }]}
+                  onPress={() => { setCreateMode('bundle'); setShowCreateModal(true); }}
+                >
+                  <Plus size={14} color="#FFF" />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -1779,12 +1799,17 @@ export default function HomeScreen() {
                 <Text style={styles.savedSkillBadgeText}>{savedSkills.length}</Text>
               </View>
             )}
-            <TouchableOpacity
-              style={[styles.createBtn, { backgroundColor: colors.accent }]}
-              onPress={() => { setCreateMode('skill'); setShowCreateModal(true); }}
-            >
-              <Plus size={14} color="#FFF" />
-            </TouchableOpacity>
+            <View style={styles.createRow}>
+              <TouchableOpacity onPress={() => handleNavigate('/(tabs)/manage')}>
+                <Text style={[styles.manageLink, { color: colors.accent }]}>Manage</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.createBtn, { backgroundColor: colors.accent }]}
+                onPress={() => { setCreateMode('skill'); setShowCreateModal(true); }}
+              >
+                <Plus size={14} color="#FFF" />
+              </TouchableOpacity>
+            </View>
           </View>
           <SwipeableSkills
             skills={allSkills}
@@ -2938,4 +2963,6 @@ const creatDealModalStyles = StyleSheet.create({
   postBtn: { marginHorizontal: 20, marginTop: 16, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   postBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   createBtn: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  createRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  manageLink: { fontSize: 12, fontWeight: '600' },
 });

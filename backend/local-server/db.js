@@ -384,6 +384,8 @@ export async function initDB() {
       category TEXT,
       status TEXT DEFAULT 'active',
       grab_count INTEGER DEFAULT 0,
+      view_count INTEGER DEFAULT 0,
+      skip_count INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )
@@ -404,10 +406,18 @@ export async function initDB() {
       category TEXT,
       status TEXT DEFAULT 'active',
       grab_count INTEGER DEFAULT 0,
+      view_count INTEGER DEFAULT 0,
+      skip_count INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Migrate: add tracking columns if missing
+  try { db.run('ALTER TABLE skill_deals ADD COLUMN view_count INTEGER DEFAULT 0'); } catch {}
+  try { db.run('ALTER TABLE skill_deals ADD COLUMN skip_count INTEGER DEFAULT 0'); } catch {}
+  try { db.run('ALTER TABLE bundles ADD COLUMN view_count INTEGER DEFAULT 0'); } catch {}
+  try { db.run('ALTER TABLE bundles ADD COLUMN skip_count INTEGER DEFAULT 0'); } catch {}
 
   saveDB();
   console.log(`📦 Database ready at ${DB_PATH}`);

@@ -487,8 +487,12 @@ app.put('/api/connection-requests/:id', (req, res) => {
 });
 
 // ─── Skill Deals ───
-app.get('/api/skill-deals', (_, res) => {
-  res.json(queryAll("SELECT * FROM skill_deals WHERE status = 'active' ORDER BY created_at DESC"));
+app.get('/api/skill-deals', (req, res) => {
+  const { creator_id } = req.query;
+  const deals = creator_id
+    ? queryAll("SELECT * FROM skill_deals WHERE creator_id = ? ORDER BY created_at DESC", [creator_id])
+    : queryAll("SELECT * FROM skill_deals WHERE status = 'active' ORDER BY created_at DESC");
+  res.json(deals);
 });
 
 app.post('/api/skill-deals', (req, res) => {
@@ -501,9 +505,28 @@ app.post('/api/skill-deals', (req, res) => {
   res.status(201).json({ id });
 });
 
+app.put('/api/skill-deals/:id/stats', (req, res) => {
+  const { field } = req.body; // 'grab', 'skip', 'view'
+  const col = field === 'grab' ? 'grab_count' : field === 'skip' ? 'skip_count' : 'view_count';
+  execute(`UPDATE skill_deals SET ${col} = ${col} + 1, updated_at = ? WHERE id = ?`,
+    [new Date().toISOString(), req.params.id]);
+  res.json({ ok: true });
+});
+
+app.put('/api/skill-deals/:id', (req, res) => {
+  const { title, description, price, status } = req.body;
+  execute('UPDATE skill_deals SET title = COALESCE(?, title), description = COALESCE(?, description), price = COALESCE(?, price), status = COALESCE(?, status), updated_at = ? WHERE id = ?',
+    [title || null, description || null, price || null, status || null, new Date().toISOString(), req.params.id]);
+  res.json({ ok: true });
+});
+
 // ─── Bundles ───
-app.get('/api/bundles', (_, res) => {
-  res.json(queryAll("SELECT * FROM bundles WHERE status = 'active' ORDER BY created_at DESC"));
+app.get('/api/bundles', (req, res) => {
+  const { creator_id } = req.query;
+  const bundles = creator_id
+    ? queryAll("SELECT * FROM bundles WHERE creator_id = ? ORDER BY created_at DESC", [creator_id])
+    : queryAll("SELECT * FROM bundles WHERE status = 'active' ORDER BY created_at DESC");
+  res.json(bundles);
 });
 
 app.post('/api/bundles', (req, res) => {
@@ -514,6 +537,21 @@ app.post('/api/bundles', (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
     [id, b.creator_id, b.creator_name, b.creator_avatar, b.title, b.description, b.price, JSON.stringify(b.items || []), b.image_url || null, b.category || null, now, now]);
   res.status(201).json({ id });
+});
+
+app.put('/api/bundles/:id/stats', (req, res) => {
+  const { field } = req.body;
+  const col = field === 'grab' ? 'grab_count' : field === 'skip' ? 'skip_count' : 'view_count';
+  execute(`UPDATE bundles SET ${col} = ${col} + 1, updated_at = ? WHERE id = ?`,
+    [new Date().toISOString(), req.params.id]);
+  res.json({ ok: true });
+});
+
+app.put('/api/bundles/:id', (req, res) => {
+  const { title, description, price, status, items } = req.body;
+  execute('UPDATE bundles SET title = COALESCE(?, title), description = COALESCE(?, description), price = COALESCE(?, price), status = COALESCE(?, status), items = COALESCE(?, items), updated_at = ? WHERE id = ?',
+    [title || null, description || null, price || null, status || null, items ? JSON.stringify(items) : null, new Date().toISOString(), req.params.id]);
+  res.json({ ok: true });
 });
 
 // ─── Init & Start ───

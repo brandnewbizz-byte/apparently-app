@@ -5,7 +5,7 @@ const getApiBase = () => {
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_LOCAL_API_URL) {
     return process.env.EXPO_PUBLIC_LOCAL_API_URL;
   }
-  return 'https://great-cloths-feel.loca.lt/api';
+  return 'https://plain-icons-yell.loca.lt/api';
 };
 
 export const LOCAL_API = getApiBase();
@@ -203,8 +203,9 @@ export async function createIncomeSource(source: any) {
 }
 
 // ─── Skill Deals ───
-export async function getSkillDeals() {
-  return fetchJSON(`${API_BASE}/skill-deals`);
+export async function getSkillDeals(creatorId?: string) {
+  const url = creatorId ? `${API_BASE}/skill-deals?creator_id=${encodeURIComponent(creatorId)}` : `${API_BASE}/skill-deals`;
+  return fetchJSON(url);
 }
 
 export async function createSkillDeal(deal: {
@@ -215,9 +216,22 @@ export async function createSkillDeal(deal: {
   return fetchJSON(`${API_BASE}/skill-deals`, { method: 'POST', body: JSON.stringify(deal) });
 }
 
+export async function trackDealStat(type: 'skill' | 'bundle', id: string, field: 'grab' | 'skip' | 'view') {
+  return fetchJSON(`${API_BASE}/${type === 'skill' ? 'skill-deals' : 'bundles'}/${id}/stats`, {
+    method: 'PUT', body: JSON.stringify({ field }),
+  }).catch(() => {});
+}
+
+export async function updateDeal(type: 'skill' | 'bundle', id: string, data: any) {
+  return fetchJSON(`${API_BASE}/${type === 'skill' ? 'skill-deals' : 'bundles'}/${id}`, {
+    method: 'PUT', body: JSON.stringify(data),
+  });
+}
+
 // ─── Bundles ───
-export async function getBundles() {
-  return fetchJSON(`${API_BASE}/bundles`);
+export async function getBundles(creatorId?: string) {
+  const url = creatorId ? `${API_BASE}/bundles?creator_id=${encodeURIComponent(creatorId)}` : `${API_BASE}/bundles`;
+  return fetchJSON(url);
 }
 
 export async function createBundle(bundle: {
