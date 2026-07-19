@@ -157,33 +157,6 @@ const styles = StyleSheet.create({
   },
 });
 
-function CrashGuard({ children }: { children: React.ReactNode }) {
-  const [error, setError] = React.useState<string | null>(null);
-  
-  useEffect(() => {
-    // Unhandled promise rejections
-    const handler = (e: PromiseRejectionEvent) => {
-      console.error('[CrashGuard] Unhandled rejection:', e.reason);
-      setError(String(e.reason));
-    };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('unhandledrejection', handler as any);
-      return () => window.removeEventListener('unhandledrejection', handler as any);
-    }
-  }, []);
-
-  if (error) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 }}>Startup Error</Text>
-        <Text style={{ color: '#999', fontSize: 14, textAlign: 'center' }}>{error}</Text>
-      </View>
-    );
-  }
-  
-  return <>{children}</>;
-}
-
 class ProviderErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -230,7 +203,6 @@ export default function RootLayout() {
 
   return (
     <ProviderErrorBoundary>
-      <CrashGuard>
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView style={{ flex: 1 }}>
@@ -264,7 +236,6 @@ export default function RootLayout() {
             </GestureHandlerRootView>
           </QueryClientProvider>
         </trpc.Provider>
-      </CrashGuard>
-    </ProviderErrorBoundary>
+      </ProviderErrorBoundary>
   );
 }
