@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -161,16 +160,7 @@ const styles = StyleSheet.create({
 export default function RootLayout() {
   useEffect(() => {
     SplashScreen.hideAsync();
-    console.log('Cleanup done: Twilio/Gmail/live removed');
-
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }) => {
-        console.log('[Supabase] Connected. Session:', session ? 'Active' : 'None');
-      })
-      .catch((e: unknown) => {
-        console.log('[Supabase] getSession failed:', e);
-      });
+    console.log('[Root] DEV MODE — Supabase/auth disabled, navigating directly to tabs');
   }, []);
 
   return (

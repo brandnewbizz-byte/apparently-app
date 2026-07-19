@@ -63,7 +63,7 @@ const defaultData: OnboardingData = {
   goals: [],
   priorities: [],
   location: '',
-  completed: false,
+  completed: true, // DEV MODE: skip onboarding
   personalization: defaultPersonalization,
   profile: defaultProfile,
 };

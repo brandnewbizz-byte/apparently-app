@@ -26,10 +26,23 @@ interface AuthState {
 const PROFILE_CACHE_KEY = 'apparently_user_profile_cache_v3';
 
 
+const dummyUser: UserProfile = {
+  id: 'dev-user',
+  fullName: 'Developer',
+  username: 'dev',
+  phone: null,
+  email: 'dev@localhost',
+  avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=dev-user',
+};
+
+const devSession = {
+  user: { id: 'dev-user', email: 'dev@localhost' },
+} as unknown as Session;
+
 const defaultState: AuthState = {
-  session: null,
-  user: null,
-  isAuthenticated: false,
+  session: devSession,
+  user: dummyUser,
+  isAuthenticated: true,
   emailVerificationRequired: false,
   pendingVerificationEmail: null,
 };
@@ -157,54 +170,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   );
 
   useEffect(() => {
-    console.log('[Auth] Initializing Supabase auth listener...');
-
-    supabase.auth
-      .getSession()
-      .then(async ({ data: { session }, error }) => {
-        if (error) {
-          console.error('[Auth] getSession error:', error.message);
-        }
-        console.log('[Auth] Initial session:', session ? 'exists' : 'none');
-        await setSessionState(session);
-        setIsLoading(false);
-      })
-      .catch((e) => {
-        console.error('[Auth] getSession exception:', e);
-        setIsLoading(false);
-      });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[Auth] Auth state changed:', event, session ? 'session exists' : 'no session');
-
-      if (event === 'SIGNED_OUT') {
-        setProfileNeedsName(false);
-        setEmailVerificationRequired(false);
-        setPendingVerificationEmail(null);
-        setState(defaultState);
-        try {
-          await AsyncStorage.removeItem(PROFILE_CACHE_KEY);
-        } catch (e) {
-          console.error('[Auth] Failed to clear cached profile:', e);
-        }
-        queryClient.clear();
-        setIsLoading(false);
-        return;
-      }
-
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-        await setSessionState(session);
-      }
-
-      setIsLoading(false);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [queryClient, setSessionState]);
+    console.log('[Auth] DEV MODE — skipping Supabase auth, always authenticated');
+    setIsLoading(false);
+  }, []);
 
   const checkUsernameAvailable = async (username: string): Promise<boolean> => {
     try {
