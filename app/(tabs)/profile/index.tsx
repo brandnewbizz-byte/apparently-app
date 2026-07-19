@@ -209,9 +209,9 @@ export default function ProfileScreen() {
     }, 1500);
   }, []);
 
-  const userName = profile?.full_name || profile?.username || 'User';
-  const userAvatar = profile?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
-  const userBio = profile?.bio || 'Ready to grab opportunities!';
+  const userName = user?.fullName || user?.username || 'User';
+  const userAvatar = user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
+  const userBio = 'Ready to grab opportunities!';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
