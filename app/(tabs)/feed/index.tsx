@@ -25,6 +25,7 @@ import { Post, Story, mockPosts, mockStories } from '@/mocks/data';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MEDIA_HEIGHT = Math.min(SCREEN_WIDTH * 1.12, 520);
+const DOUBLE_TAP_DELAY = 220;
 
 const viewer = {
   id: 'local-viewer',
@@ -62,14 +63,12 @@ function StoryCard({ story, colors }: { story: Story; colors: any }) {
 
 function ActionButton({
   icon,
-  label,
   count,
   active,
   colors,
   onPress,
 }: {
   icon: React.ReactNode;
-  label: string;
   count: number;
   active?: boolean;
   colors: any;
@@ -88,7 +87,6 @@ function ActionButton({
       ]}
     >
       {icon}
-      <Text style={[styles.actionLabel, { color: active ? colors.accent : colors.text }]}>{label}</Text>
       <Text style={[styles.actionCount, { color: active ? colors.accent : colors.textSecondary }]}>{count}</Text>
     </TouchableOpacity>
   );
@@ -101,6 +99,7 @@ function FeedCard({
   saved,
   likeCount,
   onToggleLike,
+  onQuickLike,
   onToggleSave,
   onOpen,
 }: {
@@ -110,10 +109,26 @@ function FeedCard({
   saved: boolean;
   likeCount: number;
   onToggleLike: () => void;
+  onQuickLike: () => void;
   onToggleSave: () => void;
   onOpen: () => void;
 }) {
   const hasMedia = Boolean(post.imageUrl);
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSurfacePress = useCallback(() => {
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+      onQuickLike();
+      return;
+    }
+
+    tapTimeoutRef.current = setTimeout(() => {
+      tapTimeoutRef.current = null;
+      onOpen();
+    }, DOUBLE_TAP_DELAY);
+  }, [onOpen, onQuickLike]);
 
   return (
     <View style={[styles.feedCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
@@ -133,7 +148,7 @@ function FeedCard({
       </View>
 
       {hasMedia ? (
-        <TouchableOpacity activeOpacity={0.95} onPress={onOpen} style={styles.mediaTapWrap}>
+        <TouchableOpacity activeOpacity={0.95} onPress={handleSurfacePress} style={styles.mediaTapWrap}>
           <ImageBackground
             source={{ uri: post.imageUrl }}
             style={styles.feedMedia}
@@ -141,7 +156,7 @@ function FeedCard({
           >
             <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.18)']} style={styles.feedMediaOverlay}>
               <View style={[styles.mediaHint, { backgroundColor: 'rgba(10,10,10,0.58)' }]}>
-                <Text style={styles.mediaHintText}>Swipe mode</Text>
+                <Text style={styles.mediaHintText}>Tap to open • double tap to like</Text>
               </View>
             </LinearGradient>
           </ImageBackground>
@@ -149,7 +164,7 @@ function FeedCard({
       ) : (
         <TouchableOpacity
           activeOpacity={0.92}
-          onPress={onOpen}
+          onPress={handleSurfacePress}
           style={[styles.textPanel, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
         >
           <Text style={[styles.textPanelCopy, { color: colors.text }]} numberOfLines={6}>{post.content}</Text>
@@ -163,7 +178,6 @@ function FeedCard({
 
         <View style={styles.feedCardActions}>
           <ActionButton
-            label="Like"
             count={likeCount}
             active={liked}
             colors={colors}
@@ -171,13 +185,11 @@ function FeedCard({
             icon={<Heart size={18} color={liked ? colors.accent : colors.textSecondary} fill={liked ? colors.accent : 'none'} />}
           />
           <ActionButton
-            label="Comment"
             count={post.comments}
             colors={colors}
             icon={<MessageCircle size={18} color={colors.textSecondary} />}
           />
           <ActionButton
-            label="Repost"
             count={post.shares}
             colors={colors}
             icon={<Repeat size={18} color={colors.textSecondary} />}
@@ -253,7 +265,6 @@ function ViewerSlide({
 
           <View style={styles.viewerActions}>
             <ActionButton
-              label="Like"
               count={likeCount}
               active={liked}
               colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
@@ -261,13 +272,11 @@ function ViewerSlide({
               icon={<Heart size={18} color={liked ? '#4AA8FF' : 'rgba(255,255,255,0.8)'} fill={liked ? '#4AA8FF' : 'none'} />}
             />
             <ActionButton
-              label="Comment"
               count={post.comments}
               colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
               icon={<MessageCircle size={18} color={'rgba(255,255,255,0.8)'} />}
             />
             <ActionButton
-              label="Repost"
               count={post.shares}
               colors={{ ...colors, backgroundSecondary: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.14)', text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.8)', accentGlow: 'rgba(31,139,255,0.18)' }}
               icon={<Repeat size={18} color={'rgba(255,255,255,0.8)'} />}
@@ -362,6 +371,20 @@ export default function FeedScreen() {
       [post.id]: (prev[post.id] ?? post.likes) + (nextLiked ? 1 : -1),
     }));
     impact();
+  }, [likedMap]);
+
+  const quickLike = useCallback((post: Post) => {
+    if (likedMap[post.id]) {
+      impact(Haptics.ImpactFeedbackStyle.Light);
+      return;
+    }
+
+    setLikedMap((prev) => ({ ...prev, [post.id]: true }));
+    setLikeCounts((prev) => ({
+      ...prev,
+      [post.id]: (prev[post.id] ?? post.likes) + 1,
+    }));
+    impact(Haptics.ImpactFeedbackStyle.Medium);
   }, [likedMap]);
 
   const toggleSave = useCallback((postId: string) => {
@@ -460,7 +483,7 @@ export default function FeedScreen() {
       <View style={styles.sectionWrap}>
         <View style={[styles.sectionHeader, styles.sectionHeaderTight]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Fresh posts</Text>
-          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Tap a post, then swipe up to move through the feed.</Text>
+          <Text style={[styles.sectionCaption, { color: colors.textSecondary }]}>Single tap opens it, double tap likes it, then swipe up through the feed.</Text>
         </View>
       </View>
     </View>
@@ -484,6 +507,7 @@ export default function FeedScreen() {
             saved={Boolean(savedMap[item.id])}
             likeCount={getLikeCount(item)}
             onToggleLike={() => toggleLike(item)}
+            onQuickLike={() => quickLike(item)}
             onToggleSave={() => toggleSave(item.id)}
             onOpen={() => openViewer(item.id)}
           />
