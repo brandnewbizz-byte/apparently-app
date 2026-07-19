@@ -5,7 +5,7 @@ const getApiBase = () => {
   if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_LOCAL_API_URL) {
     return process.env.EXPO_PUBLIC_LOCAL_API_URL;
   }
-  return 'https://seven-waves-sell.loca.lt/api';
+  return 'https://late-dodos-wait.loca.lt/api';
 };
 
 export const LOCAL_API = getApiBase();
