@@ -3,6 +3,12 @@
     "name": "apparently app real app",
     "slug": "apparently-app-real-app",
     "version": "1.0.0",
+    "owner": "sharehost",
+    "extra": {
+      "eas": {
+        "projectId": "54d49c1b-d62e-4dc7-b463-6047ebd9845f"
+      }
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
