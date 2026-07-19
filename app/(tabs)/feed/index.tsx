@@ -33,6 +33,21 @@ const INSTAGRAM_PHOTO_HEIGHT = Math.round(FEED_MEDIA_WIDTH * 1.25);
 const INSTAGRAM_REEL_HEIGHT = Math.min(Math.round(FEED_MEDIA_WIDTH * (16 / 9)), Math.round(SCREEN_HEIGHT * 0.82));
 const DOUBLE_TAP_DELAY = 220;
 
+type FeedItem = Post & {
+  imageWidth?: number;
+  imageHeight?: number;
+  imageAspectRatio?: number;
+  renderFullImage?: boolean;
+  isStory?: boolean;
+};
+
+type SelectedImageState = {
+  uri: string;
+  width?: number;
+  height?: number;
+  aspectRatio?: number;
+};
+
 const viewer = {
   id: 'local-viewer',
   name: 'You',
@@ -74,8 +89,33 @@ function isReelStyle(post: Post) {
   return Boolean(candidate.videoUrl || candidate.isVideo || candidate.mediaType === 'video' || candidate.mediaType === 'reel');
 }
 
-function getFeedMediaHeight(post: Post) {
-  return isReelStyle(post) ? INSTAGRAM_REEL_HEIGHT : INSTAGRAM_PHOTO_HEIGHT;
+function shouldRenderFullImage(post: FeedItem) {
+  return Boolean(
+    post.renderFullImage ||
+    post.imageUrl?.startsWith('data:') ||
+    post.imageUrl?.startsWith('file:')
+  );
+}
+
+function getFeedMediaHeight(post: FeedItem) {
+  if (isReelStyle(post)) return INSTAGRAM_REEL_HEIGHT;
+  if (shouldRenderFullImage(post) && post.imageAspectRatio && post.imageAspectRatio > 0) {
+    const rawHeight = FEED_MEDIA_WIDTH / post.imageAspectRatio;
+    return Math.round(Math.min(Math.max(rawHeight, 220), SCREEN_HEIGHT * 0.74));
+  }
+  return INSTAGRAM_PHOTO_HEIGHT;
+}
+
+function toStoredImage(asset: ImagePicker.ImagePickerAsset): SelectedImageState {
+  const mimeType = asset.mimeType || 'image/jpeg';
+  const uri = asset.base64 ? `data:${mimeType};base64,${asset.base64}` : asset.uri;
+  const aspectRatio = asset.width && asset.height ? asset.width / asset.height : undefined;
+  return {
+    uri,
+    width: asset.width,
+    height: asset.height,
+    aspectRatio,
+  };
 }
 
 function timeAgoLabel(date: Date): string {
@@ -365,10 +405,10 @@ function CreatePostModal({
   visible, colors, onClose, onPublish,
 }: {
   visible: boolean; colors: any; onClose: () => void;
-  onPublish: (content: string, imageUri?: string, postMode?: PostMode) => void;
+  onPublish: (content: string, image?: SelectedImageState, postMode?: PostMode) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SelectedImageState | null>(null);
   const [caption, setCaption] = useState('');
   const [postMode, setPostMode] = useState<PostMode>('feed');
   const [isUploading, setIsUploading] = useState(false);
@@ -380,28 +420,27 @@ function CreatePostModal({
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to your photo library in Settings.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: postMode === 'story' ? [9, 16] : [4, 5],
+      allowsEditing: false,
+      base64: true,
       quality: 0.9,
     });
-    if (!result.canceled && result.assets?.[0]) setSelectedImage(result.assets[0].uri);
-  }, [postMode]);
+    if (!result.canceled && result.assets?.[0]) setSelectedImage(toStoredImage(result.assets[0]));
+  }, []);
 
   const takePhoto = useCallback(async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow camera access in Settings.'); return; }
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: postMode === 'story' ? [9, 16] : [4, 5],
+      allowsEditing: false,
+      base64: true,
       quality: 0.9,
     });
-    if (!result.canceled && result.assets?.[0]) setSelectedImage(result.assets[0].uri);
-  }, [postMode]);
+    if (!result.canceled && result.assets?.[0]) setSelectedImage(toStoredImage(result.assets[0]));
+  }, []);
 
   const handlePublish = useCallback(() => {
     if (!caption.trim() && !selectedImage) return;
     setIsUploading(true);
-    // Brief delay so user sees the spinner
     setTimeout(() => {
       onPublish(caption.trim(), selectedImage ?? undefined, postMode);
       onClose();
@@ -488,14 +527,18 @@ function CreatePostModal({
             {selectedImage ? (
               <View style={styles.createImagePreviewWrap}>
                 <Image
-                  source={{ uri: selectedImage }}
+                  source={{ uri: selectedImage.uri }}
                   style={[
                     styles.createImagePreview,
                     postMode === 'story'
                       ? { aspectRatio: 9 / 16, maxHeight: SCREEN_HEIGHT * 0.55 }
-                      : { aspectRatio: 4 / 5, maxHeight: SCREEN_HEIGHT * 0.5 },
+                      : {
+                          aspectRatio: selectedImage.aspectRatio || 1,
+                          maxHeight: SCREEN_HEIGHT * 0.55,
+                          minHeight: 220,
+                        },
                   ]}
-                  resizeMode="cover"
+                  resizeMode="contain"
                 />
                 <TouchableOpacity style={styles.createRemoveImage} onPress={() => setSelectedImage(null)}>
                   <X size={16} color="#FFF" />
@@ -535,16 +578,39 @@ function FeedPost({
   post, colors, liked, saved, likeCount, commentCount, comments, flashHeart,
   onToggleLike, onQuickLike, onOpenComments, onToggleSave, onShare, onMediaTap, onShowMore,
 }: {
-  post: Post; colors: any; liked: boolean; saved: boolean;
+  post: FeedItem; colors: any; liked: boolean; saved: boolean;
   likeCount: number; commentCount: number; comments: SocialComment[]; flashHeart: boolean;
   onToggleLike: () => void; onQuickLike: () => void; onOpenComments: () => void;
   onToggleSave: () => void; onShare: () => void; onMediaTap: () => void;
   onShowMore: () => void;
 }) {
   const hasMedia = Boolean(post.imageUrl);
-  const mediaHeight = getFeedMediaHeight(post);
+  const [resolvedAspectRatio, setResolvedAspectRatio] = useState<number | null>(post.imageAspectRatio ?? null);
+  const preserveFullImage = shouldRenderFullImage(post);
+  const effectivePost = useMemo(() => (
+    resolvedAspectRatio ? { ...post, imageAspectRatio: resolvedAspectRatio } : post
+  ), [post, resolvedAspectRatio]);
+  const mediaHeight = getFeedMediaHeight(effectivePost);
   const reelStyle = isReelStyle(post);
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!post.imageUrl || post.imageAspectRatio) {
+      setResolvedAspectRatio(post.imageAspectRatio ?? null);
+      return;
+    }
+    let cancelled = false;
+    Image.getSize(
+      post.imageUrl,
+      (width, height) => {
+        if (!cancelled && width > 0 && height > 0) setResolvedAspectRatio(width / height);
+      },
+      () => {
+        if (!cancelled) setResolvedAspectRatio(null);
+      }
+    );
+    return () => { cancelled = true; };
+  }, [post.imageAspectRatio, post.imageUrl]);
 
   const handleMediaTap = useCallback(() => {
     if (tapTimeoutRef.current) {
@@ -577,8 +643,16 @@ function FeedPost({
       </View>
 
       {hasMedia ? (
-        <Pressable onPress={handleMediaTap} style={[styles.mediaWrap, reelStyle && styles.reelMediaWrap]}>
-          <Image source={{ uri: post.imageUrl }} style={[styles.postMedia, { height: mediaHeight }]} resizeMode="cover" />
+        <Pressable onPress={handleMediaTap} style={[
+          styles.mediaWrap,
+          reelStyle && styles.reelMediaWrap,
+          preserveFullImage && styles.fullImageWrap,
+        ]}>
+          <Image
+            source={{ uri: post.imageUrl }}
+            style={[styles.postMedia, { height: mediaHeight }]}
+            resizeMode={preserveFullImage ? 'contain' : 'cover'}
+          />
           {flashHeart ? (
             <View style={styles.heartFlashWrap} pointerEvents="none">
               <Heart size={84} color="#FFFFFF" fill="#FFFFFF" />
@@ -650,7 +724,7 @@ export default function FeedScreen() {
   const { getAllPosts, getAllStories, createPost, getComments, addComment, sharePost } = useSocial();
 
   const [draft, setDraft] = useState('');
-  const [localPosts, setLocalPosts] = useState<Post[]>([]);
+  const [localPosts, setLocalPosts] = useState<FeedItem[]>([]);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
@@ -663,9 +737,9 @@ export default function FeedScreen() {
   const [morePostId, setMorePostId] = useState<string | null>(null);
   const lastOffsetRef = useRef(0);
 
-  const socialPosts = getAllPosts();
+  const socialPosts = getAllPosts() as FeedItem[];
   const socialStories = getAllStories();
-  const basePosts = socialPosts.length ? socialPosts : mockPosts;
+  const basePosts = (socialPosts.length ? socialPosts : mockPosts) as FeedItem[];
   const stories = useMemo(() => (socialStories.length ? socialStories : mockStories).slice(0, 10), [socialStories]);
   const posts = useMemo(() => [...localPosts, ...basePosts], [localPosts, basePosts]);
   const activeCommentPost = useMemo(() => posts.find((p) => p.id === commentsPostId) ?? null, [posts, commentsPostId]);
@@ -686,15 +760,24 @@ export default function FeedScreen() {
   }, []);
 
   // ── Publish from composer ──
-  const handleComposerPublish = useCallback((content: string, imageUri?: string, postMode?: 'feed' | 'story') => {
+  const handleComposerPublish = useCallback((content: string, image?: SelectedImageState, postMode?: 'feed' | 'story') => {
     setLocalPosts((prev) => [{
-      id: `local-${Date.now()}`, user: viewer, content,
-      imageUrl: imageUri,
-      timestamp: 'Just now', likes: 0, comments: 0, shares: 0,
+      id: `local-${Date.now()}`,
+      user: viewer,
+      content,
+      imageUrl: image?.uri,
+      imageWidth: image?.width,
+      imageHeight: image?.height,
+      imageAspectRatio: image?.aspectRatio,
+      renderFullImage: Boolean(image?.uri),
+      timestamp: 'Just now',
+      likes: 0,
+      comments: 0,
+      shares: 0,
       isStory: postMode === 'story',
-    } as Post, ...prev]);
+    }, ...prev]);
     setDraft('');
-    createPost(content, imageUri);
+    createPost(content, image?.uri);
     impact(Haptics.ImpactFeedbackStyle.Heavy);
   }, [createPost]);
 
@@ -926,6 +1009,7 @@ const styles = StyleSheet.create({
   postTime: { fontSize: 11, marginTop: 1 },
   postMoreButton: { padding: 4 },
   mediaWrap: { marginHorizontal: 12, borderRadius: 22, overflow: 'hidden' },
+  fullImageWrap: { backgroundColor: '#111111' },
   postMedia: { width: '100%', backgroundColor: '#E5E5E5' },
   reelMediaWrap: { backgroundColor: '#000000' },
   textOnlyCard: { minHeight: 250, marginHorizontal: 12, borderRadius: 22, padding: 22, justifyContent: 'center', overflow: 'hidden' },
@@ -1014,7 +1098,7 @@ const styles = StyleSheet.create({
   createContent: { flex: 1 },
   createScrollContent: { padding: 16, gap: 16 },
   createImagePreviewWrap: { alignSelf: 'center', position: 'relative' },
-  createImagePreview: { width: SCREEN_WIDTH - 32, borderRadius: 18, backgroundColor: '#E5E5E5' },
+  createImagePreview: { width: SCREEN_WIDTH - 32, borderRadius: 18, backgroundColor: '#111111' },
   createRemoveImage: { position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   createPlaceholder: { width: SCREEN_WIDTH - 32, height: SCREEN_HEIGHT * 0.3, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   createPlaceholderIcon: { fontSize: 48 },
