@@ -24,6 +24,7 @@ import {
   Plus,
   Camera,
   ImagePlus,
+  BarChart3,
 } from 'lucide-react-native';
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
@@ -1624,10 +1625,24 @@ export default function HomeScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setShowCreateModal(true)}
+              activeOpacity={0.8}
+            >
+              <Plus size={20} color={colors.accent} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => handleNavigate('/(tabs)/inbox')}
               activeOpacity={0.8}
             >
               <MessageCircle size={20} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => handleNavigate('/(tabs)/manage')}
+              activeOpacity={0.8}
+            >
+              <BarChart3 size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1764,17 +1779,6 @@ export default function HomeScreen() {
                   <Text style={styles.savedBundleBadgeText}>{savedBundles.length}</Text>
                 </View>
               )}
-              <View style={styles.createRow}>
-                <TouchableOpacity onPress={() => handleNavigate('/(tabs)/manage')}>
-                  <Text style={[styles.manageLink, { color: colors.accent }]}>Manage</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.createBtn, { backgroundColor: colors.accent }]}
-                  onPress={() => { setCreateMode('bundle'); setShowCreateModal(true); }}
-                >
-                  <Plus size={14} color="#FFF" />
-                </TouchableOpacity>
-              </View>
             </View>
           </View>
 
@@ -1799,17 +1803,6 @@ export default function HomeScreen() {
                 <Text style={styles.savedSkillBadgeText}>{savedSkills.length}</Text>
               </View>
             )}
-            <View style={styles.createRow}>
-              <TouchableOpacity onPress={() => handleNavigate('/(tabs)/manage')}>
-                <Text style={[styles.manageLink, { color: colors.accent }]}>Manage</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.createBtn, { backgroundColor: colors.accent }]}
-                onPress={() => { setCreateMode('skill'); setShowCreateModal(true); }}
-              >
-                <Plus size={14} color="#FFF" />
-              </TouchableOpacity>
-            </View>
           </View>
           <SwipeableSkills
             skills={allSkills}
