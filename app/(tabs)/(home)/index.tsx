@@ -280,6 +280,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(COOLDOWN_SECONDS);
   const [bundleRound, setBundleRound] = useState(0);
+  const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
@@ -363,6 +364,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   }, [currentBundle, dismissBundle, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
+    if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
     
     Animated.parallel([
@@ -388,33 +390,41 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+  }, [completeAction, grabPreviewActive, swipeAnim.x, opacityAnim, nextCardScale]);
 
   const grabCurrentBundle = useCallback(() => {
-    if (!currentBundle) return;
+    if (!currentBundle || grabPreviewActive) return;
+    setGrabPreviewActive(true);
+    const timeout = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacityAnim, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(swipeAnim.y, {
+          toValue: -30,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.spring(nextCardScale, {
+          toValue: 1,
+          friction: 6,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setGrabPreviewActive(false);
+        completeAction('grab');
+      });
+    }, 2000);
 
-    Animated.parallel([
-      Animated.timing(opacityAnim, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(swipeAnim.y, {
-        toValue: -30,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.spring(nextCardScale, {
-        toValue: 1,
-        friction: 6,
-        useNativeDriver: true,
-      }),
-    ]).start(() => completeAction('grab'));
-  }, [completeAction, currentBundle, nextCardScale, opacityAnim, swipeAnim.y]);
+    return () => clearTimeout(timeout);
+  }, [completeAction, currentBundle, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: () => !grabPreviewActive,
     onMoveShouldSetPanResponder: (_, gestureState) => {
+      if (grabPreviewActive) return false;
       return Math.abs(gestureState.dx) > 2;
     },
     onPanResponderMove: (_, gestureState) => {
@@ -458,7 +468,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
         ]).start();
       }
     },
-  }), [swipeAnim, rotateAnim, nextCardScale, swipeCard]);
+  }), [grabPreviewActive, swipeAnim, rotateAnim, nextCardScale, swipeCard]);
 
   const rotate = rotateAnim.interpolate({
     inputRange: [-1, 0, 1],
@@ -535,6 +545,11 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
           <Bookmark size={32} color="#FFF" />
           <Text style={styles.saveOverlayText}>SAVE</Text>
         </Animated.View>
+        {grabPreviewActive ? (
+          <View style={styles.grabbedOverlay} pointerEvents="none">
+            <Text style={styles.grabbedOverlayText}>GRABBED</Text>
+          </View>
+        ) : null}
         <SwipeBundleCardContent bundle={currentBundle} colors={colors} />
       </Animated.View>
 
@@ -719,6 +734,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(SKILL_COOLDOWN_SECONDS);
   const [skillRound, setSkillRound] = useState(0);
+  const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
@@ -799,6 +815,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
   }, [currentSkill, dismissSkill, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
+    if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
     
     Animated.parallel([
@@ -824,21 +841,28 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+  }, [completeAction, grabPreviewActive, swipeAnim.x, opacityAnim, nextCardScale]);
 
   const grabCurrentSkill = useCallback(() => {
-    if (!currentSkill) return;
+    if (!currentSkill || grabPreviewActive) return;
+    setGrabPreviewActive(true);
+    const timeout = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
+        Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
+      ]).start(() => {
+        setGrabPreviewActive(false);
+        completeAction('grab');
+      });
+    }, 2000);
 
-    Animated.parallel([
-      Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
-      Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
-    ]).start(() => completeAction('grab'));
-  }, [completeAction, currentSkill, nextCardScale, opacityAnim, swipeAnim.y]);
+    return () => clearTimeout(timeout);
+  }, [completeAction, currentSkill, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 2,
+    onStartShouldSetPanResponder: () => !grabPreviewActive,
+    onMoveShouldSetPanResponder: (_, gestureState) => !grabPreviewActive && Math.abs(gestureState.dx) > 2,
     onPanResponderMove: (_, gestureState) => {
       swipeAnim.setValue({ x: gestureState.dx, y: 0 });
       rotateAnim.setValue(gestureState.dx / SCREEN_WIDTH);
@@ -862,7 +886,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
         ]).start();
       }
     },
-  }), [swipeAnim, rotateAnim, nextCardScale, swipeCard]);
+  }), [grabPreviewActive, swipeAnim, rotateAnim, nextCardScale, swipeCard]);
 
   const rotate = rotateAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-10deg', '0deg', '10deg'] });
   const skipOpacity = swipeAnim.x.interpolate({ inputRange: [-SCREEN_WIDTH * 0.3, 0], outputRange: [1, 0], extrapolate: 'clamp' });
@@ -920,6 +944,11 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
           <Bookmark size={24} color="#FFF" />
           <Text style={styles.saveOverlayText}>SAVE</Text>
         </Animated.View>
+        {grabPreviewActive ? (
+          <View style={styles.grabbedOverlay} pointerEvents="none">
+            <Text style={styles.grabbedOverlayText}>GRABBED</Text>
+          </View>
+        ) : null}
         <SkillDealCard skill={currentSkill} colors={colors} />
       </Animated.View>
 
@@ -1003,6 +1032,7 @@ interface SwipeableServiceRequestsProps {
 
 function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: SwipeableServiceRequestsProps) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
+  const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
@@ -1048,6 +1078,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
   }, [currentRequest, dismissRequest, onGrab, onSave, onSkip, resetCard]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
+    if (grabPreviewActive) return;
     const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
     
     Animated.parallel([
@@ -1061,21 +1092,28 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-  }, [completeAction, swipeAnim.x, opacityAnim, nextCardScale]);
+  }, [completeAction, grabPreviewActive, swipeAnim.x, opacityAnim, nextCardScale]);
 
   const grabCurrentRequest = useCallback(() => {
-    if (!currentRequest) return;
+    if (!currentRequest || grabPreviewActive) return;
+    setGrabPreviewActive(true);
+    const timeout = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
+        Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
+      ]).start(() => {
+        setGrabPreviewActive(false);
+        completeAction('grab');
+      });
+    }, 2000);
 
-    Animated.parallel([
-      Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
-      Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
-    ]).start(() => completeAction('grab'));
-  }, [completeAction, currentRequest, nextCardScale, opacityAnim, swipeAnim.y]);
+    return () => clearTimeout(timeout);
+  }, [completeAction, currentRequest, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
 
   const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 2,
+    onStartShouldSetPanResponder: () => !grabPreviewActive,
+    onMoveShouldSetPanResponder: (_, gestureState) => !grabPreviewActive && Math.abs(gestureState.dx) > 2,
     onPanResponderMove: (_, gestureState) => {
       swipeAnim.setValue({ x: gestureState.dx, y: 0 });
       rotateAnim.setValue(gestureState.dx / SCREEN_WIDTH);
@@ -1099,7 +1137,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
         ]).start();
       }
     },
-  }), [swipeAnim, rotateAnim, nextCardScale, swipeCard]);
+  }), [grabPreviewActive, swipeAnim, rotateAnim, nextCardScale, swipeCard]);
 
   const rotate = rotateAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-10deg', '0deg', '10deg'] });
   const skipOpacity = swipeAnim.x.interpolate({ inputRange: [-SCREEN_WIDTH * 0.3, 0], outputRange: [1, 0], extrapolate: 'clamp' });
@@ -1138,6 +1176,11 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
           <Bookmark size={24} color="#FFF" />
           <Text style={styles.saveOverlayText}>SAVE</Text>
         </Animated.View>
+        {grabPreviewActive ? (
+          <View style={styles.grabbedOverlay} pointerEvents="none">
+            <Text style={styles.grabbedOverlayText}>GRABBED</Text>
+          </View>
+        ) : null}
         <ServiceRequestCard request={currentRequest} colors={colors} />
       </Animated.View>
 
@@ -2045,6 +2088,19 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700' as const,
+  },
+  grabbedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  grabbedOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '900' as const,
+    letterSpacing: 1.2,
   },
   swipeHint: {
     flexDirection: 'row',
