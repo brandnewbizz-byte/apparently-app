@@ -371,7 +371,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gestureState) => {
-      return Math.abs(gestureState.dx) > 5;
+      return Math.abs(gestureState.dx) > 2;
     },
     onPanResponderMove: (_, gestureState) => {
       swipeAnim.setValue({ x: gestureState.dx, y: 0 });
@@ -380,27 +380,35 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
       nextCardScale.setValue(0.95 + (0.05 * progress));
     },
     onPanResponderRelease: (_, gestureState) => {
-      const swipeThreshold = SCREEN_WIDTH * 0.25;
-      
-      if (gestureState.dx > swipeThreshold) {
+      const swipeThreshold = SCREEN_WIDTH * 0.2;
+      const velocityThreshold = 0.5;
+
+      // Commit on distance OR fast flick
+      const shouldCommitRight = gestureState.dx > swipeThreshold || (gestureState.dx > 20 && gestureState.vx > velocityThreshold);
+      const shouldCommitLeft = gestureState.dx < -swipeThreshold || (gestureState.dx < -20 && gestureState.vx < -velocityThreshold);
+
+      if (shouldCommitRight) {
         swipeCard('right');
-      } else if (gestureState.dx < -swipeThreshold) {
+      } else if (shouldCommitLeft) {
         swipeCard('left');
       } else {
         Animated.parallel([
           Animated.spring(swipeAnim, {
             toValue: { x: 0, y: 0 },
-            friction: 5,
+            friction: 8,
+            tension: 100,
             useNativeDriver: true,
           }),
           Animated.spring(rotateAnim, {
             toValue: 0,
-            friction: 5,
+            friction: 8,
+            tension: 100,
             useNativeDriver: true,
           }),
           Animated.spring(nextCardScale, {
             toValue: 0.95,
-            friction: 5,
+            friction: 8,
+            tension: 100,
             useNativeDriver: true,
           }),
         ]).start();
@@ -755,7 +763,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 5,
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 2,
     onPanResponderMove: (_, gestureState) => {
       swipeAnim.setValue({ x: gestureState.dx, y: 0 });
       rotateAnim.setValue(gestureState.dx / SCREEN_WIDTH);
@@ -763,16 +771,19 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
       nextCardScale.setValue(0.95 + (0.05 * progress));
     },
     onPanResponderRelease: (_, gestureState) => {
-      const swipeThreshold = SCREEN_WIDTH * 0.25;
-      if (gestureState.dx > swipeThreshold) {
+      const swipeThreshold = SCREEN_WIDTH * 0.2;
+      const velocityThreshold = 0.5;
+      const shouldCommitRight = gestureState.dx > swipeThreshold || (gestureState.dx > 20 && gestureState.vx > velocityThreshold);
+      const shouldCommitLeft = gestureState.dx < -swipeThreshold || (gestureState.dx < -20 && gestureState.vx < -velocityThreshold);
+      if (shouldCommitRight) {
         swipeCard('right');
-      } else if (gestureState.dx < -swipeThreshold) {
+      } else if (shouldCommitLeft) {
         swipeCard('left');
       } else {
         Animated.parallel([
-          Animated.spring(swipeAnim, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: true }),
-          Animated.spring(rotateAnim, { toValue: 0, friction: 5, useNativeDriver: true }),
-          Animated.spring(nextCardScale, { toValue: 0.95, friction: 5, useNativeDriver: true }),
+          Animated.spring(swipeAnim, { toValue: { x: 0, y: 0 }, friction: 8, tension: 100, useNativeDriver: true }),
+          Animated.spring(rotateAnim, { toValue: 0, friction: 8, tension: 100, useNativeDriver: true }),
+          Animated.spring(nextCardScale, { toValue: 0.95, friction: 8, tension: 100, useNativeDriver: true }),
         ]).start();
       }
     },
@@ -959,7 +970,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 5,
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 2,
     onPanResponderMove: (_, gestureState) => {
       swipeAnim.setValue({ x: gestureState.dx, y: 0 });
       rotateAnim.setValue(gestureState.dx / SCREEN_WIDTH);
@@ -967,16 +978,19 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
       nextCardScale.setValue(0.95 + (0.05 * progress));
     },
     onPanResponderRelease: (_, gestureState) => {
-      const swipeThreshold = SCREEN_WIDTH * 0.25;
-      if (gestureState.dx > swipeThreshold) {
+      const swipeThreshold = SCREEN_WIDTH * 0.2;
+      const velocityThreshold = 0.5;
+      const shouldCommitRight = gestureState.dx > swipeThreshold || (gestureState.dx > 20 && gestureState.vx > velocityThreshold);
+      const shouldCommitLeft = gestureState.dx < -swipeThreshold || (gestureState.dx < -20 && gestureState.vx < -velocityThreshold);
+      if (shouldCommitRight) {
         swipeCard('right');
-      } else if (gestureState.dx < -swipeThreshold) {
+      } else if (shouldCommitLeft) {
         swipeCard('left');
       } else {
         Animated.parallel([
-          Animated.spring(swipeAnim, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: true }),
-          Animated.spring(rotateAnim, { toValue: 0, friction: 5, useNativeDriver: true }),
-          Animated.spring(nextCardScale, { toValue: 0.95, friction: 5, useNativeDriver: true }),
+          Animated.spring(swipeAnim, { toValue: { x: 0, y: 0 }, friction: 8, tension: 100, useNativeDriver: true }),
+          Animated.spring(rotateAnim, { toValue: 0, friction: 8, tension: 100, useNativeDriver: true }),
+          Animated.spring(nextCardScale, { toValue: 0.95, friction: 8, tension: 100, useNativeDriver: true }),
         ]).start();
       }
     },
