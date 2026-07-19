@@ -1,6 +1,9 @@
-import { Bookmark, Heart, MessageCircle, MoreHorizontal, Send, X } from 'lucide-react-native';
+import { Bookmark, Camera, Heart, ImagePlus, MessageCircle, MoreHorizontal, Send, Share2, X } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Image,
@@ -74,6 +77,18 @@ function isReelStyle(post: Post) {
 function getFeedMediaHeight(post: Post) {
   return isReelStyle(post) ? INSTAGRAM_REEL_HEIGHT : INSTAGRAM_PHOTO_HEIGHT;
 }
+
+function timeAgoLabel(date: Date): string {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 60) return 'Just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// ── Story Bubble ────────────────────────────────────────────────────────────
 
 function StoryBubble({ story, colors }: { story: Story; colors: any }) {
   return (
@@ -189,12 +204,13 @@ function CommentsSheet({
 
 function MediaViewer({
   visible, post, liked, saved, likeCount, flashHeart,
-  onClose, onDoubleTapLike, onToggleLike, onToggleSave, onOpenComments,
+  onClose, onDoubleTapLike, onToggleLike, onToggleSave, onOpenComments, onShowMore,
 }: {
   visible: boolean; post: Post | null; liked: boolean; saved: boolean;
   likeCount: number; flashHeart: boolean;
   onClose: () => void; onDoubleTapLike: () => void;
   onToggleLike: () => void; onToggleSave: () => void; onOpenComments: () => void;
+  onShowMore: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -221,7 +237,6 @@ function MediaViewer({
   return (
     <Modal visible={visible} animationType="fade" transparent={false} onRequestClose={onClose}>
       <View style={styles.viewerContainer}>
-        {/* Top bar */}
         <View style={[styles.viewerTopBar, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={onClose} style={styles.viewerCloseButton}>
             <X size={24} color="#FFFFFF" />
@@ -230,12 +245,11 @@ function MediaViewer({
             <Image source={{ uri: post.user.avatar }} style={styles.viewerTopAvatar} />
             <Text style={styles.viewerTopUsername}>{post.user.username}</Text>
           </View>
-          <TouchableOpacity style={styles.viewerMoreButton}>
+          <TouchableOpacity onPress={onShowMore} style={styles.viewerMoreButton}>
             <MoreHorizontal size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
-        {/* Media */}
         <Pressable onPress={handleImageTap} style={styles.viewerMediaArea}>
           <Image
             source={{ uri: post.imageUrl }}
@@ -249,7 +263,6 @@ function MediaViewer({
           ) : null}
         </Pressable>
 
-        {/* Bottom bar */}
         <View style={[styles.viewerBottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <View style={styles.viewerActionRow}>
             <View style={styles.viewerActionLeft}>
@@ -279,16 +292,254 @@ function MediaViewer({
   );
 }
 
+// ── Post More Options Sheet (Three-Dot Menu) ────────────────────────────────
+
+function PostMoreSheet({
+  visible, post, colors, onClose, onReport,
+}: {
+  visible: boolean; post: Post | null; colors: any;
+  onClose: () => void; onReport: () => void;
+}) {
+  if (!post) return null;
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <Pressable style={styles.moreOverlay} onPress={onClose}>
+        <View style={[styles.moreBottomSheet, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.moreTitle, { color: colors.text }]}>Options</Text>
+          <TouchableOpacity
+            style={[styles.moreOption, { borderTopColor: colors.border }]}
+            onPress={() => { onClose(); setTimeout(onReport, 300); }}
+          >
+            <Text style={[styles.moreOptionText, { color: '#ED4956' }]}>Report</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.moreOption, { borderTopColor: colors.border }]}
+            onPress={() => {
+              onClose();
+              Alert.alert('Shared!', 'Post link copied to clipboard.');
+            }}
+          >
+            <Text style={[styles.moreOptionText, { color: colors.text }]}>Copy Link</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.moreOption, { borderTopColor: colors.border }]}
+            onPress={() => {
+              onClose();
+              Alert.alert('Saved', 'Post has been saved to your collection.');
+            }}
+          >
+            <Text style={[styles.moreOptionText, { color: colors.text }]}>Save to Collection</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.moreOption, { borderTopColor: colors.border }]}
+            onPress={() => {
+              onClose();
+              Alert.alert('Muted', 'You won\'t see posts from this user anymore.');
+            }}
+          >
+            <Text style={[styles.moreOptionText, { color: colors.text }]}>Mute User</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.moreOption, { borderTopColor: colors.border }]}
+            onPress={() => {
+              onClose();
+              Alert.alert('Blocked', 'This user has been blocked.');
+            }}
+          >
+            <Text style={[styles.moreOptionText, { color: colors.text }]}>Block User</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.moreCancel, { borderTopColor: colors.border }]} onPress={onClose}>
+            <Text style={[styles.moreCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ── Create Post Modal (Gallery / Camera / Story) ────────────────────────────
+
+type PostMode = 'feed' | 'story';
+
+function CreatePostModal({
+  visible, colors, onClose, onPublish,
+}: {
+  visible: boolean; colors: any; onClose: () => void;
+  onPublish: (content: string, imageUri?: string, postMode?: PostMode) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [caption, setCaption] = useState('');
+  const [postMode, setPostMode] = useState<PostMode>('feed');
+  const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => { if (!visible) { setSelectedImage(null); setCaption(''); setPostMode('feed'); setIsUploading(false); } }, [visible]);
+
+  const pickFromGallery = useCallback(async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow access to your photo library in Settings.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: postMode === 'story' ? [9, 16] : [4, 5],
+      quality: 0.9,
+    });
+    if (!result.canceled && result.assets?.[0]) setSelectedImage(result.assets[0].uri);
+  }, [postMode]);
+
+  const takePhoto = useCallback(async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow camera access in Settings.'); return; }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: postMode === 'story' ? [9, 16] : [4, 5],
+      quality: 0.9,
+    });
+    if (!result.canceled && result.assets?.[0]) setSelectedImage(result.assets[0].uri);
+  }, [postMode]);
+
+  const handlePublish = useCallback(() => {
+    if (!caption.trim() && !selectedImage) return;
+    setIsUploading(true);
+    // Brief delay so user sees the spinner
+    setTimeout(() => {
+      onPublish(caption.trim(), selectedImage ?? undefined, postMode);
+      onClose();
+    }, 400);
+  }, [caption, selectedImage, postMode, onPublish, onClose]);
+
+  const canPublish = caption.trim().length > 0 || Boolean(selectedImage);
+
+  const renderBottomToolbar = () => (
+    <View style={[styles.createToolbar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.createToolbarRow, { borderTopColor: colors.border }]}>
+        {/* Gallery */}
+        <TouchableOpacity style={styles.createTool} onPress={pickFromGallery}>
+          <View style={[styles.createToolIcon, { backgroundColor: '#FF8500' }]}>
+            <ImagePlus size={22} color="#FFF" />
+          </View>
+          <Text style={[styles.createToolLabel, { color: colors.textSecondary }]}>Gallery</Text>
+        </TouchableOpacity>
+
+        {/* Camera */}
+        <TouchableOpacity style={styles.createTool} onPress={takePhoto}>
+          <View style={[styles.createToolIcon, { backgroundColor: '#5856D6' }]}>
+            <Camera size={22} color="#FFF" />
+          </View>
+          <Text style={[styles.createToolLabel, { color: colors.textSecondary }]}>Camera</Text>
+        </TouchableOpacity>
+
+        {/* Post Type Toggle */}
+        <TouchableOpacity
+          style={styles.createTool}
+          onPress={() => setPostMode((m) => (m === 'feed' ? 'story' : 'feed'))}
+        >
+          <View style={[styles.createToolIcon, { backgroundColor: postMode === 'story' ? '#34C759' : colors.accent }]}>
+            <Text style={styles.createModeIcon}>
+              {postMode === 'feed' ? '📰' : '📖'}
+            </Text>
+          </View>
+          <Text style={[styles.createToolLabel, { color: colors.textSecondary }]}>
+            {postMode === 'story' ? 'Story' : 'Feed'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.createModeHint, { backgroundColor: postMode === 'story' ? 'rgba(52,199,89,0.1)' : 'rgba(0,122,255,0.1)' }]}>
+        <Text style={[styles.createModeHintText, { color: postMode === 'story' ? '#34C759' : colors.accent }]}>
+          {postMode === 'story'
+            ? '📖 Story — disappears after 24 hours'
+            : '📰 Feed Post — stays on your profile'}
+        </Text>
+      </View>
+    </View>
+  );
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[styles.createContainer, { backgroundColor: colors.background }]}>
+        {/* Header */}
+        <View style={[styles.createHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose}>
+            <X size={26} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.createTitle, { color: colors.text }]}>
+            {postMode === 'story' ? 'New Story' : 'New Post'}
+          </Text>
+          <TouchableOpacity
+            onPress={handlePublish}
+            disabled={!canPublish || isUploading}
+            style={[styles.createShareBtn, { backgroundColor: canPublish ? colors.accent : colors.border }]}
+          >
+            {isUploading ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Text style={styles.createShareText}>Share</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Content Area */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.createContent}
+        >
+          <ScrollView contentContainerStyle={styles.createScrollContent} keyboardShouldPersistTaps="handled">
+            {selectedImage ? (
+              <View style={styles.createImagePreviewWrap}>
+                <Image
+                  source={{ uri: selectedImage }}
+                  style={[
+                    styles.createImagePreview,
+                    postMode === 'story'
+                      ? { aspectRatio: 9 / 16, maxHeight: SCREEN_HEIGHT * 0.55 }
+                      : { aspectRatio: 4 / 5, maxHeight: SCREEN_HEIGHT * 0.5 },
+                  ]}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity style={styles.createRemoveImage} onPress={() => setSelectedImage(null)}>
+                  <X size={16} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={[styles.createPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+                <Text style={[styles.createPlaceholderIcon]}>📸</Text>
+                <Text style={[styles.createPlaceholderText, { color: colors.textSecondary }]}>
+                  Choose a photo or take one
+                </Text>
+              </View>
+            )}
+
+            <TextInput
+              value={caption}
+              onChangeText={setCaption}
+              placeholder="Write a caption..."
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.createCaptionInput, { color: colors.text }]}
+              multiline
+              maxLength={2200}
+              textAlignVertical="top"
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+        {renderBottomToolbar()}
+      </View>
+    </Modal>
+  );
+}
+
 // ── Feed Post Card ──────────────────────────────────────────────────────────
 
 function FeedPost({
   post, colors, liked, saved, likeCount, commentCount, comments, flashHeart,
-  onToggleLike, onQuickLike, onOpenComments, onToggleSave, onShare, onMediaTap,
+  onToggleLike, onQuickLike, onOpenComments, onToggleSave, onShare, onMediaTap, onShowMore,
 }: {
   post: Post; colors: any; liked: boolean; saved: boolean;
   likeCount: number; commentCount: number; comments: SocialComment[]; flashHeart: boolean;
   onToggleLike: () => void; onQuickLike: () => void; onOpenComments: () => void;
   onToggleSave: () => void; onShare: () => void; onMediaTap: () => void;
+  onShowMore: () => void;
 }) {
   const hasMedia = Boolean(post.imageUrl);
   const mediaHeight = getFeedMediaHeight(post);
@@ -320,7 +571,7 @@ function FeedPost({
             <Text style={[styles.postTime, { color: colors.textSecondary }]}>{post.timestamp}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.postMoreButton}>
+        <TouchableOpacity onPress={onShowMore} style={styles.postMoreButton}>
           <MoreHorizontal size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -408,6 +659,8 @@ export default function FeedScreen() {
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [autoFocusComments, setAutoFocusComments] = useState(false);
   const [viewerPostId, setViewerPostId] = useState<string | null>(null);
+  const [showComposer, setShowComposer] = useState(false);
+  const [morePostId, setMorePostId] = useState<string | null>(null);
   const lastOffsetRef = useRef(0);
 
   const socialPosts = getAllPosts();
@@ -417,6 +670,7 @@ export default function FeedScreen() {
   const posts = useMemo(() => [...localPosts, ...basePosts], [localPosts, basePosts]);
   const activeCommentPost = useMemo(() => posts.find((p) => p.id === commentsPostId) ?? null, [posts, commentsPostId]);
   const activeViewerPost = useMemo(() => posts.find((p) => p.id === viewerPostId) ?? null, [posts, viewerPostId]);
+  const activeMorePost = useMemo(() => posts.find((p) => p.id === morePostId) ?? null, [posts, morePostId]);
 
   const impact = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(style);
@@ -431,7 +685,21 @@ export default function FeedScreen() {
     setTimeout(() => setHeartFlashPostId((c) => (c === postId ? null : c)), 650);
   }, []);
 
-  const handlePublish = useCallback(() => {
+  // ── Publish from composer ──
+  const handleComposerPublish = useCallback((content: string, imageUri?: string, postMode?: 'feed' | 'story') => {
+    setLocalPosts((prev) => [{
+      id: `local-${Date.now()}`, user: viewer, content,
+      imageUrl: imageUri,
+      timestamp: 'Just now', likes: 0, comments: 0, shares: 0,
+      isStory: postMode === 'story',
+    } as Post, ...prev]);
+    setDraft('');
+    createPost(content, imageUri);
+    impact(Haptics.ImpactFeedbackStyle.Heavy);
+  }, [createPost]);
+
+  // ── Legacy text-only publish ──
+  const handleLegacyPublish = useCallback(() => {
     const clean = draft.trim();
     if (!clean) return;
     setLocalPosts((prev) => [{
@@ -503,10 +771,7 @@ export default function FeedScreen() {
     if (!activeViewerPost) return;
     if (!likedMap[activeViewerPost.id]) {
       setLikedMap((prev) => ({ ...prev, [activeViewerPost.id]: true }));
-      setLikeCounts((prev) => ({
-        ...prev,
-        [activeViewerPost.id]: (prev[activeViewerPost.id] ?? activeViewerPost.likes) + 1,
-      }));
+      setLikeCounts((prev) => ({ ...prev, [activeViewerPost.id]: (prev[activeViewerPost.id] ?? activeViewerPost.likes) + 1 }));
     }
     flashHeart(activeViewerPost.id);
     impact(Haptics.ImpactFeedbackStyle.Medium);
@@ -518,6 +783,21 @@ export default function FeedScreen() {
     setAutoFocusComments(true);
     impact(Haptics.ImpactFeedbackStyle.Light);
   }, [activeViewerPost]);
+
+  // ── More Options ──
+  const openMore = useCallback((postId: string) => setMorePostId(postId), []);
+  const closeMore = useCallback(() => setMorePostId(null), []);
+
+  const handleReport = useCallback(() => {
+    Alert.alert(
+      'Report Post',
+      'Are you sure you want to report this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Report', style: 'destructive', onPress: () => Alert.alert('Reported', 'Thank you. We\'ll review this post.') },
+      ]
+    );
+  }, []);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -533,21 +813,23 @@ export default function FeedScreen() {
         contentContainerStyle={{ paddingBottom: 110 }}
         ListHeaderComponent={
           <View>
-            <View style={[styles.composerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={() => setShowComposer(true)}
+              style={[styles.composerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
               <View style={styles.composerTopRow}>
                 <Image source={{ uri: viewer.avatar }} style={styles.composerAvatar} />
-                <TextInput
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder="Share something..."
-                  placeholderTextColor={colors.textTertiary}
-                  style={[styles.composerInput, { backgroundColor: colors.backgroundSecondary, color: colors.text }]}
-                />
-                <TouchableOpacity onPress={handlePublish} style={styles.composerPostButton}>
+                <View style={[styles.composerInputPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+                  <Text style={[styles.composerPlaceholderText, { color: colors.textTertiary }]}>
+                    What's on your mind? 📸
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowComposer(true)} style={styles.composerPostButton}>
                   <Text style={[styles.composerPostText, { color: colors.accent }]}>Post</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesRow}>
               {stories.map((story) => (
                 <StoryBubble key={story.id} story={story} colors={colors} />
@@ -571,6 +853,7 @@ export default function FeedScreen() {
             onToggleSave={() => toggleSave(item.id)}
             onShare={() => sharePost(item)}
             onMediaTap={() => item.imageUrl && openViewer(item.id)}
+            onShowMore={() => openMore(item.id)}
           />
         )}
       />
@@ -598,6 +881,20 @@ export default function FeedScreen() {
         onToggleLike={() => activeViewerPost && toggleLike(activeViewerPost)}
         onToggleSave={() => activeViewerPost && toggleSave(activeViewerPost.id)}
         onOpenComments={viewerOpenComments}
+        onShowMore={() => activeViewerPost && openMore(activeViewerPost.id)}
+      />
+      <PostMoreSheet
+        visible={Boolean(activeMorePost)}
+        post={activeMorePost}
+        colors={colors}
+        onClose={closeMore}
+        onReport={handleReport}
+      />
+      <CreatePostModal
+        visible={showComposer}
+        colors={colors}
+        onClose={() => setShowComposer(false)}
+        onPublish={handleComposerPublish}
       />
     </View>
   );
@@ -612,7 +909,8 @@ const styles = StyleSheet.create({
   composerCard: { marginHorizontal: 12, marginTop: 12, marginBottom: 14, borderWidth: 1, borderRadius: 18, padding: 12 },
   composerTopRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   composerAvatar: { width: 38, height: 38, borderRadius: 19 },
-  composerInput: { flex: 1, minHeight: 42, borderRadius: 14, paddingHorizontal: 14, fontSize: 14 },
+  composerInputPlaceholder: { flex: 1, minHeight: 42, borderRadius: 14, paddingHorizontal: 14, justifyContent: 'center' },
+  composerPlaceholderText: { fontSize: 14 },
   composerPostButton: { paddingHorizontal: 6 },
   composerPostText: { fontSize: 14, fontWeight: '700' },
   storiesRow: { paddingHorizontal: 12, paddingBottom: 14 },
@@ -638,16 +936,16 @@ const styles = StyleSheet.create({
   iconButton: { padding: 2 },
   postMetaBlock: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 14 },
   likesText: { fontSize: 14, fontWeight: '700' },
-  captionLine: { marginTop: 6, fontSize: 14, lineHeight: 20 },
+  captionLine: { marginTop: 4, fontSize: 14, lineHeight: 20 },
   captionUser: { fontWeight: '700' },
-  commentPreviewTouch: { marginTop: 6, gap: 3 },
-  viewCommentsText: { fontSize: 14 },
-  previewCommentLine: { fontSize: 13, lineHeight: 18 },
+  commentPreviewTouch: { marginTop: 6 },
+  viewCommentsText: { fontSize: 13, marginBottom: 4 },
+  previewCommentLine: { marginTop: 2, fontSize: 13 },
   previewCommentAuthor: { fontWeight: '700' },
-  postTimeFooter: { marginTop: 8, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.2 },
+  postTimeFooter: { marginTop: 6, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.3 },
 
   // ── Comments Sheet ──
-  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   sheetKeyboardWrap: { justifyContent: 'flex-end' },
   sheetCard: { maxHeight: SCREEN_HEIGHT * 0.78, borderTopLeftRadius: 26, borderTopRightRadius: 26, overflow: 'hidden' },
   sheetHandle: { width: 42, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
@@ -697,4 +995,37 @@ const styles = StyleSheet.create({
   viewerCaptionUser: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   viewerCaptionText: { color: '#FFFFFF', fontSize: 14 },
   viewerTimestamp: { color: 'rgba(255,255,255,0.5)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 4 },
+
+  // ── More Sheet (Three-Dot Menu) ──
+  moreOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  moreBottomSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 20 },
+  moreTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', paddingVertical: 14 },
+  moreOption: { paddingVertical: 16, paddingHorizontal: 20, borderTopWidth: StyleSheet.hairlineWidth },
+  moreOptionText: { fontSize: 15, textAlign: 'center' },
+  moreCancel: { paddingVertical: 16, paddingHorizontal: 20, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8 },
+  moreCancelText: { fontSize: 15, fontWeight: '600', textAlign: 'center' },
+
+  // ── Create Modal (Gallery / Camera / Story) ──
+  createContainer: { flex: 1 },
+  createHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  createTitle: { fontSize: 17, fontWeight: '700' },
+  createShareBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20 },
+  createShareText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  createContent: { flex: 1 },
+  createScrollContent: { padding: 16, gap: 16 },
+  createImagePreviewWrap: { alignSelf: 'center', position: 'relative' },
+  createImagePreview: { width: SCREEN_WIDTH - 32, borderRadius: 18, backgroundColor: '#E5E5E5' },
+  createRemoveImage: { position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+  createPlaceholder: { width: SCREEN_WIDTH - 32, height: SCREEN_HEIGHT * 0.3, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  createPlaceholderIcon: { fontSize: 48 },
+  createPlaceholderText: { marginTop: 10, fontSize: 14 },
+  createCaptionInput: { fontSize: 16, minHeight: 80, paddingVertical: 8, lineHeight: 22 },
+  createToolbar: {},
+  createToolbarRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 14, paddingHorizontal: 20, borderTopWidth: StyleSheet.hairlineWidth },
+  createTool: { alignItems: 'center', gap: 6, paddingVertical: 6 },
+  createToolIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  createToolLabel: { fontSize: 12, fontWeight: '500' },
+  createModeIcon: { fontSize: 20 },
+  createModeHint: { marginHorizontal: 16, marginBottom: 12, borderRadius: 10, padding: 10, alignItems: 'center' },
+  createModeHintText: { fontSize: 12, fontWeight: '600' },
 });

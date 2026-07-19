@@ -6,6 +6,7 @@ interface TabBarContextValue {
   tabBarTranslateY: Animated.Value;
   handleScroll: (currentY: number) => void;
   showTabBar: () => void;
+  hideTabBar: () => void;
 }
 
 export const [TabBarProvider, useTabBar] = createContextHook<TabBarContextValue>(() => {
@@ -56,5 +57,6 @@ export const [TabBarProvider, useTabBar] = createContextHook<TabBarContextValue>
     tabBarTranslateY,
     handleScroll,
     showTabBar,
+    hideTabBar,
   };
 });
