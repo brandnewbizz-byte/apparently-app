@@ -6,8 +6,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import {
   View,
+  Text,
   StyleSheet,
   KeyboardAvoidingView,
+  TouchableOpacity,
   Platform,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -26,8 +28,6 @@ import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
-
-SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -157,45 +157,114 @@ const styles = StyleSheet.create({
   },
 });
 
+function CrashGuard({ children }: { children: React.ReactNode }) {
+  const [error, setError] = React.useState<string | null>(null);
+  
+  useEffect(() => {
+    // Unhandled promise rejections
+    const handler = (e: PromiseRejectionEvent) => {
+      console.error('[CrashGuard] Unhandled rejection:', e.reason);
+      setError(String(e.reason));
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('unhandledrejection', handler as any);
+      return () => window.removeEventListener('unhandledrejection', handler as any);
+    }
+  }, []);
+
+  if (error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 }}>Startup Error</Text>
+        <Text style={{ color: '#999', fontSize: 14, textAlign: 'center' }}>{error}</Text>
+      </View>
+    );
+  }
+  
+  return <>{children}</>;
+}
+
+class ProviderErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: '' };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('[ProviderErrorBoundary] Caught:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 }}>App Crashed</Text>
+          <Text style={{ color: '#F87171', fontSize: 13, textAlign: 'center', marginBottom: 16 }}>{this.state.error}</Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, error: '' })}
+            style={{ paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24, backgroundColor: '#0095F6' }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function RootLayout() {
   useEffect(() => {
-    SplashScreen.hideAsync();
+    // Safety: force hide splash even if providers crash
+    const timer = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 3000);
+    SplashScreen.hideAsync().catch(() => {});
     console.log('[Root] DEV MODE — Supabase/auth disabled, navigating directly to tabs');
+    return () => clearTimeout(timer);
   }, []);
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <SafeAreaProvider>
-            <ThemeProvider>
-              <AuthProvider>
-                <OnboardingProvider>
-                  <LifeCrmProvider>
-                    <SocialProvider>
-                      <ConnectionsProvider>
-                            <MessagingProvider>
-                              <SwapProvider>
-                                <BookingsProvider>
-                                  <PlannerProvider>
-                                    <TabBarProvider>
-                                      <AppErrorBoundary>
-                                        <RootLayoutNavWithTheme />
-                                      </AppErrorBoundary>
-                                    </TabBarProvider>
-                                  </PlannerProvider>
-                                </BookingsProvider>
-                              </SwapProvider>
-                            </MessagingProvider>
-                      </ConnectionsProvider>
-                    </SocialProvider>
-                  </LifeCrmProvider>
-                </OnboardingProvider>
-              </AuthProvider>
-            </ThemeProvider>
-          </SafeAreaProvider>
-        </GestureHandlerRootView>
-      </QueryClientProvider>
-    </trpc.Provider>
+    <ProviderErrorBoundary>
+      <CrashGuard>
+        <trpc.Provider client={trpcClient} queryClient={queryClient}>
+          <QueryClientProvider client={queryClient}>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <SafeAreaProvider>
+                <ThemeProvider>
+                  <AuthProvider>
+                    <OnboardingProvider>
+                      <LifeCrmProvider>
+                        <SocialProvider>
+                          <ConnectionsProvider>
+                                <MessagingProvider>
+                                  <SwapProvider>
+                                    <BookingsProvider>
+                                      <PlannerProvider>
+                                        <TabBarProvider>
+                                          <AppErrorBoundary>
+                                            <RootLayoutNavWithTheme />
+                                          </AppErrorBoundary>
+                                        </TabBarProvider>
+                                      </PlannerProvider>
+                                    </BookingsProvider>
+                                  </SwapProvider>
+                                </MessagingProvider>
+                          </ConnectionsProvider>
+                        </SocialProvider>
+                      </LifeCrmProvider>
+                    </OnboardingProvider>
+                  </AuthProvider>
+                </ThemeProvider>
+              </SafeAreaProvider>
+            </GestureHandlerRootView>
+          </QueryClientProvider>
+        </trpc.Provider>
+      </CrashGuard>
+    </ProviderErrorBoundary>
   );
 }
