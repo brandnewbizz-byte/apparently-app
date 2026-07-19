@@ -91,7 +91,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="inbox"
           options={{
-            href: null,
+            title: 'Inbox',
           }}
         />
         <Tabs.Screen

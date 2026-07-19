@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 
 import { type User } from '@/mocks/data';
 import { supabase } from '@/lib/supabase';
+import * as localApi from '@/lib/api';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export type SwapPostStatus = 'open' | 'matched' | 'closed';

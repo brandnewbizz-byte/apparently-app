@@ -47,6 +47,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner } from '@/contexts/PlannerContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMessaging } from '@/contexts/MessagingContext';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -65,6 +66,7 @@ interface BundlePlan {
   bookedAt?: string;
   pickupTime?: string;
   status: 'available' | 'grabbed';
+  creatorId?: string;
   creator?: {
     name: string;
     avatar: string;
@@ -93,6 +95,7 @@ const MOCK_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
     distance: 15.2,
     status: 'available',
+    creatorId: 'u-2',
     summary: ['Beach resort stay', 'Spa treatment', 'Sunset cruise', 'Dinner for 2', 'Breakfast buffet'],
     creator: {
       name: 'Sarah Chen',
@@ -110,6 +113,7 @@ const MOCK_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1600334089648-b0d9d3028eb2?w=800',
     distance: 2.8,
     status: 'available',
+    creatorId: 'u-3',
     summary: ['Full body massage', 'Facial treatment', 'Yoga session'],
     creator: {
       name: 'Maya Rose',
@@ -127,6 +131,7 @@ const MOCK_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800',
     distance: 4.5,
     status: 'available',
+    creatorId: 'u-4',
     summary: ['Fine dining', 'Movie tickets', 'Dessert bar', 'Roses bouquet'],
     creator: {
       name: 'Alex Rivera',
@@ -147,6 +152,7 @@ const MOCK_HOT_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
     distance: 1.5,
     status: 'available',
+    creatorId: 'u-5',
     summary: ['Personal training', 'Nutrition plan', 'Gym pass', 'Protein pack'],
     creator: {
       name: 'Jake Fitness',
@@ -164,6 +170,7 @@ const MOCK_HOT_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1501555088652-021faa106b9b?w=800',
     distance: 22.3,
     status: 'available',
+    creatorId: 'u-6',
     summary: ['Hiking guide', 'Kayak rental', 'Camping gear', 'BBQ setup', 'Photo session', 'Trail snacks'],
     creator: {
       name: 'Zoe Wild',
@@ -181,6 +188,7 @@ const MOCK_HOT_BUNDLES: BundlePlan[] = [
     image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800',
     distance: 35.0,
     status: 'available',
+    creatorId: 'u-7',
     summary: ['5-star suite', 'Private chef', 'Spa day', 'Limo service', 'Wine tasting', 'Golf round', 'Butler service', 'Champagne'],
     creator: {
       name: 'Elite Escapes',
@@ -210,6 +218,7 @@ interface SkillDeal {
   image: string;
   distance: number;
   expiresIn: number;
+  creatorId?: string;
   provider: {
     name: string;
     avatar: string;
@@ -217,11 +226,11 @@ interface SkillDeal {
 }
 
 const MOCK_SKILL_DEALS: SkillDeal[] = [
-  { id: 's1', title: 'Home Cleaning', icon: '🧹', price: 35, originalPrice: 45, rating: 4.9, image: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400', distance: 2.1, expiresIn: 1800, provider: { name: 'Maria S.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' } },
-  { id: 's2', title: 'Personal Chef', icon: '👨‍🍳', price: 89, originalPrice: 120, rating: 4.8, image: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=400', distance: 3.5, expiresIn: 3600, provider: { name: 'Chef Tony', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' } },
-  { id: 's3', title: 'Dog Walking', icon: '🐕', price: 18, originalPrice: 25, rating: 5.0, image: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', distance: 0.8, expiresIn: 900, provider: { name: 'Jake W.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' } },
-  { id: 's4', title: 'Photography', icon: '📸', price: 65, originalPrice: 85, rating: 4.7, image: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=400', distance: 5.2, expiresIn: 7200, provider: { name: 'Lisa P.', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' } },
-  { id: 's5', title: 'Tutoring', icon: '📚', price: 30, originalPrice: 40, rating: 4.9, image: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400', distance: 1.5, expiresIn: 5400, provider: { name: 'Prof. Kim', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100' } },
+  { id: 's1', title: 'Home Cleaning', icon: '🧹', price: 35, originalPrice: 45, rating: 4.9, image: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400', distance: 2.1, expiresIn: 1800, creatorId: 'u-2', provider: { name: 'Maria S.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' } },
+  { id: 's2', title: 'Personal Chef', icon: '👨‍🍳', price: 89, originalPrice: 120, rating: 4.8, image: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=400', distance: 3.5, expiresIn: 3600, creatorId: 'u-4', provider: { name: 'Chef Tony', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' } },
+  { id: 's3', title: 'Dog Walking', icon: '🐕', price: 18, originalPrice: 25, rating: 5.0, image: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', distance: 0.8, expiresIn: 900, creatorId: 'u-5', provider: { name: 'Jake W.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' } },
+  { id: 's4', title: 'Photography', icon: '📸', price: 65, originalPrice: 85, rating: 4.7, image: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=400', distance: 5.2, expiresIn: 7200, creatorId: 'u-3', provider: { name: 'Lisa P.', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' } },
+  { id: 's5', title: 'Tutoring', icon: '📚', price: 30, originalPrice: 40, rating: 4.9, image: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400', distance: 1.5, expiresIn: 5400, creatorId: 'u-6', provider: { name: 'Prof. Kim', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100' } },
 ];
 
 interface ServiceRequest {
@@ -232,6 +241,7 @@ interface ServiceRequest {
   image: string;
   distance: number;
   expiresIn: number;
+  creatorId?: string;
   requester: {
     name: string;
     avatar: string;
@@ -241,9 +251,9 @@ interface ServiceRequest {
 }
 
 const MOCK_SERVICE_REQUESTS: ServiceRequest[] = [
-  { id: 'sr1', title: 'Need Help Moving', description: 'Looking for 2 people to help move furniture this Saturday', budget: 150, image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800', distance: 4.2, expiresIn: 14400, requester: { name: 'Tom H.', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', rating: 4.8 }, category: 'Moving' },
-  { id: 'sr2', title: 'Party Planner Needed', description: 'Planning a surprise birthday party for 30 guests', budget: 300, image: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=800', distance: 6.8, expiresIn: 28800, requester: { name: 'Emma L.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100', rating: 4.9 }, category: 'Events' },
-  { id: 'sr3', title: 'Garden Makeover', description: 'Need landscaping help for backyard renovation', budget: 250, image: 'https://images.unsplash.com/photo-1558904541-efa843a96f01?w=800', distance: 3.1, expiresIn: 43200, requester: { name: 'Mike R.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100', rating: 4.7 }, category: 'Home' },
+  { id: 'sr1', title: 'Need Help Moving', description: 'Looking for 2 people to help move furniture this Saturday', budget: 150, image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800', distance: 4.2, expiresIn: 14400, creatorId: 'u-4', requester: { name: 'Tom H.', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', rating: 4.8 }, category: 'Moving' },
+  { id: 'sr2', title: 'Party Planner Needed', description: 'Planning a surprise birthday party for 30 guests', budget: 300, image: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=800', distance: 6.8, expiresIn: 28800, creatorId: 'u-2', requester: { name: 'Emma L.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100', rating: 4.9 }, category: 'Events' },
+  { id: 'sr3', title: 'Garden Makeover', description: 'Need landscaping help for backyard renovation', budget: 250, image: 'https://images.unsplash.com/photo-1558904541-efa843a96f01?w=800', distance: 3.1, expiresIn: 43200, creatorId: 'u-5', requester: { name: 'Mike R.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100', rating: 4.7 }, category: 'Home' },
 ];
 
 const LIVE_UPDATES = [
@@ -1306,6 +1316,7 @@ export default function HomeScreen() {
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
+  const { sendMessage } = useMessaging();
   
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
@@ -1386,7 +1397,9 @@ export default function HomeScreen() {
     console.log('Card action:', 'grab_bundle', bundle.id);
     setConfettiAmount(bundle.price);
     setShowConfetti(true);
-  }, []);
+    // Create conversation with bundle creator
+    sendMessage(bundle.creatorId || 'u-2', `👋 Hey! I'm interested in your bundle "${bundle.title}" for $${bundle.price}. Is it still available?`);
+  }, [sendMessage]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {
     console.log('Card action:', 'skip_bundle', bundle.id);
@@ -1407,7 +1420,8 @@ export default function HomeScreen() {
     console.log('Card action:', 'grab_skill', skill.id);
     setConfettiAmount(skill.price);
     setShowConfetti(true);
-  }, []);
+    sendMessage(skill.creatorId || 'u-3', `💪 Interested in your "${skill.title}" skill offer for $${skill.price}. Let's connect!`);
+  }, [sendMessage]);
 
   const handleSkipSkill = useCallback((skill: SkillDeal) => {
     console.log('Card action:', 'skip_skill', skill.id);
@@ -1428,7 +1442,8 @@ export default function HomeScreen() {
     console.log('Card action:', 'grab_request', request.id);
     setConfettiAmount(request.budget);
     setShowConfetti(true);
-  }, []);
+    sendMessage(request.creatorId || 'u-4', `🛠️ Hey! I can help with "${request.title}". My budget is $${request.budget}. Still looking?`);
+  }, [sendMessage]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
     console.log('Card action:', 'skip_request', request.id);

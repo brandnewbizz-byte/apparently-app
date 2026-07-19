@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 
 import { DatabaseService } from '@/lib/database';
+import * as localApi from '@/lib/api';
 import type { DbUser } from '@/lib/database.types';
 import type { MarketplaceProfile } from '@/mocks/data';
 
@@ -136,28 +137,60 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
         }
 
         console.log('[ConnectionsContext] Building connections from Supabase users');
-        const userId = await DatabaseService.getCurrentUserId();
-        const users = await DatabaseService.fetchUsers({ signal });
-        const profiles = users.map(mapDbUserToMarketplaceProfile);
-        const connections: Connection[] = profiles
-          .filter((p) => p.id !== (userId ?? ''))
-          .slice(0, 50)
-          .map((p) => ({
-            id: `conn_${p.id}`,
-            userId: p.id,
-            profile: p,
-            connectedAt: new Date().toISOString(),
-            canMessage: true,
-          }));
+        try {
+          const userId = await DatabaseService.getCurrentUserId();
+          const users = await DatabaseService.fetchUsers({ signal });
+          const profiles = users.map(mapDbUserToMarketplaceProfile);
+          const connections: Connection[] = profiles
+            .filter((p) => p.id !== (userId ?? ''))
+            .slice(0, 50)
+            .map((p) => ({
+              id: `conn_${p.id}`,
+              userId: p.id,
+              profile: p,
+              connectedAt: new Date().toISOString(),
+              canMessage: true,
+            }));
 
-        return {
-          requests: [],
-          connections,
-          messages: [],
-          hiddenProfiles: [],
-          interactions: [],
-          ratings: [],
-        } as ConnectionsState;
+          return {
+            requests: [],
+            connections,
+            messages: [],
+            hiddenProfiles: [],
+            interactions: [],
+            ratings: [],
+          } as ConnectionsState;
+        } catch (supabaseError) {
+          console.log('[ConnectionsContext] Supabase unavailable, trying local API...');
+        }
+
+        // Fall back to local API
+        try {
+          const localRequests = await localApi.getConnectionRequests();
+          console.log('[ConnectionsContext] Local connection requests:', localRequests?.length || 0);
+          return {
+            requests: (localRequests || []).map((r: any) => ({
+              id: r.id,
+              fromUserId: r.from_user_id,
+              toUserId: r.to_user_id,
+              fromProfile: { id: r.from_user_id, name: r.from_name || 'User', avatar: r.from_avatar || '', isVerified: false },
+              toProfile: { id: r.to_user_id, name: r.to_name || 'User', avatar: r.to_avatar || '', isVerified: false },
+              status: r.status || 'pending',
+              message: r.message,
+              createdAt: r.created_at,
+              updatedAt: r.updated_at,
+            })),
+            connections: [],
+            messages: [],
+            hiddenProfiles: [],
+            interactions: [],
+            ratings: [],
+          } as ConnectionsState;
+        } catch (e2) {
+          console.log('[ConnectionsContext] Local API also unavailable');
+        }
+
+        return defaultState;
       } catch (error: any) {
         if (error?.name === 'AbortError') {
           console.log('[ConnectionsContext] Fetch aborted (navigation)');

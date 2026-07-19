@@ -105,6 +105,23 @@ export async function getProducts() {
   return fetchJSON(`${API_BASE}/products`);
 }
 
+export async function createProduct(product: {
+  seller_id: string;
+  seller_name: string;
+  seller_avatar: string;
+  seller_username: string;
+  title: string;
+  description: string;
+  price: number;
+  accepts_swap: boolean;
+  condition: string;
+  category: string;
+  images: Array<{ id: string; uri: string }>;
+  location: string;
+}) {
+  return fetchJSON(`${API_BASE}/products`, { method: 'POST', body: JSON.stringify(product) });
+}
+
 // ─── Calendar Events ───
 export async function getCalendarEvents(userId: string) {
   return fetchJSON(`${API_BASE}/calendar-events?user_id=${encodeURIComponent(userId || DEFAULT_USER_ID)}`);
@@ -133,6 +150,16 @@ export async function createSwapPost(post: any) {
   return fetchJSON(`${API_BASE}/swap-posts`, { method: 'POST', body: JSON.stringify(post) });
 }
 
+// ─── Bookings ───
+export async function getBookings(userId?: string) {
+  const params = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+  return fetchJSON(`${API_BASE}/bookings${params}`);
+}
+
+export async function createBooking(booking: any) {
+  return fetchJSON(`${API_BASE}/bookings`, { method: 'POST', body: JSON.stringify(booking) });
+}
+
 // ─── Plans ───
 export async function getPlans(userId: string) {
   return fetchJSON(`${API_BASE}/plans?user_id=${encodeURIComponent(userId || DEFAULT_USER_ID)}`);
@@ -140,6 +167,39 @@ export async function getPlans(userId: string) {
 
 export async function createPlan(plan: any) {
   return fetchJSON(`${API_BASE}/plans`, { method: 'POST', body: JSON.stringify(plan) });
+}
+
+export async function deletePlan(planId: string) {
+  return fetchJSON(`${API_BASE}/plans/${planId}`, { method: 'DELETE' });
+}
+
+// ─── Swap Matches ───
+export async function getSwapMatches(userId?: string) {
+  const params = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+  return fetchJSON(`${API_BASE}/swap-matches${params}`);
+}
+
+export async function createSwapMatch(match: any) {
+  return fetchJSON(`${API_BASE}/swap-matches`, { method: 'POST', body: JSON.stringify(match) });
+}
+
+export async function updateSwapMatch(matchId: string, updates: any) {
+  return fetchJSON(`${API_BASE}/swap-matches/${matchId}`, { method: 'PUT', body: JSON.stringify(updates) });
+}
+
+// ─── Connection Requests ───
+export async function getConnectionRequests(userId?: string) {
+  const params = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+  return fetchJSON(`${API_BASE}/connection-requests${params}`);
+}
+
+export async function createConnectionRequest(req: any) {
+  return fetchJSON(`${API_BASE}/connection-requests`, { method: 'POST', body: JSON.stringify(req) });
+}
+
+// ─── Income Sources ───
+export async function createIncomeSource(source: any) {
+  return fetchJSON(`${API_BASE}/income-sources`, { method: 'POST', body: JSON.stringify(source) });
 }
 
 export { DEFAULT_USER_ID };

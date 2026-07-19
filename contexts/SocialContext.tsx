@@ -631,6 +631,27 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
     localApi.createPost('u-dev', content, imageUrl, options).then((saved) => {
       console.log('[SocialContext] Post saved to local API:', saved?.id);
+      // When it's a sell post, also create a marketplace product
+      if (options?.postKind === 'sell') {
+        localApi.createProduct({
+          seller_id: 'u-dev',
+          seller_name: 'You',
+          seller_avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100',
+          seller_username: 'you',
+          title: content.slice(0, 100),
+          description: content,
+          price: 0,
+          accepts_swap: true,
+          condition: 'good',
+          category: options?.category || 'General',
+          images: imageUrl ? [{ id: '1', uri: imageUrl }] : [],
+          location: 'Local',
+        }).then(() => {
+          console.log('[SocialContext] Sell post also created as marketplace product');
+        }).catch((e) => {
+          console.log('[SocialContext] Marketplace product create failed:', e?.message);
+        });
+      }
       apiLoaded.current = false;
       localApi.getPosts().then((rawPosts: any[]) => {
         const mapped: Post[] = rawPosts.map((p: any) => ({

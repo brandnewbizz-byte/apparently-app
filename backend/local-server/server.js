@@ -458,6 +458,34 @@ app.delete('/api/plans/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Connection Requests ───
+app.get('/api/connection-requests', (req, res) => {
+  const { user_id } = req.query;
+  const requests = user_id
+    ? queryAll('SELECT * FROM connection_requests WHERE to_user_id = ? OR from_user_id = ? ORDER BY created_at DESC', [user_id, user_id])
+    : queryAll('SELECT * FROM connection_requests ORDER BY created_at DESC');
+  res.json(requests);
+});
+
+app.post('/api/connection-requests', (req, res) => {
+  const r = req.body;
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  execute(`INSERT INTO connection_requests (id, from_user_id, to_user_id, from_name, from_avatar, from_username,
+    to_name, to_avatar, to_username, status, message, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, r.from_user_id, r.to_user_id, r.from_name || null, r.from_avatar || null, r.from_username || null,
+      r.to_name || null, r.to_avatar || null, r.to_username || null, r.status || 'pending', r.message || null, now, now]);
+  res.status(201).json({ id });
+});
+
+app.put('/api/connection-requests/:id', (req, res) => {
+  const { status } = req.body;
+  execute('UPDATE connection_requests SET status = ?, updated_at = ? WHERE id = ?',
+    [status, new Date().toISOString(), req.params.id]);
+  res.json({ ok: true });
+});
+
 // ─── Init & Start ───
 await initDB();
 seedAll();

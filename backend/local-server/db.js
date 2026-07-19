@@ -350,6 +350,25 @@ export async function initDB() {
     )
   `);
 
+  // Connection requests
+  db.run(`
+    CREATE TABLE IF NOT EXISTS connection_requests (
+      id TEXT PRIMARY KEY,
+      from_user_id TEXT NOT NULL,
+      to_user_id TEXT NOT NULL,
+      from_name TEXT,
+      from_avatar TEXT,
+      from_username TEXT,
+      to_name TEXT,
+      to_avatar TEXT,
+      to_username TEXT,
+      status TEXT DEFAULT 'pending',
+      message TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   saveDB();
   console.log(`📦 Database ready at ${DB_PATH}`);
 }

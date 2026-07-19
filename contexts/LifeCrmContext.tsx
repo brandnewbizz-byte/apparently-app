@@ -14,6 +14,7 @@ import {
   WellnessSuggestion,
 } from '@/mocks/lifeCrmData';
 import { DatabaseService } from '@/lib/database';
+import * as localApi from '@/lib/api';
 
 interface LifeCrmData {
   calendarEvents: CalendarEvent[];
@@ -133,9 +134,34 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
           console.log('[LifeCRM] Events fetch aborted (navigation)');
           return null;
         }
-        console.error('[LifeCRM] Error fetching events from Supabase:', error);
-        return null;
+        console.log('[LifeCRM] Supabase events fetch failed, trying local API...');
       }
+
+      // Fall back to local API
+      try {
+        const localEvents = await localApi.getCalendarEvents(localApi.DEFAULT_USER_ID);
+        if (localEvents && localEvents.length > 0) {
+          console.log('[LifeCRM] Fetched events from local API:', localEvents.length);
+          return localEvents.map((e: any) => ({
+            id: e.id,
+            title: e.title,
+            type: e.type,
+            date: e.date,
+            time: e.time,
+            duration: e.duration,
+            location: e.location,
+            attendees: typeof e.attendees === 'string' ? JSON.parse(e.attendees) : (e.attendees || []),
+            priority: e.priority,
+            isCompleted: !!e.is_completed,
+            incomeAmount: e.income_amount,
+            incomeSource: e.income_source,
+            paymentStatus: e.payment_status,
+          })) as CalendarEvent[];
+        }
+      } catch (e2) {
+        console.log('[LifeCRM] Local API events also unavailable');
+      }
+      return null;
     },
     staleTime: 1000 * 60 * 5,
   });
@@ -158,9 +184,29 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
           console.log('[LifeCRM] Bills fetch aborted (navigation)');
           return null;
         }
-        console.error('[LifeCRM] Error fetching bills from Supabase:', error);
-        return null;
+        console.log('[LifeCRM] Supabase bills fetch failed, trying local API...');
       }
+
+      // Fall back to local API
+      try {
+        const localBills = await localApi.getBills(localApi.DEFAULT_USER_ID);
+        if (localBills && localBills.length > 0) {
+          console.log('[LifeCRM] Fetched bills from local API:', localBills.length);
+          return localBills.map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            amount: b.amount,
+            dueDate: b.due_date,
+            category: b.category,
+            isPaid: !!b.is_paid,
+            isRecurring: !!b.is_recurring,
+            frequency: b.frequency,
+          })) as Bill[];
+        }
+      } catch (e2) {
+        console.log('[LifeCRM] Local API bills also unavailable');
+      }
+      return null;
     },
     staleTime: 1000 * 60 * 5,
   });

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import * as localApi from '@/lib/api';
 
 export type LocationType = 'home' | 'hotel' | 'airbnb' | 'coffee' | 'coworking';
 export type TransportType = 'none' | 'chauffeur';
@@ -115,46 +116,73 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     queryFn: async () => {
       console.log('[Planner] Fetching plans...');
       
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.log('[Planner] No user logged in');
-        return [] as Plan[];
+      // Try Supabase first
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('plans')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (!error && data) {
+            console.log('[Planner] Fetched plans from Supabase:', data.length);
+            return (data ?? []).map((row: any) => ({
+              id: String(row.id),
+              user_id: row.user_id,
+              date: row.date,
+              date_label: row.date_label,
+              location_type: row.location_type,
+              custom_location: row.custom_location,
+              transport: row.transport,
+              pickup_zip: row.pickup_zip,
+              pickup_city: row.pickup_city,
+              pickup_state: row.pickup_state,
+              dropoff_zip: row.dropoff_zip,
+              dropoff_city: row.dropoff_city,
+              dropoff_state: row.dropoff_state,
+              plan: row.plan,
+              status: row.status || 'pending',
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+            })) as Plan[];
+          }
+        }
+      } catch (e) {
+        console.log('[Planner] Supabase unavailable, trying local API...');
       }
 
-      const { data, error } = await supabase
-        .from('plans')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[Planner] Error fetching plans:', error.message);
-        return [] as Plan[];
+      // Fall back to local API
+      try {
+        const localPlans = await localApi.getPlans(localApi.DEFAULT_USER_ID);
+        if (localPlans && localPlans.length > 0) {
+          console.log('[Planner] Fetched plans from local API:', localPlans.length);
+          return localPlans.map((row: any) => ({
+            id: String(row.id),
+            user_id: row.user_id || localApi.DEFAULT_USER_ID,
+            date: row.date,
+            date_label: row.date_label,
+            location_type: row.location_type,
+            custom_location: row.custom_location,
+            transport: row.transport,
+            pickup_zip: row.pickup_zip,
+            pickup_city: row.pickup_city,
+            pickup_state: row.pickup_state,
+            dropoff_zip: row.dropoff_zip,
+            dropoff_city: row.dropoff_city,
+            dropoff_state: row.dropoff_state,
+            plan: row.plan || row.plan_details,
+            status: row.status || 'pending',
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          })) as Plan[];
+        }
+      } catch (e2) {
+        console.log('[Planner] Local API also unavailable');
       }
 
-      console.log('[Planner] Fetched plans:', data?.length ?? 0);
-      
-      const mapped: Plan[] = (data ?? []).map((row: any) => ({
-        id: String(row.id),
-        user_id: row.user_id,
-        date: row.date,
-        date_label: row.date_label,
-        location_type: row.location_type,
-        custom_location: row.custom_location,
-        transport: row.transport,
-        pickup_zip: row.pickup_zip,
-        pickup_city: row.pickup_city,
-        pickup_state: row.pickup_state,
-        dropoff_zip: row.dropoff_zip,
-        dropoff_city: row.dropoff_city,
-        dropoff_state: row.dropoff_state,
-        plan: row.plan,
-        status: row.status || 'pending',
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      }));
-
-      return mapped;
+      return [] as Plan[];
     },
     staleTime: 1000 * 30,
   });
@@ -169,43 +197,71 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     mutationFn: async (input: CreatePlanInput) => {
       console.log('[Planner] Creating plan:', input);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('Not logged in');
+      // Try Supabase first
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const payload = {
+            user_id: user.id,
+            date: input.date,
+            date_label: input.date_label || null,
+            location_type: input.location_type,
+            custom_location: input.custom_location || null,
+            transport: input.transport,
+            pickup_zip: input.pickup_zip || null,
+            pickup_city: input.pickup_city || null,
+            pickup_state: input.pickup_state || null,
+            dropoff_zip: input.dropoff_zip || null,
+            dropoff_city: input.dropoff_city || null,
+            dropoff_state: input.dropoff_state || null,
+            plan: input.plan_details,
+            status: 'pending',
+          };
+
+          const { data, error } = await supabase
+            .from('plans')
+            .insert(payload)
+            .select('*')
+            .single();
+
+          if (!error && data) {
+            console.log('[Planner] Created plan in Supabase:', data);
+            return data as Plan;
+          }
+        }
+      } catch (e) {
+        console.log('[Planner] Supabase create failed, trying local API...');
       }
 
-      const payload = {
-        user_id: user.id,
-        date: input.date,
-        date_label: input.date_label || null,
-        location_type: input.location_type,
-        custom_location: input.custom_location || null,
-        transport: input.transport,
-        pickup_zip: input.pickup_zip || null,
-        pickup_city: input.pickup_city || null,
-        pickup_state: input.pickup_state || null,
-        dropoff_zip: input.dropoff_zip || null,
-        dropoff_city: input.dropoff_city || null,
-        dropoff_state: input.dropoff_state || null,
-        plan: input.plan_details,
-        status: 'pending',
-      };
-
-      console.log('[Planner] Insert payload:', JSON.stringify(payload, null, 2));
-
-      const { data, error } = await supabase
-        .from('plans')
-        .insert(payload)
-        .select('*')
-        .single();
-
-      if (error) {
-        console.error('[Planner] Create error:', error.message, error);
-        throw error;
+      // Fall back to local API
+      try {
+        const localPlan = {
+          user_id: localApi.DEFAULT_USER_ID,
+          title: input.date_label || `Plan for ${input.date}`,
+          date: input.date,
+          start_time: '',
+          duration_minutes: 60,
+          category: input.location_type,
+          location_type: input.location_type,
+          location: input.custom_location || '',
+          transport: input.transport,
+          assistance: input.plan_details?.assistance || [],
+          payment: input.plan_details?.payment || 'cash',
+          priority: 'medium',
+        };
+        const result = await localApi.createPlan(localPlan);
+        console.log('[Planner] Created plan in local API:', result);
+        return {
+          id: result?.id || `local-${Date.now()}`,
+          user_id: localApi.DEFAULT_USER_ID,
+          date: input.date,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        } as Plan;
+      } catch (e2) {
+        console.error('[Planner] Local API create also failed:', e2);
+        throw new Error('Could not create plan - all backends unavailable');
       }
-
-      console.log('[Planner] Created plan:', data);
-      return data as Plan;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] });

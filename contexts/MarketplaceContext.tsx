@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 
 import { DatabaseService } from '@/lib/database';
+import * as localApi from '@/lib/api';
 
 export type ProductCondition = 'new' | 'like_new' | 'good' | 'fair' | 'used';
 export type ProductCategory = 'electronics' | 'clothing' | 'home' | 'sports' | 'vehicles' | 'collectibles' | 'services' | 'other';
@@ -117,6 +118,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
   const productsQuery = useQuery({
     queryKey: ['marketplaceProducts'],
     queryFn: async ({ signal }) => {
+      // Try Supabase first
       try {
         const dbProducts = await DatabaseService.fetchProducts(undefined, { signal });
         if (dbProducts && dbProducts.length > 0) {
@@ -131,17 +133,46 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
           
           return productsWithInquiries;
         }
-        
-        console.log('[MarketplaceContext] No Supabase products');
-        return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {
           console.log('[MarketplaceContext] Products fetch aborted (navigation)');
           return [];
         }
-        console.error('[MarketplaceContext] Error loading products:', error);
-        return [];
+        console.log('[MarketplaceContext] Supabase unavailable, trying local API...');
       }
+
+      // Fall back to local API
+      try {
+        const localProducts = await localApi.getProducts();
+        if (localProducts && localProducts.length > 0) {
+          console.log('[MarketplaceContext] Fetched products from local API:', localProducts.length);
+          return localProducts.map((p: any) => ({
+            id: p.id,
+            sellerId: p.seller_id,
+            sellerName: p.seller_name,
+            sellerAvatar: p.seller_avatar,
+            sellerUsername: p.seller_username,
+            title: p.title,
+            description: p.description,
+            price: p.price,
+            acceptsSwap: !!p.accepts_swap,
+            condition: p.condition,
+            category: p.category,
+            images: typeof p.images === 'string' ? JSON.parse(p.images) : (p.images || []),
+            location: p.location,
+            createdAt: p.created_at,
+            updatedAt: p.updated_at,
+            views: p.views || 0,
+            saves: p.saves || 0,
+            status: p.status || 'active',
+            inquiries: [],
+          })) as Product[];
+        }
+      } catch (e2) {
+        console.log('[MarketplaceContext] Local API also unavailable');
+      }
+
+      return [];
     },
     staleTime: 1000 * 60 * 5,
   });
@@ -201,9 +232,29 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
   const createProductMutate = createProductMutation.mutate;
 
   const addProduct = useCallback((product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'views' | 'saves' | 'inquiries' | 'status'>) => {
-    console.log('[MarketplaceContext] Creating product (Supabase)...');
+    console.log('[MarketplaceContext] Creating product...');
     createProductMutate(product);
-  }, [createProductMutate]);
+    // Also persist to local API
+    localApi.createProduct({
+      seller_id: product.sellerId,
+      seller_name: product.sellerName,
+      seller_avatar: product.sellerAvatar,
+      seller_username: product.sellerUsername,
+      title: product.title,
+      description: product.description,
+      price: product.price,
+      accepts_swap: product.acceptsSwap,
+      condition: product.condition,
+      category: product.category,
+      images: product.images,
+      location: product.location,
+    }).then(() => {
+      console.log('[MarketplaceContext] Product also saved to local API');
+      queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
+    }).catch(e => {
+      console.log('[MarketplaceContext] Local API product save failed:', e.message);
+    });
+  }, [createProductMutate, queryClient]);
 
   const updateProduct = useCallback(async (productId: string, updates: Partial<Product>) => {
     console.log('[MarketplaceContext] Updating product (Supabase):', productId);

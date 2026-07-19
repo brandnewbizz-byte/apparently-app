@@ -14,6 +14,7 @@ import {
   boatAmenities,
 } from '@/mocks/bookingsData';
 import { DatabaseService } from '@/lib/database';
+import * as localApi from '@/lib/api';
 
 export type { Listing, Booking, ListingCategory, RentalSubmission, RentalSubmissionStatus };
 
@@ -154,6 +155,29 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           return mappedListings;
         }
         console.log('[BookingsContext] No listings found in Supabase');
+        
+        // Try local API fallback
+        try {
+          const localBookings = await localApi.getBookings();
+          if (localBookings && localBookings.length > 0) {
+            console.log('[BookingsContext] Fetched bookings from local API:', localBookings.length);
+            return localBookings.map((b: any) => ({
+              id: b.id,
+              listingId: b.listing_id,
+              hostId: b.user_id || 'u-dev',
+              host: { id: b.user_id || 'u-dev', name: 'Host', avatar: '', isVerified: false },
+              guestId: b.user_id || 'u-dev',
+              startDate: b.start_date,
+              endDate: b.end_date,
+              totalPrice: b.total_price || 0,
+              status: b.status || 'pending',
+              guestCount: b.guest_count || 1,
+              message: b.message || '',
+            })) as any[];
+          }
+        } catch (e2) {
+          console.log('[BookingsContext] Local API also unavailable');
+        }
         return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {

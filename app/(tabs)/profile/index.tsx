@@ -76,7 +76,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   
   const [refreshing, setRefreshing] = useState(false);
   const [streak, setStreak] = useState(6);
