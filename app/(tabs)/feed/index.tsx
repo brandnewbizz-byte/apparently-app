@@ -24,7 +24,9 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Post, Story, mockPosts, mockStories, mockUsers } from '@/mocks/data';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const MEDIA_HEIGHT = Math.min((SCREEN_WIDTH - 24) * 1.25, SCREEN_HEIGHT * 0.62);
+const FEED_MEDIA_WIDTH = SCREEN_WIDTH - 24;
+const INSTAGRAM_PHOTO_HEIGHT = Math.round(FEED_MEDIA_WIDTH * 1.25);
+const INSTAGRAM_REEL_HEIGHT = Math.min(Math.round(FEED_MEDIA_WIDTH * (16 / 9)), Math.round(SCREEN_HEIGHT * 0.82));
 const DOUBLE_TAP_DELAY = 220;
 
 const viewer = {
@@ -62,6 +64,15 @@ function buildSeededComments(post: Post): SocialComment[] {
       isLiked: false,
       replies: [],
     }));
+}
+
+function isReelStyle(post: Post) {
+  const candidate = post as Post & { mediaType?: string; videoUrl?: string; isVideo?: boolean };
+  return Boolean(candidate.videoUrl || candidate.isVideo || candidate.mediaType === 'video' || candidate.mediaType === 'reel');
+}
+
+function getFeedMediaHeight(post: Post) {
+  return isReelStyle(post) ? INSTAGRAM_REEL_HEIGHT : INSTAGRAM_PHOTO_HEIGHT;
 }
 
 function StoryBubble({ story, colors }: { story: Story; colors: any }) {
@@ -221,6 +232,8 @@ function FeedPost({
   onShare: () => void;
 }) {
   const hasMedia = Boolean(post.imageUrl);
+  const mediaHeight = getFeedMediaHeight(post);
+  const reelStyle = isReelStyle(post);
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMediaTap = useCallback(() => {
@@ -254,8 +267,8 @@ function FeedPost({
       </View>
 
       {hasMedia ? (
-        <Pressable onPress={handleMediaTap} style={styles.mediaWrap}>
-          <Image source={{ uri: post.imageUrl }} style={styles.postMedia} resizeMode="cover" />
+        <Pressable onPress={handleMediaTap} style={[styles.mediaWrap, reelStyle && styles.reelMediaWrap]}>
+          <Image source={{ uri: post.imageUrl }} style={[styles.postMedia, { height: mediaHeight }]} resizeMode="cover" />
           {flashHeart ? (
             <View style={styles.heartFlashWrap} pointerEvents="none">
               <Heart size={84} color="#FFFFFF" fill="#FFFFFF" />
@@ -637,8 +650,10 @@ const styles = StyleSheet.create({
   },
   postMedia: {
     width: '100%',
-    height: MEDIA_HEIGHT,
     backgroundColor: '#E5E5E5',
+  },
+  reelMediaWrap: {
+    backgroundColor: '#000000',
   },
   textOnlyCard: {
     minHeight: 250,
