@@ -92,6 +92,7 @@ export default function TabLayout() {
           name="inbox"
           options={{
             title: 'Inbox',
+            tabBarButton: () => null,
           }}
         />
         <Tabs.Screen
