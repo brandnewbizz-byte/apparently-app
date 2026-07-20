@@ -133,6 +133,18 @@ function RootLayoutNav() {
         animation: 'slide_from_right',
       }}
     />
+    <Stack.Screen
+      name="book"
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="swap"
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="inbox"
+      options={{ headerShown: false }}
+    />
     </Stack>
   );
 }

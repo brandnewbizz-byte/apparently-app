@@ -178,7 +178,7 @@ export default function ProfileScreen() {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    router.push('/(tabs)/inbox' as any);
+    router.push('/inbox' as any);
   }, [router]);
 
   const formatBundleDate = (dateString: string | null | undefined) => {
@@ -243,7 +243,7 @@ export default function ProfileScreen() {
             >
               <TouchableOpacity 
                 style={styles.shopButton}
-                onPress={() => router.push('/(tabs)/book' as any)}
+                onPress={() => router.push('/book' as any)}
               >
                 <ShoppingBag size={22} color="#FFFFFF" />
               </TouchableOpacity>
@@ -318,7 +318,7 @@ export default function ProfileScreen() {
 
             <TouchableOpacity 
               style={[styles.quickActionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/(tabs)/book' as any)}
+              onPress={() => router.push('/book' as any)}
             >
               <LinearGradient
                 colors={[ACCENT_COLORS.neonGreen, '#059669']}
