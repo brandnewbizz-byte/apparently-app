@@ -287,7 +287,7 @@ export default function ListingDetailScreen() {
                   const prefillDetails = `I'm interested in ${listing.title} in ${listing.location}. I'm open to offering a service to reduce the cost.\n\nDesired dates: ${bookingDates.start || '—'} to ${bookingDates.end || '—'}.\nBudget/target discount: $`;
 
                   router.push({
-                    pathname: '/swap' as any,
+                    pathname: '/(tabs)/swap' as any,
                     params: {
                       openCreate: '1',
                       mode: 'paid',

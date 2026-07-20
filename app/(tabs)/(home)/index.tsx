@@ -1655,7 +1655,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleNavigate('/inbox')}
+              onPress={() => handleNavigate('/(tabs)/inbox')}
               activeOpacity={0.8}
             >
               <MessageCircle size={20} color={colors.text} />
@@ -1727,7 +1727,7 @@ export default function HomeScreen() {
               <Heart size={20} color="#EC4899" />
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Lifestyle</Text>
             </View>
-            <TouchableOpacity onPress={() => handleNavigate('/book')}>
+            <TouchableOpacity onPress={() => handleNavigate('/(tabs)/book')}>
               <Text style={styles.seeAllText}>See all</Text>
             </TouchableOpacity>
           </View>
@@ -1744,7 +1744,7 @@ export default function HomeScreen() {
                   key={category.id}
                   style={[styles.lifestyleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   activeOpacity={0.8}
-                  onPress={() => handleNavigate('/book')}
+                  onPress={() => handleNavigate('/(tabs)/book')}
                 >
                   <ImageBackground
                     source={{ uri: category.image }}
