@@ -514,11 +514,23 @@ function PostCard({
   colors,
   onPress,
   onSave,
+  onComment,
+  onWatch,
+  onJoin,
+  onCelebrate,
+  onTagTap,
+  onMediaTap,
 }: {
   post: FeedPost;
   colors: any;
   onPress: () => void;
   onSave: (postId: string) => void;
+  onComment: (post: FeedPost) => void;
+  onWatch: (postId: string) => void;
+  onJoin: (postId: string) => void;
+  onCelebrate: (postId: string) => void;
+  onTagTap: (tag: string) => void;
+  onMediaTap: (uri: string) => void;
 }) {
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
   const CatIcon = cat.icon;
@@ -579,7 +591,11 @@ function PostCard({
 
       {/* Media */}
       {post.media && (
-        <View style={post.type === 'live' ? styles.liveMediaWrap : styles.mediaWrap}>
+        <TouchableOpacity
+          style={post.type === 'live' ? styles.liveMediaWrap : styles.mediaWrap}
+          activeOpacity={0.9}
+          onPress={() => onMediaTap(post.media!)}
+        >
           <RNImage
             source={{ uri: post.media }}
             style={[styles.mediaImg, { height: post.type === 'live' ? 240 : post.mediaHeight || 340 }]}
@@ -607,7 +623,7 @@ function PostCard({
               </View>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
       )}
 
       {/* Event/Plan meta */}
@@ -644,9 +660,13 @@ function PostCard({
             <Text style={[styles.metaChipText, { color: cat.color }]}>{post.category}</Text>
           </View>
           {post.tags.slice(0, 3).map((tag) => (
-            <View key={tag} style={[styles.tag, { backgroundColor: colors.accent + '08' }]}>
+            <TouchableOpacity
+              key={tag}
+              style={[styles.tag, { backgroundColor: colors.accent + '08' }]}
+              onPress={() => onTagTap(tag)}
+            >
               <Text style={[styles.tagText, { color: colors.textTertiary }]}>#{tag}</Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
@@ -660,23 +680,26 @@ function PostCard({
           <Bookmark size={16} color={saved ? colors.accent : colors.textTertiary} fill={saved ? colors.accent : 'none'} />
           <Text style={[styles.actionText, { color: colors.textTertiary }]}>{post.stats.saves + (saved ? 1 : 0)}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.background }]}>
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: colors.background }]}
+          onPress={() => onComment(post)}
+        >
           <MessageCircle size={16} color={colors.textTertiary} />
           <Text style={[styles.actionText, { color: colors.textTertiary }]}>{post.stats.comments}</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
         {post.type === 'live' ? (
-          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: '#EF4444' }]}>
+          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: '#EF4444' }]} onPress={() => onWatch(post.id)}>
             <Play size={13} color="#FFF" fill="#FFF" />
             <Text style={styles.joinBtnText}>Watch</Text>
           </TouchableOpacity>
         ) : post.type === 'event' || post.type === 'plan' ? (
-          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: colors.accent }]}>
+          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: colors.accent }]} onPress={() => onJoin(post.id)}>
             <Users size={13} color="#FFF" />
             <Text style={styles.joinBtnText}>Join</Text>
           </TouchableOpacity>
         ) : post.type === 'achievement' ? (
-          <TouchableOpacity style={[styles.celebrateBtn, { borderColor: '#10B98140' }]}>
+          <TouchableOpacity style={[styles.celebrateBtn, { borderColor: '#10B98140' }]} onPress={() => onCelebrate(post.id)}>
             <Sparkles size={13} color="#10B981" />
             <Text style={[styles.celebrateBtnText, { color: '#10B981' }]}>Celebrate</Text>
           </TouchableOpacity>
@@ -853,16 +876,26 @@ export default function FeedScreen() {
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [viewerMedia, setViewerMedia] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const filteredPosts = useMemo(() => {
-    const all = [...userPosts, ...FEED_POSTS];
-    if (activeFilter === 'all') return all;
-    return all.filter((p) => p.type === activeFilter);
-  }, [activeFilter, userPosts]);
+    let all = [...userPosts, ...FEED_POSTS];
+    if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
+    if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
+    // Shuffle on refresh
+    if (refreshKey > 0 && activeFilter === 'all' && !tagFilter) {
+      all = [...all].sort(() => Math.random() - 0.5);
+    }
+    return all;
+  }, [activeFilter, userPosts, tagFilter, refreshKey]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    setTagFilter(null);
+    setRefreshKey((k) => k + 1);
+    setTimeout(() => setRefreshing(false), 800);
   }, []);
 
   const handleSavePost = (postId: string) => {
@@ -901,6 +934,17 @@ export default function FeedScreen() {
     setUserPosts((prev) => [post, ...prev]);
   };
 
+  const handleComment = (post: FeedPost) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedPost(post);
+  };
+
+  const handleTagTap = (tag: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTagFilter((prev) => (prev === tag ? null : tag));
+    setActiveFilter('all');
+  };
+
   const liveCount = FEED_POSTS.filter((p) => p.type === 'live').length;
 
   return (
@@ -911,7 +955,7 @@ export default function FeedScreen() {
           <View>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Feed</Text>
             <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
-              {filteredPosts.length} posts{activeFilter === 'all' && liveCount > 0 ? ` · ${liveCount} live` : ''}
+              {tagFilter ? `#${tagFilter} · ` : ''}{filteredPosts.length} posts{activeFilter === 'all' && !tagFilter && liveCount > 0 ? ` · ${liveCount} live` : ''}
             </Text>
           </View>
           <View style={styles.headerActions}>
@@ -967,6 +1011,18 @@ export default function FeedScreen() {
         </ScrollView>
       </View>
 
+      {/* Tag filter active indicator */}
+      {tagFilter && (
+        <View style={[styles.tagFilterBar, { borderBottomColor: colors.border }]}>
+          <View style={[styles.tagFilterPill, { backgroundColor: colors.accent + '15' }]}>
+            <Text style={[styles.tagFilterText, { color: colors.accent }]}>#{tagFilter}</Text>
+            <TouchableOpacity onPress={() => setTagFilter(null)}>
+              <X size={12} color={colors.accent} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Feed List */}
       <FlatList
         data={filteredPosts}
@@ -980,6 +1036,12 @@ export default function FeedScreen() {
               setSelectedPost(item);
             }}
             onSave={handleSavePost}
+            onComment={handleComment}
+            onWatch={handleWatchLive}
+            onJoin={handleJoinPost}
+            onCelebrate={handleCelebrate}
+            onTagTap={handleTagTap}
+            onMediaTap={(uri) => setViewerMedia(uri)}
           />
         )}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
@@ -994,7 +1056,7 @@ export default function FeedScreen() {
             <FileText size={48} color={colors.textTertiary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No posts yet</Text>
             <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-              Nothing here for "{activeFilter}" right now.
+              {tagFilter ? `No posts tagged #${tagFilter}.` : `Nothing here for "${activeFilter}" right now.`}
             </Text>
           </View>
         )}
@@ -1022,6 +1084,18 @@ export default function FeedScreen() {
         colors={colors}
         insets={insets}
       />
+
+      {/* Media Viewer Modal */}
+      <Modal visible={!!viewerMedia} animationType="fade" statusBarTranslucent>
+        <View style={[styles.viewerContainer, { backgroundColor: '#000' }]}>
+          <TouchableOpacity style={[styles.viewerClose, { top: insets.top + 12 }]} onPress={() => setViewerMedia(null)}>
+            <X size={24} color="#FFF" />
+          </TouchableOpacity>
+          {viewerMedia && (
+            <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="contain" />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1152,4 +1226,12 @@ const styles = StyleSheet.create({
   tagAddBtn: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   tagRemovable: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
   tagRemovableText: { fontSize: 12, fontWeight: '600' },
+  // ── Tag Filter ──
+  tagFilterBar: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
+  tagFilterPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, alignSelf: 'flex-start' },
+  tagFilterText: { fontSize: 13, fontWeight: '700' },
+  // ── Media Viewer ──
+  viewerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  viewerClose: { position: 'absolute', right: 16, zIndex: 10, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.6 },
 });
