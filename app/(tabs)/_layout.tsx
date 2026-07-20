@@ -101,14 +101,14 @@ export default function TabLayout() {
         <Tabs.Screen
           name="book"
           options={{
-            href: null,
+            tabBarButton: () => null,
           }}
         />
         <Tabs.Screen
           name="swap"
           options={{
-            href: null,
             title: 'Swap',
+            tabBarButton: () => null,
           }}
         />
         <Tabs.Screen
