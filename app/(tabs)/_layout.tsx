@@ -53,12 +53,6 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="book"
-          options={{
-            href: null,
-          }}
-        />
-        <Tabs.Screen
           name="feed"
           options={{
             title: 'Feed',
@@ -70,16 +64,9 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="swap"
-          options={{
-            href: null,
-            title: 'Swap',
-          }}
-        />
-        <Tabs.Screen
           name="live"
           options={{
-            title: 'Live',
+            title: 'Spot',
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
                 <Radio size={24} color={color} />
@@ -98,14 +85,6 @@ export default function TabLayout() {
             ),
           }}
         />
-
-        <Tabs.Screen
-          name="inbox"
-          options={{
-            title: 'Inbox',
-            tabBarButton: () => null,
-          }}
-        />
         <Tabs.Screen
           name="profile"
           options={{
@@ -115,6 +94,28 @@ export default function TabLayout() {
                 <User size={24} color={color} />
               </View>
             ),
+          }}
+        />
+
+        {/* Hidden tabs — not shown in tab bar */}
+        <Tabs.Screen
+          name="book"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="swap"
+          options={{
+            href: null,
+            title: 'Swap',
+          }}
+        />
+        <Tabs.Screen
+          name="inbox"
+          options={{
+            title: 'Inbox',
+            tabBarButton: () => null,
           }}
         />
       </Tabs>
