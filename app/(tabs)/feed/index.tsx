@@ -1,8 +1,8 @@
 import {
   Calendar, Clock, MapPin, Users, Sparkles, Dumbbell, Utensils, Palette,
-  Plane, Heart, Music, Zap, Play, Eye,
+  Plane, Heart, Music, Zap, Play, Plus, Eye,
   MessageCircle, CheckCircle2, Wrench, Bookmark,
-  Radio, Image, Video, FileText, X, Send, ChevronLeft,
+  Radio, Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -247,8 +248,8 @@ const FEED_POSTS: FeedPost[] = [
 const FILTERS = [
   { key: 'all', label: 'All', icon: FileText },
   { key: 'live', label: 'Live', icon: Radio },
-  { key: 'photo', label: 'Photos', icon: Image },
-  { key: 'video', label: 'Videos', icon: Video },
+  { key: 'photo', label: 'Photos', icon: ImageIcon },
+  { key: 'video', label: 'Videos', icon: VideoIcon },
   { key: 'event', label: 'Events', icon: Sparkles },
   { key: 'plan', label: 'Plans', icon: Calendar },
 ];
@@ -686,6 +687,156 @@ function PostCard({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Create Post Modal
+// ═══════════════════════════════════════════════════════════════════════════
+
+const POST_CATEGORIES = ['Wellness', 'Fitness', 'Entertainment', 'Creative', 'Dining', 'Travel'];
+
+function CreatePostModal({
+  visible, onClose, onPost, colors, insets,
+}: { visible: boolean; onClose: () => void; onPost: (p: FeedPost) => void; colors: any; insets: any }) {
+  const [postType, setPostType] = useState<PostType>('text');
+  const [caption, setCaption] = useState('');
+  const [category, setCategory] = useState('Wellness');
+  const [mediaUri, setMediaUri] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+
+  const handlePickMedia = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: postType === 'video' ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8, allowsEditing: false,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setMediaUri(result.assets[0].uri);
+      if (postType === 'photo' && result.assets[0].type === 'video') setPostType('video');
+    }
+  };
+
+  const handleAddTag = () => {
+    const t = tagInput.trim().replace(/^#/, '');
+    if (t && !tags.includes(t) && tags.length < 5) { setTags((prev) => [...prev, t]); setTagInput(''); }
+  };
+
+  const handleRemoveTag = (tag: string) => { setTags((prev) => prev.filter((t) => t !== tag)); };
+
+  const handlePost = () => {
+    if (!caption.trim() && !mediaUri) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onPost({
+      id: `user-${Date.now()}`, type: postType,
+      author: { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
+      category, timestamp: 'Just now', caption: caption.trim(),
+      media: mediaUri || undefined, mediaHeight: postType === 'video' ? 420 : 340,
+      tags, stats: { saves: 0, comments: 0 }, comments_list: [],
+    });
+    setCaption(''); setMediaUri(null); setTags([]); setTagInput('');
+    setPostType('text'); setCategory('Wellness'); onClose();
+  };
+
+  const canPost = caption.trim().length > 0 || mediaUri != null;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={[styles.createModal, { backgroundColor: colors.background }]}>
+        <View style={[styles.createHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} style={styles.createBackBtn}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.createTitle, { color: colors.text }]}>New Post</Text>
+          <TouchableOpacity
+            style={[styles.createPostBtn, { backgroundColor: canPost ? colors.accent : colors.surface, opacity: canPost ? 1 : 0.5 }]}
+            onPress={handlePost} disabled={!canPost}
+          >
+            <Text style={{ color: canPost ? '#FFF' : colors.textTertiary, fontWeight: '700', fontSize: 14 }}>Post</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.createBody} contentContainerStyle={{ padding: 16, gap: 16 }}>
+          {/* Post Type */}
+          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Post Type</Text>
+          <View style={styles.typePicker}>
+            {([{ key: 'text', label: 'Text', icon: FileText }, { key: 'photo', label: 'Photo', icon: ImageIcon }, { key: 'video', label: 'Video', icon: VideoIcon }] as const).map((t) => {
+              const Icon = t.icon; const active = postType === t.key;
+              return (
+                <TouchableOpacity key={t.key}
+                  style={[styles.typeOption, { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border }]}
+                  onPress={() => { setPostType(t.key); if (t.key === 'text') setMediaUri(null); }}
+                >
+                  <Icon size={16} color={active ? '#FFF' : colors.textSecondary} />
+                  <Text style={[styles.typeOptionText, { color: active ? '#FFF' : colors.textSecondary }]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {/* Category */}
+          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.catPicker}>
+              {POST_CATEGORIES.map((cat) => {
+                const cfg = CATEGORY_CONFIG[cat]; const CIcon = cfg.icon; const active = category === cat;
+                return (
+                  <TouchableOpacity key={cat}
+                    style={[styles.catOption, { backgroundColor: active ? cfg.bg : colors.surface, borderColor: active ? cfg.color : colors.border }]}
+                    onPress={() => setCategory(cat)}
+                  >
+                    <CIcon size={13} color={cfg.color} />
+                    <Text style={[styles.catOptionText, { color: active ? cfg.color : colors.textSecondary }]}>{cat}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+          {/* Caption */}
+          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Caption</Text>
+          <TextInput
+            style={[styles.createCaptionInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            placeholder="What's on your mind?" placeholderTextColor={colors.textTertiary}
+            value={caption} onChangeText={setCaption} multiline textAlignVertical="top"
+          />
+          {/* Media */}
+          {postType !== 'text' && (
+            <>
+              <Text style={[styles.createLabel, { color: colors.textSecondary }]}>{postType === 'video' ? 'Video' : 'Photo'}</Text>
+              {mediaUri ? (
+                <View style={styles.mediaPreview}>
+                  <RNImage source={{ uri: mediaUri }} style={styles.mediaPreviewImg} />
+                  <TouchableOpacity style={styles.mediaRemoveBtn} onPress={() => setMediaUri(null)}><X size={16} color="#FFF" /></TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={[styles.mediaPickerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handlePickMedia}>
+                  {postType === 'video' ? <VideoIcon size={28} color={colors.textTertiary} /> : <ImageIcon size={28} color={colors.textTertiary} />}
+                  <Text style={[styles.mediaPickerText, { color: colors.textTertiary }]}>{postType === 'video' ? 'Select video' : 'Select photo'}</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+          {/* Tags */}
+          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Tags (up to 5)</Text>
+          <View style={styles.tagInputRow}>
+            <TextInput
+              style={[styles.tagField, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="Add a tag..." placeholderTextColor={colors.textTertiary}
+              value={tagInput} onChangeText={setTagInput} onSubmitEditing={handleAddTag} returnKeyType="done"
+            />
+            <TouchableOpacity style={[styles.tagAddBtn, { backgroundColor: colors.accent }]} onPress={handleAddTag}><Plus size={16} color="#FFF" /></TouchableOpacity>
+          </View>
+          {tags.length > 0 && (
+            <View style={styles.tagRow}>
+              {tags.map((tag) => (
+                <TouchableOpacity key={tag} style={[styles.tagRemovable, { backgroundColor: colors.accent + '15' }]} onPress={() => handleRemoveTag(tag)}>
+                  <Text style={[styles.tagRemovableText, { color: colors.accent }]}>#{tag}</Text>
+                  <X size={10} color={colors.accent} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main Feed Screen
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -697,14 +848,17 @@ export default function FeedScreen() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
+  const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
 
   const filteredPosts = useMemo(() => {
-    if (activeFilter === 'all') return FEED_POSTS;
-    return FEED_POSTS.filter((p) => p.type === activeFilter);
-  }, [activeFilter]);
+    const all = [...userPosts, ...FEED_POSTS];
+    if (activeFilter === 'all') return all;
+    return all.filter((p) => p.type === activeFilter);
+  }, [activeFilter, userPosts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -743,6 +897,10 @@ export default function FeedScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
+  const handleCreatePost = (post: FeedPost) => {
+    setUserPosts((prev) => [post, ...prev]);
+  };
+
   const liveCount = FEED_POSTS.filter((p) => p.type === 'live').length;
 
   return (
@@ -757,6 +915,12 @@ export default function FeedScreen() {
             </Text>
           </View>
           <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[styles.headerBtn, { backgroundColor: colors.accent }]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setShowCreate(true); }}
+            >
+              <Plus size={20} color="#FFF" />
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => router.push('/inbox')}
@@ -849,6 +1013,15 @@ export default function FeedScreen() {
           onCelebrate={handleCelebrate}
         />
       )}
+
+      {/* Create Post Modal */}
+      <CreatePostModal
+        visible={showCreate}
+        onClose={() => setShowCreate(false)}
+        onPost={handleCreatePost}
+        colors={colors}
+        insets={insets}
+      />
     </View>
   );
 }
@@ -954,4 +1127,29 @@ const styles = StyleSheet.create({
   commentInputAvatar: { width: 32, height: 32, borderRadius: 10 },
   commentInputField: { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, fontSize: 14 },
   sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  // ── Create Post Modal ──
+  createModal: { flex: 1 },
+  createHeader: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  createBackBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  createTitle: { fontSize: 17, fontWeight: '700' },
+  createPostBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  createBody: { flex: 1 },
+  createLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  typePicker: { flexDirection: 'row', gap: 10 },
+  typeOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
+  typeOptionText: { fontSize: 14, fontWeight: '600' },
+  catPicker: { flexDirection: 'row', gap: 8 },
+  catOption: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  catOptionText: { fontSize: 13, fontWeight: '600' },
+  createCaptionInput: { borderRadius: 12, borderWidth: 1, padding: 14, minHeight: 100, fontSize: 15, lineHeight: 22 },
+  mediaPickerBtn: { borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', padding: 32, alignItems: 'center', gap: 8 },
+  mediaPickerText: { fontSize: 13, fontWeight: '600' },
+  mediaPreview: { borderRadius: 12, overflow: 'hidden', position: 'relative' },
+  mediaPreviewImg: { width: '100%', height: 240, borderRadius: 12 },
+  mediaRemoveBtn: { position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+  tagInputRow: { flexDirection: 'row', gap: 8 },
+  tagField: { flex: 1, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  tagAddBtn: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  tagRemovable: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
+  tagRemovableText: { fontSize: 12, fontWeight: '600' },
 });
