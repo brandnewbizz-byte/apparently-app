@@ -96,28 +96,6 @@ export default function TabLayout() {
             ),
           }}
         />
-
-        {/* Hidden tabs — not shown in tab bar */}
-        <Tabs.Screen
-          name="book"
-          options={{
-            tabBarButton: () => null,
-          }}
-        />
-        <Tabs.Screen
-          name="swap"
-          options={{
-            title: 'Swap',
-            tabBarButton: () => null,
-          }}
-        />
-        <Tabs.Screen
-          name="inbox"
-          options={{
-            title: 'Inbox',
-            tabBarButton: () => null,
-          }}
-        />
       </Tabs>
   );
 }

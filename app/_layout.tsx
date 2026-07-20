@@ -133,6 +133,30 @@ function RootLayoutNav() {
         animation: 'slide_from_right',
       }}
     />
+    <Stack.Screen
+      name="inbox"
+      options={{
+        headerShown: false,
+        presentation: 'fullScreenModal',
+        animation: 'slide_from_right',
+      }}
+    />
+    <Stack.Screen
+      name="swap"
+      options={{
+        headerShown: false,
+        presentation: 'fullScreenModal',
+        animation: 'slide_from_right',
+      }}
+    />
+    <Stack.Screen
+      name="book"
+      options={{
+        headerShown: false,
+        presentation: 'fullScreenModal',
+        animation: 'slide_from_right',
+      }}
+    />
     </Stack>
   );
 }

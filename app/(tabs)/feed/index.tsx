@@ -997,7 +997,7 @@ export default function FeedScreen() {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    router.push('/(tabs)/inbox' as any);
+    router.push('/inbox' as any);
   }, [router]);
 
   return (
