@@ -4,7 +4,23 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Users table (extends Supabase auth.users)
+-- Profiles table (extends Supabase auth.users — used by auth/signup)
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  phone TEXT,
+  email TEXT,
+  avatar TEXT,
+  is_verified BOOLEAN DEFAULT FALSE,
+  followers_count INTEGER DEFAULT 0,
+  is_live BOOLEAN DEFAULT FALSE,
+  relationship_category TEXT CHECK (relationship_category IN ('family', 'friend', 'business', 'mentor', 'colleague', 'associate', 'investor', 'prospect')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Users table (extends Supabase auth.users — used by app data layer)
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -50,7 +66,7 @@ CREATE TABLE IF NOT EXISTS stories (
 -- Listings table (for rentals: stays, cars, boats)
 CREATE TABLE IF NOT EXISTS listings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  category TEXT NOT NULL CHECK (category IN ('stay', 'car', 'boat')),
+  category TEXT NOT NULL CHECK (category IN ('stay', 'car', 'boat', 'product')),
   title TEXT NOT NULL,
   description TEXT,
   images TEXT[] DEFAULT '{}',
@@ -369,6 +385,7 @@ CREATE INDEX IF NOT EXISTS idx_job_requests_type ON job_requests(type);
 CREATE INDEX IF NOT EXISTS idx_job_requests_status ON job_requests(status);
 
 -- Enable Row Level Security (RLS)
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
@@ -391,6 +408,11 @@ ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_requests ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies: Users can read all public data, but only modify their own
+-- Profiles table policies (for auth/signup)
+CREATE POLICY "Users can view all profiles" ON profiles FOR SELECT USING (true);
+CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
 -- Users table policies
 CREATE POLICY "Users can view all users" ON users FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
@@ -531,6 +553,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Add update triggers to tables with updated_at
+CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_listings_updated_at BEFORE UPDATE ON listings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

@@ -60,6 +60,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
+import { useBundles, type UserBundle } from '@/contexts/BundleContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -100,119 +101,29 @@ interface LifestyleCategory {
   image: string;
 }
 
-const MOCK_BUNDLES: BundlePlan[] = [
-  {
-    id: 'bundle-1',
-    title: 'Weekend Escape Pack',
-    price: 299,
-    items: 5,
-    type: 'lifestyle',
-    image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
-    distance: 15.2,
-    status: 'available',
-    creatorId: 'u-2',
-    summary: ['Beach resort stay', 'Spa treatment', 'Sunset cruise', 'Dinner for 2', 'Breakfast buffet'],
-    creator: {
-      name: 'Sarah Chen',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
-      rating: 4.9,
-      reviews: 127,
-    },
-  },
-  {
-    id: 'bundle-2',
-    title: 'Self-Care Sunday',
-    price: 149,
-    items: 3,
-    type: 'wellness',
-    image: 'https://images.unsplash.com/photo-1600334089648-b0d9d3028eb2?w=800',
-    distance: 2.8,
-    status: 'available',
-    creatorId: 'u-3',
-    summary: ['Full body massage', 'Facial treatment', 'Yoga session'],
-    creator: {
-      name: 'Maya Rose',
-      avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100',
-      rating: 4.8,
-      reviews: 89,
-    },
-  },
-  {
-    id: 'bundle-3',
-    title: 'Date Night Bundle',
-    price: 199,
-    items: 4,
-    type: 'experience',
-    image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=800',
-    distance: 4.5,
-    status: 'available',
-    creatorId: 'u-4',
-    summary: ['Fine dining', 'Movie tickets', 'Dessert bar', 'Roses bouquet'],
-    creator: {
-      name: 'Alex Rivera',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-      rating: 4.7,
-      reviews: 203,
-    },
-  },
-];
+// Helper: convert UserBundle (context) → BundlePlan (swipeable card)
+function userBundleToPlan(b: UserBundle): BundlePlan {
+  return {
+    id: b.id,
+    title: b.title,
+    price: b.price,
+    items: b.items.length,
+    type: b.category || 'lifestyle',
+    image: b.imageUrl,
+    distance: 0,
+    status: b.status === 'grabbed' ? 'grabbed' : 'available',
+    creatorId: 'u-dev',
+    creator: b.creator,
+    summary: b.items.map((i) => i.name),
+    description: b.description,
+    imageUrl: b.imageUrl,
+    category: b.category,
+    grabCount: b.grabCount,
+    location: b.location,
+  };
+}
 
-const MOCK_HOT_BUNDLES: BundlePlan[] = [
-  {
-    id: 'hbundle-1',
-    title: 'Fitness Starter',
-    price: 179,
-    items: 4,
-    type: 'health',
-    image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
-    distance: 1.5,
-    status: 'available',
-    creatorId: 'u-5',
-    summary: ['Personal training', 'Nutrition plan', 'Gym pass', 'Protein pack'],
-    creator: {
-      name: 'Jake Fitness',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100',
-      rating: 4.9,
-      reviews: 312,
-    },
-  },
-  {
-    id: 'hbundle-2',
-    title: 'Adventure Pack',
-    price: 399,
-    items: 6,
-    type: 'outdoor',
-    image: 'https://images.unsplash.com/photo-1501555088652-021faa106b9b?w=800',
-    distance: 22.3,
-    status: 'available',
-    creatorId: 'u-6',
-    summary: ['Hiking guide', 'Kayak rental', 'Camping gear', 'BBQ setup', 'Photo session', 'Trail snacks'],
-    creator: {
-      name: 'Zoe Wild',
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100',
-      rating: 5.0,
-      reviews: 156,
-    },
-  },
-  {
-    id: 'hbundle-3',
-    title: 'Luxury Retreat',
-    price: 599,
-    items: 8,
-    type: 'premium',
-    image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800',
-    distance: 35.0,
-    status: 'available',
-    creatorId: 'u-7',
-    summary: ['5-star suite', 'Private chef', 'Spa day', 'Limo service', 'Wine tasting', 'Golf round', 'Butler service', 'Champagne'],
-    creator: {
-      name: 'Elite Escapes',
-      avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=100',
-      rating: 4.8,
-      reviews: 89,
-    },
-  },
-];
+
 
 const LIFESTYLE_CATEGORIES: LifestyleCategory[] = [
   { id: 'wellness', title: 'Wellness', icon: Heart, color: '#EC4899', count: 24, image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=400' },
@@ -285,12 +196,10 @@ const LIVE_UPDATES = [
   { name: 'Alex', action: 'booked', amount: 85, service: 'Photo', time: '8 mins ago' },
 ];
 
-const CAROUSEL_SETS = {
-  bundles: [
-    { key: 'recommend', label: 'For You', data: MOCK_BUNDLES },
-    { key: 'hot', label: 'Hot', data: MOCK_HOT_BUNDLES },
-  ],
-};
+const BUNDLE_SET_TABS = [
+  { key: 'recommend', label: 'For You' },
+  { key: 'hot', label: 'Hot' },
+];
 
 interface SwipeableBundlesProps {
   bundles: BundlePlan[];
@@ -1353,6 +1262,7 @@ export default function HomeScreen() {
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
   const { sendMessage } = useMessaging();
+  const { bundles: contextBundles, grabBundle } = useBundles();
 
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
@@ -1416,7 +1326,18 @@ export default function HomeScreen() {
     enabled: isAuthenticated,
   });
 
-  const currentBundleSet = CAROUSEL_SETS.bundles[bundleSetIndex];
+  // Compute bundle sets from context
+  const bundleSets = useMemo(() => {
+    const availableBundles = contextBundles.filter((b) => b.status === 'available');
+    const forYou = availableBundles.map(userBundleToPlan);
+    const hot = [...availableBundles].sort((a, b) => b.grabCount - a.grabCount).map(userBundleToPlan);
+    return [
+      { ...BUNDLE_SET_TABS[0], data: forYou },
+      { ...BUNDLE_SET_TABS[1], data: hot },
+    ];
+  }, [contextBundles]);
+
+  const currentBundleSet = bundleSets[bundleSetIndex];
 
   useEffect(() => {
     console.log('Grid load:', {
@@ -1446,9 +1367,10 @@ export default function HomeScreen() {
     console.log('Card action:', 'grab_bundle', bundle.id);
     setConfettiAmount(bundle.price);
     setShowConfetti(true);
+    grabBundle(bundle.id);
     // Create conversation with bundle creator
     sendMessage(bundle.creatorId || 'u-2', `👋 Hey! I'm interested in your bundle "${bundle.title}" for $${bundle.price}. Is it still available?`);
-  }, [sendMessage]);
+  }, [sendMessage, grabBundle]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {
     console.log('Card action:', 'skip_bundle', bundle.id);
@@ -1777,7 +1699,7 @@ export default function HomeScreen() {
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Bundles</Text>
             </View>
             <View style={styles.bundleTabs}>
-              {CAROUSEL_SETS.bundles.map((set, i) => (
+              {bundleSets.map((set, i) => (
                 <TouchableOpacity
                   key={set.key}
                   style={[

@@ -2,6 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import { logger } from '@/lib/logger';
 
 interface UserPersonalization {
   ageRange: string;
@@ -89,7 +90,7 @@ export const [OnboardingProvider, useOnboarding] = createContextHook(() => {
         }
         return defaultData;
       } catch (error) {
-        console.error('[Onboarding] Error parsing stored data:', error);
+        logger.error('Onboarding', 'Error parsing stored data', { error });
         return defaultData;
       }
     },
@@ -170,7 +171,7 @@ export const [OnboardingProvider, useOnboarding] = createContextHook(() => {
     };
     setData(updated);
     saveMutation.mutate(updated);
-    console.log('[Onboarding] Toggled open to connect:', !currentProfile.isOpenToConnect);
+    logger.info('Onboarding', 'Toggled open to connect', { isOpenToConnect: !currentProfile.isOpenToConnect });
   };
 
   return {

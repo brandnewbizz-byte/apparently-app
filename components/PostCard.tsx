@@ -1,6 +1,7 @@
-import { Heart, MessageCircle, MoreHorizontal, BadgeCheck, Zap, Send, X, AtSign, Bookmark, EyeOff, Flag, UserMinus, Link2, Bell, BellOff, Star, CornerDownRight, Copy, MessageSquare, Users, Check, Trash2 } from 'lucide-react-native';
+import { Heart, MessageCircle, ThumbsUp, Share2, MoreHorizontal, BadgeCheck, Zap, Send, X, AtSign, Bookmark, EyeOff, Flag, UserMinus, Link2, Bell, BellOff, Star, CornerDownRight, Copy, MessageSquare, Users, Check, Trash2, MessagesSquare, Forward } from 'lucide-react-native';
 import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, TextInput, Modal, KeyboardAvoidingView, ScrollView, Animated, Alert } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 
@@ -18,6 +19,7 @@ interface Props {
 const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
   const interaction = interactions[post.id] ?? {
@@ -508,7 +510,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             activeOpacity={0.7}
             testID={`post-${post.id}-like`}
           >
-            <Heart
+            <Star
               size={22}
               color={interaction.isLiked ? colors.live : colors.text}
               fill={interaction.isLiked ? colors.live : 'none'}
@@ -524,7 +526,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             activeOpacity={0.7}
             testID={`post-${post.id}-comment`}
           >
-            <MessageCircle size={22} color={colors.text} />
+            <MessagesSquare size={22} color={colors.text} />
             <Text style={[styles.actionText, { color: colors.text }]}>{formatCount(interaction.commentCount)}</Text>
           </TouchableOpacity>
 
@@ -534,7 +536,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             activeOpacity={0.7}
             testID={`post-${post.id}-share`}
           >
-            <Send size={22} color={colors.text} />
+            <Forward size={22} color={colors.text} />
             <Text style={[styles.actionText, { color: colors.text }]}>{formatCount(interaction.shareCount)}</Text>
           </TouchableOpacity>
         </View>
@@ -568,6 +570,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
       <KeyboardAvoidingView
         style={styles.modalContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={insets.bottom}
       >
         <TouchableOpacity
           style={styles.modalBackdrop}
@@ -636,7 +639,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             </View>
           )}
 
-          <View style={[styles.commentInputContainer, { borderTopColor: colors.border }]}>
+          <View style={[styles.commentInputContainer, { borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
             <Image
               source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop' }}
               style={styles.inputAvatar}

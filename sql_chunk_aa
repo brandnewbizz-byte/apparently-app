@@ -1,0 +1,190 @@
+-- Supabase SQL Schema for Apparently App
+-- Run this in your Supabase SQL Editor to create all necessary tables
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Profiles table (extends Supabase auth.users — used by auth/signup)
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  phone TEXT,
+  email TEXT,
+  avatar TEXT,
+  is_verified BOOLEAN DEFAULT FALSE,
+  followers_count INTEGER DEFAULT 0,
+  is_live BOOLEAN DEFAULT FALSE,
+  relationship_category TEXT CHECK (relationship_category IN ('family', 'friend', 'business', 'mentor', 'colleague', 'associate', 'investor', 'prospect')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Users table (extends Supabase auth.users — used by app data layer)
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  avatar TEXT,
+  is_verified BOOLEAN DEFAULT FALSE,
+  followers_count INTEGER DEFAULT 0,
+  is_live BOOLEAN DEFAULT FALSE,
+  relationship_category TEXT CHECK (relationship_category IN ('family', 'friend', 'business', 'mentor', 'colleague', 'associate', 'investor', 'prospect')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Posts table
+CREATE TABLE IF NOT EXISTS posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  image_url TEXT,
+  timestamp TEXT DEFAULT 'Just now',
+  likes INTEGER DEFAULT 0,
+  comments INTEGER DEFAULT 0,
+  shares INTEGER DEFAULT 0,
+  is_apparently BOOLEAN DEFAULT FALSE,
+  apparently_tag TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Stories table
+CREATE TABLE IF NOT EXISTS stories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  image_url TEXT NOT NULL,
+  timestamp TEXT DEFAULT 'Just now',
+  viewed BOOLEAN DEFAULT FALSE,
+  background_color TEXT,
+  text_content TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '24 hours'
+);
+
+-- Listings table (for rentals: stays, cars, boats)
+CREATE TABLE IF NOT EXISTS listings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  category TEXT NOT NULL CHECK (category IN ('stay', 'car', 'boat', 'product')),
+  title TEXT NOT NULL,
+  description TEXT,
+  images TEXT[] DEFAULT '{}',
+  host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  location TEXT NOT NULL,
+  coordinates JSONB,
+  price_per_day DECIMAL(10,2) NOT NULL,
+  price_per_hour DECIMAL(10,2),
+  currency TEXT DEFAULT 'USD',
+  rating DECIMAL(3,2) DEFAULT 0,
+  review_count INTEGER DEFAULT 0,
+  amenity_ids TEXT[] DEFAULT '{}',
+  status TEXT DEFAULT 'available' CHECK (status IN ('available', 'booked', 'unavailable')),
+  instant_book BOOLEAN DEFAULT FALSE,
+  specs JSONB,
+  rules TEXT[] DEFAULT '{}',
+  cancellation_policy TEXT DEFAULT 'flexible' CHECK (cancellation_policy IN ('flexible', 'moderate', 'strict')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Bookings table
+CREATE TABLE IF NOT EXISTS bookings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  total_price DECIMAL(10,2) NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled')),
+  guest_count INTEGER,
+  message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Products table (marketplace)
+CREATE TABLE IF NOT EXISTS products (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  seller_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  seller_name TEXT NOT NULL,
+  seller_avatar TEXT,
+  seller_username TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  price DECIMAL(10,2) NOT NULL,
+  accepts_swap BOOLEAN DEFAULT FALSE,
+  condition TEXT NOT NULL CHECK (condition IN ('new', 'like_new', 'good', 'fair', 'used')),
+  category TEXT NOT NULL CHECK (category IN ('electronics', 'clothing', 'home', 'sports', 'vehicles', 'collectibles', 'services', 'other')),
+  images JSONB DEFAULT '[]',
+  location TEXT,
+  views INTEGER DEFAULT 0,
+  saves INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'sold', 'reserved', 'deleted')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Product inquiries table
+CREATE TABLE IF NOT EXISTS product_inquiries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  user_name TEXT NOT NULL,
+  user_avatar TEXT,
+  message TEXT NOT NULL,
+  is_swap_offer BOOLEAN DEFAULT FALSE,
+  swap_service_id TEXT,
+  read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Calendar events table
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('meeting', 'personal', 'business', 'reminder', 'deadline')),
+  date DATE NOT NULL,
+  time TEXT NOT NULL,
+  duration INTEGER DEFAULT 60,
+  location TEXT,
+  attendees TEXT[] DEFAULT '{}',
+  priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  is_completed BOOLEAN DEFAULT FALSE,
+  income_amount DECIMAL(10,2),
+  income_source TEXT,
+  payment_status TEXT CHECK (payment_status IN ('expected', 'received', 'overdue')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Bills table
+CREATE TABLE IF NOT EXISTS bills (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  due_date DATE NOT NULL,
+  category TEXT NOT NULL CHECK (category IN ('utilities', 'subscription', 'loan', 'insurance', 'rent', 'other')),
+  is_paid BOOLEAN DEFAULT FALSE,
+  is_recurring BOOLEAN DEFAULT FALSE,
+  frequency TEXT CHECK (frequency IN ('weekly', 'monthly', 'quarterly', 'yearly')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Relationships (contacts/CRM) table
+CREATE TABLE IF NOT EXISTS relationships (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  avatar TEXT,
+  category TEXT NOT NULL CHECK (category IN ('family', 'friend', 'business', 'mentor', 'colleague', 'associate', 'investor', 'prospect')),
+  last_interaction TEXT DEFAULT 'Never',
+  last_interaction_date DATE,
+  interaction_score INTEGER DEFAULT 100,
+  notes TEXT,
+  upcoming_birthday DATE,
+  tags TEXT[] DEFAULT '{}',
+  phone TEXT,

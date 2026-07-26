@@ -15,6 +15,7 @@ import {
 } from '@/mocks/lifeCrmData';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 interface LifeCrmData {
   calendarEvents: CalendarEvent[];
@@ -124,24 +125,24 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         if (userId) {
           const dbEvents = await DatabaseService.fetchCalendarEvents(userId, { signal });
           if (dbEvents && dbEvents.length > 0) {
-            console.log('[LifeCRM] Fetched events from Supabase:', dbEvents.length);
+            logger.info('LifeCRM', 'Fetched events from Supabase', { length: dbEvents.length });
             return dbEvents.map(mapDbEventToEvent);
           }
         }
         return null;
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[LifeCRM] Events fetch aborted (navigation)');
+          logger.info('LifeCRM', 'Events fetch aborted (navigation)');
           return null;
         }
-        console.log('[LifeCRM] Supabase events fetch failed, trying local API...');
+        logger.info('LifeCRM', 'Supabase events fetch failed, trying local API...');
       }
 
       // Fall back to local API
       try {
         const localEvents = await localApi.getCalendarEvents(localApi.DEFAULT_USER_ID);
         if (localEvents && localEvents.length > 0) {
-          console.log('[LifeCRM] Fetched events from local API:', localEvents.length);
+          logger.info('LifeCRM', 'Fetched events from local API', { length: localEvents.length });
           return localEvents.map((e: any) => ({
             id: e.id,
             title: e.title,
@@ -159,7 +160,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
           })) as CalendarEvent[];
         }
       } catch (e2) {
-        console.log('[LifeCRM] Local API events also unavailable');
+        logger.info('LifeCRM', 'Local API events also unavailable');
       }
       return null;
     },
@@ -174,24 +175,24 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         if (userId) {
           const dbBills = await DatabaseService.fetchBills(userId, { signal });
           if (dbBills && dbBills.length > 0) {
-            console.log('[LifeCRM] Fetched bills from Supabase:', dbBills.length);
+            logger.info('LifeCRM', 'Fetched bills from Supabase', { length: dbBills.length });
             return dbBills.map(mapDbBillToBill);
           }
         }
         return null;
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[LifeCRM] Bills fetch aborted (navigation)');
+          logger.info('LifeCRM', 'Bills fetch aborted (navigation)');
           return null;
         }
-        console.log('[LifeCRM] Supabase bills fetch failed, trying local API...');
+        logger.info('LifeCRM', 'Supabase bills fetch failed, trying local API...');
       }
 
       // Fall back to local API
       try {
         const localBills = await localApi.getBills(localApi.DEFAULT_USER_ID);
         if (localBills && localBills.length > 0) {
-          console.log('[LifeCRM] Fetched bills from local API:', localBills.length);
+          logger.info('LifeCRM', 'Fetched bills from local API', { length: localBills.length });
           return localBills.map((b: any) => ({
             id: b.id,
             name: b.name,
@@ -204,7 +205,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
           })) as Bill[];
         }
       } catch (e2) {
-        console.log('[LifeCRM] Local API bills also unavailable');
+        logger.info('LifeCRM', 'Local API bills also unavailable');
       }
       return null;
     },
@@ -219,7 +220,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         if (userId) {
           const dbRelationships = await DatabaseService.fetchRelationships(userId, { signal });
           if (dbRelationships && dbRelationships.length > 0) {
-            console.log('[LifeCRM] Fetched relationships from Supabase:', dbRelationships.length);
+            logger.info('LifeCRM', 'Fetched relationships from Supabase', { length: dbRelationships.length });
             
             const relationshipsWithData = await Promise.all(
               dbRelationships.map(async (r) => {
@@ -238,10 +239,10 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         return null;
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[LifeCRM] Relationships fetch aborted (navigation)');
+          logger.info('LifeCRM', 'Relationships fetch aborted (navigation)');
           return null;
         }
-        console.error('[LifeCRM] Error fetching relationships from Supabase:', error);
+        logger.error('LifeCRM', 'Error fetching relationships from Supabase', { error });
         return null;
       }
     },
@@ -261,14 +262,14 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
               ...parsed,
             };
           } catch (parseError) {
-            console.error('[LifeCRM] JSON parse error, clearing corrupted data:', parseError);
+            logger.error('LifeCRM', 'JSON parse error, clearing corrupted data', { parseError });
             await AsyncStorage.removeItem(STORAGE_KEY);
             return defaultData;
           }
         }
         return defaultData;
       } catch (error) {
-        console.error('[LifeCRM] Error loading stored data:', error);
+        logger.error('LifeCRM', 'Error loading stored data', { error });
         return defaultData;
       }
     },
@@ -276,12 +277,12 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
 
   const saveMutation = useMutation({
     mutationFn: async (newData: LifeCrmData) => {
-      console.log('[LifeCRM] Saving data to storage, triggering income recalculation');
+      logger.info('LifeCRM', 'Saving data to storage, triggering income recalculation');
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
       return newData;
     },
     onSuccess: () => {
-      console.log('[LifeCRM] Data saved, invalidating queries to refresh UI');
+      logger.info('LifeCRM', 'Data saved, invalidating queries to refresh UI');
       queryClient.invalidateQueries({ queryKey: ['lifeCrm'] });
     },
   });
@@ -444,7 +445,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         total: estimatedIncomeThisMonth,
       },
     };
-    console.log('[LifeCRM] Income breakdown calculated:', breakdown);
+    logger.info('LifeCRM', 'Income breakdown calculated', { breakdown });
     return breakdown;
   }, [calculateIncomeFromMeetings, calculateIncomeFromEvents, estimatedIncomeToday, estimatedIncomeThisWeek, estimatedIncomeThisMonth]);
 
@@ -473,7 +474,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['supabaseCalendarEvents'] });
     }
     
-    console.log('[LifeCRM] Added new event:', event.title, 'with income:', event.incomeAmount);
+    logger.info('LifeCRM', 'Added new event', { title: event.title, incomeAmount: event.incomeAmount });
   };
 
   const addBill = async (bill: Omit<Bill, 'id'>) => {
@@ -500,7 +501,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['supabaseBills'] });
     }
     
-    console.log('[LifeCRM] Added new bill:', newBill.name);
+    logger.info('LifeCRM', 'Added new bill', { name: newBill.name });
   };
 
   const toggleEventComplete = async (eventId: string) => {
@@ -539,7 +540,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     };
     setData(updated);
     saveMutation.mutate(updated);
-    console.log('[LifeCRM] Updated relationship:', relationshipId);
+    logger.info('LifeCRM', 'Updated relationship', { relationshipId });
   };
 
   const updateCalendarEvent = async (eventId: string, updates: Partial<CalendarEvent>) => {
@@ -566,7 +567,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
     
     await DatabaseService.updateCalendarEvent(eventId, dbUpdates);
-    console.log('[LifeCRM] Updated event:', eventId, 'with updates:', updates);
+    logger.info('LifeCRM', 'Updated event', { eventId, updates });
   };
 
   const deleteCalendarEvent = async (eventId: string) => {
@@ -578,7 +579,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     saveMutation.mutate(updated);
     
     await DatabaseService.deleteCalendarEvent(eventId);
-    console.log('[LifeCRM] Deleted event:', eventId);
+    logger.info('LifeCRM', 'Deleted event', { eventId });
   };
 
   const updateBill = async (billId: string, updates: Partial<Bill>) => {
@@ -599,7 +600,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     if (updates.frequency !== undefined) dbUpdates.frequency = updates.frequency;
     
     await DatabaseService.updateBill(billId, dbUpdates);
-    console.log('[LifeCRM] Updated bill:', billId);
+    logger.info('LifeCRM', 'Updated bill', { billId });
   };
 
   const deleteBill = async (billId: string) => {
@@ -611,7 +612,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     saveMutation.mutate(updated);
     
     await DatabaseService.deleteBill(billId);
-    console.log('[LifeCRM] Deleted bill:', billId);
+    logger.info('LifeCRM', 'Deleted bill', { billId });
   };
 
   const addContact = async (contact: Omit<Relationship, 'id' | 'interactions' | 'meetings' | 'followUps' | 'interactionScore' | 'needsAttention'>) => {
@@ -651,7 +652,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['supabaseRelationships'] });
     }
     
-    console.log('[LifeCRM] Added new contact:', newContact.name);
+    logger.info('LifeCRM', 'Added new contact', { name: newContact.name });
   };
 
   const updateContact = async (contactId: string, updates: Partial<Relationship>) => {
@@ -676,7 +677,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     if (updates.role !== undefined) dbUpdates.role = updates.role;
     
     await DatabaseService.updateRelationship(contactId, dbUpdates);
-    console.log('[LifeCRM] Updated contact:', contactId);
+    logger.info('LifeCRM', 'Updated contact', { contactId });
   };
 
   const deleteContact = async (contactId: string) => {
@@ -688,7 +689,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     saveMutation.mutate(updated);
     
     await DatabaseService.deleteRelationship(contactId);
-    console.log('[LifeCRM] Deleted contact:', contactId);
+    logger.info('LifeCRM', 'Deleted contact', { contactId });
   };
 
   const addInteraction = async (contactId: string, interaction: Omit<ContactInteraction, 'id'>, autoCompleteReminders = true) => {
@@ -719,7 +720,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
             : r.followUps;
           
           if (autoCompleteReminders && r.followUps.some(f => f.status !== 'completed')) {
-            console.log('[LifeCRM] Auto-completed reminders for contact:', r.name);
+            logger.info('LifeCRM', 'Auto-completed reminders for contact', { name: r.name });
           }
           
           return {
@@ -748,7 +749,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       outcome: interaction.outcome,
     });
     
-    console.log('[LifeCRM] Added interaction for contact:', contactId, 'at', currentTime);
+    logger.info('LifeCRM', 'Added interaction for contact', { contactId, currentTime });
   };
 
   const addMeeting = async (contactId: string, meeting: Omit<ContactMeeting, 'id' | 'linkedContactId'>) => {
@@ -782,7 +783,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       income_status: meeting.incomeStatus,
     });
     
-    console.log('[LifeCRM] Added meeting for contact:', contactId, meeting.title, 'with income:', meeting.expectedIncome);
+    logger.info('LifeCRM', 'Added meeting for contact', { contactId, title: meeting.title, expectedIncome: meeting.expectedIncome });
   };
 
   const updateMeeting = async (contactId: string, meetingId: string, updates: Partial<ContactMeeting>) => {
@@ -814,7 +815,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     if (updates.incomeStatus !== undefined) dbUpdates.income_status = updates.incomeStatus;
     
     await DatabaseService.updateContactMeeting(meetingId, dbUpdates);
-    console.log('[LifeCRM] Updated meeting:', meetingId, 'with updates:', updates);
+    logger.info('LifeCRM', 'Updated meeting', { meetingId, updates });
   };
 
   const deleteMeeting = async (contactId: string, meetingId: string) => {
@@ -833,7 +834,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     saveMutation.mutate(updated);
     
     await DatabaseService.deleteContactMeeting(meetingId);
-    console.log('[LifeCRM] Deleted meeting:', meetingId);
+    logger.info('LifeCRM', 'Deleted meeting', { meetingId });
   };
 
   const deleteFollowUp = async (contactId: string, followUpId: string) => {
@@ -852,7 +853,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     saveMutation.mutate(updated);
     
     await DatabaseService.deleteContactFollowUp(followUpId);
-    console.log('[LifeCRM] Deleted follow-up:', followUpId);
+    logger.info('LifeCRM', 'Deleted follow-up', { followUpId });
   };
 
   const addFollowUp = async (contactId: string, followUp: Omit<ContactFollowUp, 'id' | 'linkedContactId'>) => {
@@ -881,7 +882,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       notes: followUp.notes,
     });
     
-    console.log('[LifeCRM] Added follow-up for contact:', contactId, followUp.title);
+    logger.info('LifeCRM', 'Added follow-up for contact', { contactId, title: followUp.title });
   };
 
   const completeFollowUp = async (contactId: string, followUpId: string) => {
@@ -946,11 +947,11 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
     };
     setData(updated);
     saveMutation.mutate(updated);
-    console.log('[LifeCRM] Dismissed suggestion:', suggestionId);
+    logger.info('LifeCRM', 'Dismissed suggestion', { suggestionId });
   };
 
   const handleSuggestionAction = (suggestion: WellnessSuggestion, action: 'paid' | 'completed' | 'disregard') => {
-    console.log('[LifeCRM] Suggestion action:', suggestion.title, action);
+    logger.info('LifeCRM', 'Suggestion action', { title: suggestion.title, action });
     
     if (action === 'disregard') {
       dismissSuggestion(suggestion.id);
@@ -961,13 +962,13 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       if (action === 'paid') {
         markBillPaid(suggestion.linkedId);
         dismissSuggestion(suggestion.id);
-        console.log('[LifeCRM] Marked bill as paid from suggestion:', suggestion.linkedId);
+        logger.info('LifeCRM', 'Marked bill as paid from suggestion', { linkedId: suggestion.linkedId });
       }
     } else if (suggestion.linkType === 'event' && suggestion.linkedId) {
       if (action === 'completed') {
         toggleEventComplete(suggestion.linkedId);
         dismissSuggestion(suggestion.id);
-        console.log('[LifeCRM] Marked event as completed from suggestion:', suggestion.linkedId);
+        logger.info('LifeCRM', 'Marked event as completed from suggestion', { linkedId: suggestion.linkedId });
       }
     }
   };

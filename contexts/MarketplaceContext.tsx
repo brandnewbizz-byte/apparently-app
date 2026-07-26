@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export type ProductCondition = 'new' | 'like_new' | 'good' | 'fair' | 'used';
 export type ProductCategory = 'electronics' | 'clothing' | 'home' | 'sports' | 'vehicles' | 'collectibles' | 'services' | 'other';
@@ -75,7 +76,7 @@ const CURRENT_USER = {
   id: 'current-user',
   name: 'You',
   username: 'you',
-  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+  avatar: '',
 };
 
 const mapDbProductToProduct = (p: any, inquiries: any[] = []): Product => ({
@@ -122,7 +123,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
       try {
         const dbProducts = await DatabaseService.fetchProducts(undefined, { signal });
         if (dbProducts && dbProducts.length > 0) {
-          console.log('[MarketplaceContext] Fetched products from Supabase:', dbProducts.length);
+          logger.info('MarketplaceContext', 'Fetched products from Supabase', { length: dbProducts.length });
           
           const productsWithInquiries = await Promise.all(
             dbProducts.map(async (p) => {
@@ -135,17 +136,17 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
         }
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[MarketplaceContext] Products fetch aborted (navigation)');
+          logger.info('MarketplaceContext', 'Products fetch aborted (navigation)');
           return [];
         }
-        console.log('[MarketplaceContext] Supabase unavailable, trying local API...');
+        logger.info('MarketplaceContext', 'Supabase unavailable, trying local API...');
       }
 
       // Fall back to local API
       try {
         const localProducts = await localApi.getProducts();
         if (localProducts && localProducts.length > 0) {
-          console.log('[MarketplaceContext] Fetched products from local API:', localProducts.length);
+          logger.info('MarketplaceContext', 'Fetched products from local API', { length: localProducts.length });
           return localProducts.map((p: any) => ({
             id: p.id,
             sellerId: p.seller_id,
@@ -169,7 +170,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
           })) as Product[];
         }
       } catch (e2) {
-        console.log('[MarketplaceContext] Local API also unavailable');
+        logger.info('MarketplaceContext', 'Local API also unavailable');
       }
 
       return [];
@@ -180,7 +181,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
   const savedQuery = useQuery({
     queryKey: ['savedProducts'],
     queryFn: async () => {
-      console.log('[MarketplaceContext] Saved products are backend-only (no local state)');
+      logger.info('MarketplaceContext', 'Saved products are backend-only (no local state)');
       return [] as string[];
     },
   });
@@ -205,7 +206,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
         status: 'active',
       });
       if (dbProduct) {
-        console.log('[MarketplaceContext] Created product in Supabase:', dbProduct.id);
+        logger.info('MarketplaceContext', 'Created product in Supabase', { id: dbProduct.id });
         return dbProduct;
       }
       return null;
@@ -232,7 +233,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
   const createProductMutate = createProductMutation.mutate;
 
   const addProduct = useCallback((product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'views' | 'saves' | 'inquiries' | 'status'>) => {
-    console.log('[MarketplaceContext] Creating product...');
+    logger.info('MarketplaceContext', 'Creating product...');
     createProductMutate(product);
     // Also persist to local API
     localApi.createProduct({
@@ -249,15 +250,15 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
       images: product.images,
       location: product.location,
     }).then(() => {
-      console.log('[MarketplaceContext] Product also saved to local API');
+      logger.info('MarketplaceContext', 'Product also saved to local API');
       queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
     }).catch(e => {
-      console.log('[MarketplaceContext] Local API product save failed:', e.message);
+      logger.info('MarketplaceContext', 'Local API product save failed', { message: e.message });
     });
   }, [createProductMutate, queryClient]);
 
   const updateProduct = useCallback(async (productId: string, updates: Partial<Product>) => {
-    console.log('[MarketplaceContext] Updating product (Supabase):', productId);
+    logger.info('MarketplaceContext', 'Updating product (Supabase)', { productId });
 
     const dbUpdates: any = {};
     if (updates.title !== undefined) dbUpdates.title = updates.title;
@@ -274,19 +275,19 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
     
     await DatabaseService.updateProduct(productId, dbUpdates);
     queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
-    console.log('[MarketplaceContext] Updated product:', productId);
+    logger.info('MarketplaceContext', 'Updated product', { productId });
   }, [queryClient]);
 
   const deleteProduct = useCallback(async (productId: string) => {
     await DatabaseService.updateProduct(productId, { status: 'deleted' });
     queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
-    console.log('[MarketplaceContext] Deleted product:', productId);
+    logger.info('MarketplaceContext', 'Deleted product', { productId });
   }, [queryClient]);
 
   const markAsSold = useCallback(async (productId: string) => {
     await DatabaseService.updateProduct(productId, { status: 'sold' });
     queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
-    console.log('[MarketplaceContext] Marked as sold:', productId);
+    logger.info('MarketplaceContext', 'Marked as sold', { productId });
   }, [queryClient]);
 
   const saveProduct = useCallback(async (productId: string) => {
@@ -327,11 +328,11 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
     });
     
     queryClient.invalidateQueries({ queryKey: ['marketplaceProducts'] });
-    console.log('[MarketplaceContext] Added inquiry to product:', productId);
+    logger.info('MarketplaceContext', 'Added inquiry to product', { productId });
   }, [queryClient]);
 
   const markInquiryAsRead = useCallback((_productId: string, _inquiryId: string) => {
-    console.log('[MarketplaceContext] markInquiryAsRead not implemented (backend-only)');
+    logger.info('MarketplaceContext', 'markInquiryAsRead not implemented (backend-only)');
   }, []);
 
   const getProductById = useCallback((productId: string) => {

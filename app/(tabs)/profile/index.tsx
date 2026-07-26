@@ -9,6 +9,7 @@ import {
   Package,
   Eye,
   MessageSquare,
+  MessageCircle,
   ShoppingBag,
   Edit3,
   Star,
@@ -17,6 +18,10 @@ import {
   User,
   Briefcase,
   Heart,
+  X,
+  Camera,
+  Bookmark,
+  Send,
 } from 'lucide-react-native';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
@@ -29,6 +34,10 @@ import {
   Image,
   Platform,
   RefreshControl,
+  Modal,
+  TextInput,
+  Dimensions,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +46,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useBundles } from '@/contexts/BundleContext';
+import { useSocial } from '@/contexts/SocialContext';
+import { useUserPosts } from '@/contexts/UserPostsContext';
 
 const ACCENT_COLORS = {
   gold: '#FFB800',
@@ -72,17 +84,158 @@ interface StatItem {
   bgColor: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// My Posts Grid — Instagram 3-column grid
+// ═══════════════════════════════════════════════════════════════════════════
+
+function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any) => void }) {
+  const { getAllPosts } = useSocial();
+  const { userPosts } = useUserPosts();
+
+  // Merge social posts with user-created posts (from camera/posting flow)
+  // Tag user posts so we can identify which ones are deletable
+  const socialPosts = (getAllPosts() || []).map((sp: any) => ({ ...sp, isOwnPost: false }));
+  const userContextPosts: any[] = userPosts.map(up => ({
+    id: up.id,
+    imageUrl: up.mediaUri,
+    caption: up.caption,
+    likes: 0,
+    timestamp: up.timestamp,
+    type: 'photo',
+    isOwnPost: true,
+  }));
+  const allPosts = [...userContextPosts, ...socialPosts];
+
+  if (!allPosts || allPosts.length === 0) {
+    return (
+      <View style={profileStyles.gridEmpty}>
+        <View style={[profileStyles.gridEmptyIcon, { backgroundColor: ACCENT_COLORS.blueDim }]}>
+          <Camera size={28} color={ACCENT_COLORS.blue} />
+        </View>
+        <Text style={[profileStyles.gridEmptyTitle, { color: colors.text }]}>No posts yet</Text>
+        <Text style={[profileStyles.gridEmptyText, { color: colors.textSecondary }]}>
+          Create a post to see it here
+        </Text>
+      </View>
+    );
+  }
+
+  const COL_COUNT = 3;
+  const GAP = 2;
+  const IMG_SIZE = (Dimensions.get('window').width - GAP * (COL_COUNT - 1)) / COL_COUNT;
+
+  return (
+    <View style={profileStyles.grid}>
+      {allPosts.map((post: any, idx: number) => (
+        <TouchableOpacity
+          key={post.id || idx}
+          activeOpacity={0.8}
+          style={{ width: IMG_SIZE, height: IMG_SIZE, marginRight: (idx % COL_COUNT) < COL_COUNT - 1 ? GAP : 0, marginBottom: GAP }}
+          onPress={() => {
+            if (onPostPress) onPostPress(post);
+          }}
+        >
+          <Image
+            source={{ uri: post.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400' }}
+            style={{ width: '100%', height: '100%', backgroundColor: '#1a1a2e' }}
+            resizeMode="cover"
+          />
+          {post.likes > 0 && (
+            <View style={profileStyles.gridOverlay}>
+              <Heart size={16} color="#FFF" fill="#FFF" />
+              <Text style={profileStyles.gridOverlayText}>{post.likes}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+function EditProfileModal({
+  visible, onClose, colors,
+}: { visible: boolean; onClose: () => void; colors: any }) {
+  const { user } = useAuth();
+  const [name, setName] = useState(user?.fullName || 'Roniel Lewis');
+  const [bio, setBio] = useState('Building the future of compliance automation.');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+
+  const handleSave = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // In a real app: update user metadata via Supabase/Auth
+    console.log('[Profile] Saved:', { name, bio, avatarUrl });
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={[styles.editModal, { backgroundColor: colors.background }]}>
+        <View style={[styles.editHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.editTitle, { color: colors.text }]}>Edit Profile</Text>
+          <TouchableOpacity
+            style={[styles.editSaveBtn, { backgroundColor: colors.accent }]}
+            onPress={handleSave}
+          >
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Save</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }}>
+          {/* Avatar */}
+          <View style={{ alignItems: 'center' }}>
+            <View style={styles.editAvatarWrap}>
+              <Image
+                source={{ uri: avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200' }}
+                style={styles.editAvatar}
+              />
+              <View style={[styles.editAvatarBadge, { backgroundColor: colors.accent }]}>
+                <Camera size={12} color="#FFF" />
+              </View>
+            </View>
+            <TouchableOpacity>
+              <Text style={[styles.editAvatarHint, { color: colors.accent }]}>Change photo</Text>
+            </TouchableOpacity>
+          </View>
+          {/* Name */}
+          <View>
+            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Display Name</Text>
+            <TextInput
+              style={[styles.editInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              value={name} onChangeText={setName}
+            />
+          </View>
+          {/* Bio */}
+          <View>
+            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Bio</Text>
+            <TextInput
+              style={[styles.editInput, styles.editBio, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              value={bio} onChangeText={setBio} multiline textAlignVertical="top"
+            />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
+  const { myBundles, deleteBundle } = useBundles();
   
   const [refreshing, setRefreshing] = useState(false);
   const [streak, setStreak] = useState(6);
   const [totalEarnings, setTotalEarnings] = useState(128);
   const [grabbedBundles, setGrabbedBundles] = useState<GrabbedBundle[]>([]);
   const [loadingBundles, setLoadingBundles] = useState(true);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'plans'>('posts');
+
+  // Helper: get post count without inline hook call
+  const { getAllPosts } = useSocial();
+  const getAllPostsForCount = useCallback(() => getAllPosts().length, [getAllPosts]);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -258,7 +411,7 @@ export default function ProfileScreen() {
               <View style={styles.avatarSection}>
                 <View style={styles.avatarContainer}>
                   <Image source={{ uri: userAvatar }} style={styles.avatar} />
-                  <TouchableOpacity style={styles.editAvatarButton}>
+                  <TouchableOpacity style={styles.editAvatarButton} onPress={() => setShowEditProfile(true)}>
                     <Edit3 size={14} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
@@ -277,173 +430,124 @@ export default function ProfileScreen() {
             </LinearGradient>
           </View>
 
-          {/* Stats Grid */}
-          <View style={[styles.statsSection, { backgroundColor: colors.background }]}>
-            <View style={styles.statsGrid}>
-              {stats.map((stat, index) => (
-                <View 
-                  key={index} 
-                  style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                >
-                  <View style={[styles.statIconContainer, { backgroundColor: stat.bgColor }]}>
-                    {stat.icon}
-                  </View>
-                  <Text style={[styles.statValue, { color: stat.color }]}>{stat.value}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{stat.label}</Text>
-                </View>
-              ))}
+          {/* Instagram-Style Stats Row */}
+          <View style={{ paddingHorizontal: 32, paddingTop: 28, paddingBottom: 16, flexDirection: 'row', justifyContent: 'space-around' }}>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{getAllPostsForCount()}</Text>
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>posts</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{myBundles.length}</Text>
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>bundles</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{grabbedBundles.length}</Text>
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>grabbed</Text>
             </View>
           </View>
 
-          {/* Quick Actions */}
-          <View style={styles.quickActionsSection}>
-            <TouchableOpacity 
-              style={[styles.quickActionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/(tabs)/planner' as any)}
-            >
-              <LinearGradient
-                colors={[ACCENT_COLORS.gold, '#FF8C00']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.quickActionGradient}
+          {/* Tab Bar */}
+          <View style={{ flexDirection: 'row', borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: colors.border }}>
+            {(['posts', 'bundles', 'plans'] as const).map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: activeTab === tab ? colors.text : 'transparent' }}
               >
-                <Calendar size={24} color="#FFFFFF" />
-              </LinearGradient>
-              <View style={styles.quickActionText}>
-                <Text style={[styles.quickActionTitle, { color: colors.text }]}>Plan Your Day</Text>
-                <Text style={[styles.quickActionSubtitle, { color: colors.textSecondary }]}>Optimize schedule</Text>
-              </View>
-              <ChevronRight size={20} color={colors.textTertiary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.quickActionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/book' as any)}
-            >
-              <LinearGradient
-                colors={[ACCENT_COLORS.neonGreen, '#059669']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.quickActionGradient}
-              >
-                <TrendingUp size={24} color="#FFFFFF" />
-              </LinearGradient>
-              <View style={styles.quickActionText}>
-                <Text style={[styles.quickActionTitle, { color: colors.text }]}>Browse Gigs</Text>
-                <Text style={[styles.quickActionSubtitle, { color: colors.textSecondary }]}>Find opportunities</Text>
-              </View>
-              <ChevronRight size={20} color={colors.textTertiary} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Grabbed Plans Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>My Grabbed Plans</Text>
-              <Award size={20} color={ACCENT_COLORS.gold} />
-            </View>
-            
-            {loadingBundles ? (
-              <View style={[styles.bundleLoadingContainer, { backgroundColor: colors.surface }]}>
-                <Text style={[styles.bundleLoadingText, { color: colors.textSecondary }]}>Loading plans...</Text>
-              </View>
-            ) : grabbedBundles.length === 0 ? (
-              <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
-                  <Package size={32} color={ACCENT_COLORS.gold} />
-                </View>
-                <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No plans yet</Text>
-                <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>
-                  Grab a plan bundle to see it here
+                <Text style={{ fontSize: 12, fontWeight: activeTab === tab ? '700' : '500', color: activeTab === tab ? colors.text : colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  {tab}
                 </Text>
-                <TouchableOpacity 
-                  style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.goldDim }]}
-                  onPress={() => router.push('/(tabs)/planner' as any)}
-                >
-                  <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.gold }]}>Browse Plans</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.bundlesList}>
-                {grabbedBundles.slice(0, 3).map((bundle) => (
-                  <TouchableOpacity 
-                    key={bundle.id} 
-                    style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    onPress={() => handleViewBundleDetails(bundle)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.bundleCardLeft}>
-                      <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
-                        <Package size={20} color={ACCENT_COLORS.gold} />
-                      </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Tab Content */}
+          <View style={{ paddingBottom: 100 }}>
+            {activeTab === 'posts' && <UserPostsGrid colors={colors} />}
+
+            {activeTab === 'bundles' && (
+              <View style={{ paddingTop: 8 }}>
+                {myBundles.length === 0 ? (
+                  <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.purpleDim }]}>
+                      <Package size={32} color={ACCENT_COLORS.purple} />
                     </View>
-                    <View style={styles.bundleCardContent}>
-                      <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>
-                        {bundle.title}
-                      </Text>
-                      <View style={styles.bundleMetaRow}>
-                        <View style={[styles.bundleStatusBadge, { backgroundColor: `${getStatusColor(bundle.status)}20` }]}>
-                          <Text style={[styles.bundleStatusText, { color: getStatusColor(bundle.status) }]}>
-                            {bundle.status.replace('_', ' ')}
-                          </Text>
+                    <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No bundles yet</Text>
+                    <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Create a bundle to offer multiple services together</Text>
+                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.purpleDim }]} onPress={() => router.push('/bundle-builder' as any)}>
+                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.purple }]}>Create Bundle</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  myBundles.map((bundle) => (
+                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7}>
+                      <View style={styles.bundleCardLeft}>
+                        <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.purpleDim }]}>
+                          <Package size={20} color={ACCENT_COLORS.purple} />
                         </View>
-                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>
-                          {formatBundleDate(bundle.booked_at)}
-                        </Text>
                       </View>
+                      <View style={styles.bundleCardContent}>
+                        <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>{bundle.title}</Text>
+                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>{bundle.grabCount} grabs</Text>
+                      </View>
+                      <View style={styles.bundleCardRight}>
+                        <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${bundle.price}</Text>
+                        <TouchableOpacity onPress={() => deleteBundle(bundle.id)}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+
+            {activeTab === 'plans' && (
+              <View style={{ paddingTop: 8 }}>
+                {loadingBundles ? (
+                  <View style={[styles.bundleLoadingContainer, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.bundleLoadingText, { color: colors.textSecondary }]}>Loading...</Text>
+                  </View>
+                ) : grabbedBundles.length === 0 ? (
+                  <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
+                      <Package size={32} color={ACCENT_COLORS.gold} />
                     </View>
-                    <View style={styles.bundleCardRight}>
-                      <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>
-                        ${bundle.proposed_budget}
-                      </Text>
-                      <ChevronRight size={18} color={colors.textTertiary} />
-                    </View>
-                  </TouchableOpacity>
-                ))}
-                {grabbedBundles.length > 3 && (
-                  <TouchableOpacity style={styles.viewAllButton}>
-                    <Text style={[styles.viewAllText, { color: ACCENT_COLORS.gold }]}>
-                      View all {grabbedBundles.length} plans
-                    </Text>
-                  </TouchableOpacity>
+                    <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No plans yet</Text>
+                    <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Grab a plan bundle to see it here</Text>
+                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.goldDim }]} onPress={() => router.push('/(tabs)/planner' as any)}>
+                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.gold }]}>Browse Plans</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  grabbedBundles.map((bundle) => (
+                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} onPress={() => handleViewBundleDetails(bundle)} activeOpacity={0.7}>
+                      <View style={styles.bundleCardLeft}>
+                        <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
+                          <Package size={20} color={ACCENT_COLORS.gold} />
+                        </View>
+                      </View>
+                      <View style={styles.bundleCardContent}>
+                        <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>{bundle.title}</Text>
+                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>{formatBundleDate(bundle.booked_at)}</Text>
+                      </View>
+                      <View style={styles.bundleCardRight}>
+                        <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${bundle.proposed_budget}</Text>
+                        <ChevronRight size={18} color={colors.textTertiary} />
+                      </View>
+                    </TouchableOpacity>
+                  ))
                 )}
               </View>
             )}
           </View>
-
-          {/* Activity Section */}
-          <View style={[styles.section, { marginBottom: 100 }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Activity</Text>
-              <Heart size={20} color={ACCENT_COLORS.coral} />
-            </View>
-            
-            <View style={[styles.activityCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={styles.activityItem}>
-                <View style={[styles.activityDot, { backgroundColor: ACCENT_COLORS.neonGreen }]} />
-                <Text style={[styles.activityText, { color: colors.textSecondary }]}>
-                  Earned <Text style={{ color: ACCENT_COLORS.neonGreen, fontWeight: '600' as const }}>$25</Text> from referral bonus
-                </Text>
-                <Text style={[styles.activityTime, { color: colors.textTertiary }]}>2h ago</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <View style={[styles.activityDot, { backgroundColor: ACCENT_COLORS.gold }]} />
-                <Text style={[styles.activityText, { color: colors.textSecondary }]}>
-                  Completed <Text style={{ color: ACCENT_COLORS.gold, fontWeight: '600' as const }}>VA Task</Text>
-                </Text>
-                <Text style={[styles.activityTime, { color: colors.textTertiary }]}>5h ago</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <View style={[styles.activityDot, { backgroundColor: ACCENT_COLORS.blue }]} />
-                <Text style={[styles.activityText, { color: colors.textSecondary }]}>
-                  Received <Text style={{ color: ACCENT_COLORS.coral, fontWeight: '600' as const }}>5-star</Text> review
-                </Text>
-                <Text style={[styles.activityTime, { color: colors.textTertiary }]}>1d ago</Text>
-              </View>
-            </View>
-          </View>
         </Animated.View>
       </ScrollView>
+
+      {/* Edit Profile Modal */}
+      <EditProfileModal
+        visible={showEditProfile}
+        onClose={() => setShowEditProfile(false)}
+        colors={colors}
+      />
     </View>
   );
 }
@@ -751,4 +855,53 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 12,
   },
+  // ── Edit Profile Modal ──
+  editModal: { flex: 1 },
+  editHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  editTitle: { fontSize: 17, fontWeight: '700' },
+  editSaveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  editAvatarWrap: { position: 'relative', marginBottom: 8 },
+  editAvatar: { width: 80, height: 80, borderRadius: 40 },
+  editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
+  editAvatarHint: { fontSize: 13, fontWeight: '600' },
+  editLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  editInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  editBio: { minHeight: 80 },
+});
+
+// ── Instagram Post Styles ──
+const igStyles = StyleSheet.create({
+  postsContainer: { gap: 16 },
+  postCard: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  postHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10 },
+  postHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  postAvatar: { width: 36, height: 36, borderRadius: 18 },
+  postHeaderText: { gap: 1 },
+  postUsername: { fontSize: 13, fontWeight: '700' },
+  postLocation: { fontSize: 11 },
+  postMenuBtn: { padding: 4 },
+  postMenuDots: { fontSize: 18, fontWeight: '700', letterSpacing: 1 },
+  postImage: { width: '100%', height: 340 },
+  actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 10 },
+  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionBtn: { padding: 4 },
+  likesRow: { paddingHorizontal: 12, paddingTop: 6 },
+  likesText: { fontSize: 13, lineHeight: 18 },
+  boldText: { fontWeight: '700' },
+  captionRow: { paddingHorizontal: 12, paddingTop: 4 },
+  captionText: { fontSize: 13, lineHeight: 18 },
+  commentsLink: { paddingHorizontal: 12, paddingTop: 4 },
+  commentsLinkText: { fontSize: 13 },
+  postTimestamp: { fontSize: 11, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 12, textTransform: 'uppercase', letterSpacing: 0.3 },
+});
+
+// ── Instagram Grid Styles ──
+const profileStyles = StyleSheet.create({
+  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 0 },
+  gridEmpty: { paddingVertical: 48, alignItems: 'center', paddingHorizontal: 24 },
+  gridEmptyIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  gridEmptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  gridEmptyText: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  gridOverlay: { position: 'absolute', bottom: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+  gridOverlayText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
 });

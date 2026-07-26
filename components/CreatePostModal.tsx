@@ -23,11 +23,13 @@ import { useSocial } from '@/contexts/SocialContext';
 interface CreatePostModalProps {
   visible: boolean;
   onClose: () => void;
+  onPost?: (data: { caption: string; mediaUri?: string }) => void;
+  preloadMediaUri?: string | null;
 }
 
 type PrivacyOption = 'public' | 'connections' | 'private';
 
-export default function CreatePostModal({ visible, onClose }: CreatePostModalProps) {
+export default function CreatePostModal({ visible, onClose, onPost, preloadMediaUri }: CreatePostModalProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { createPost } = useSocial();
@@ -44,6 +46,10 @@ export default function CreatePostModal({ visible, onClose }: CreatePostModalPro
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
+      // Pre-populate media if coming from camera capture
+      if (preloadMediaUri) {
+        setSelectedMedia({ uri: preloadMediaUri, type: 'image' });
+      }
     }
   }, [visible]);
 
@@ -66,7 +72,13 @@ export default function CreatePostModal({ visible, onClose }: CreatePostModalPro
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
-    createPost(content.trim(), selectedMedia?.uri || undefined);
+    if (onPost) {
+      // Camera-first flow: delegate to feed page handler
+      onPost({ caption: content.trim(), mediaUri: selectedMedia?.uri });
+    } else {
+      // Standard flow: use SocialContext
+      createPost(content.trim(), selectedMedia?.uri || undefined);
+    }
     
     console.log('[CreatePostModal] Post created', { content, selectedMedia, privacy });
     

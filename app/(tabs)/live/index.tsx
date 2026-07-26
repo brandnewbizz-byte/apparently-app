@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
+import { SkeletonStreamCard } from '@/components/SkeletonCard';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -323,10 +324,13 @@ export default function LiveScreen() {
   const [showGoLive, setShowGoLive] = useState(false);
   const [myStreams, setMyStreams] = useState<Stream[]>([]);
   const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    const timer = setTimeout(() => setIsInitialLoad(false), 400);
+    return () => clearTimeout(timer);
   }, []);
 
   const onRefresh = useCallback(() => {
@@ -382,6 +386,12 @@ export default function LiveScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
         <Animated.View style={{ opacity: fadeAnim }}>
+
+          {/* ── Loading Skeleton ── */}
+          {isInitialLoad && !refreshing ? (
+            <SkeletonStreamCard count={4} baseColor={colors.surface} shimmerColor={colors.border} />
+          ) : (
+            <>
 
           {/* My Streams (if any) */}
           {myStreams.length > 0 && (
@@ -548,6 +558,8 @@ export default function LiveScreen() {
           </View>
 
           <View style={{ height: 100 }} />
+          </>
+          )}
         </Animated.View>
       </ScrollView>
 

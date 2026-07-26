@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Post, mockUsers } from '@/mocks/data';
+import { logger } from '@/lib/logger';
 
 export interface SharedPost {
   post: Post;
@@ -48,7 +49,7 @@ const currentUser = {
   id: 'current-user',
   name: 'You',
   username: 'you',
-  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+  avatar: '',
 };
 
 export const [MessagingProvider, useMessaging] = createContextHook<MessagingState>(() => {
@@ -63,18 +64,18 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         if (stored && stored !== 'undefined' && stored !== 'null') {
           try {
             const parsed = JSON.parse(stored);
-            console.log('[MessagingContext] Hydrated messaging state from storage');
+            logger.info('MessagingContext', 'Hydrated messaging state from storage');
             return parsed as Conversation[];
           } catch (parseError) {
-            console.error('[MessagingContext] JSON parse error, clearing corrupted data:', parseError);
+            logger.error('MessagingContext', 'JSON parse error, clearing corrupted data', { parseError });
             await AsyncStorage.removeItem(STORAGE_KEY);
             return [];
           }
         }
-        console.log('[MessagingContext] Using default messaging state');
+        logger.info('MessagingContext', 'Using default messaging state');
         return [];
       } catch (error) {
-        console.error('[MessagingContext] Error loading stored data:', error);
+        logger.error('MessagingContext', 'Error loading stored data', { error });
         return [];
       }
     },
@@ -83,7 +84,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
   const { mutate: persistMutation } = useMutation({
     mutationFn: async (payload: Conversation[]) => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      console.log('[MessagingContext] Persisted messaging state');
+      logger.info('MessagingContext', 'Persisted messaging state');
       return payload;
     },
     onSuccess: () => {
@@ -113,7 +114,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       id: `conv-${participantId}-${Date.now()}`,
       participantId,
       participantName: user?.name || 'Unknown User',
-      participantAvatar: user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+      participantAvatar: user?.avatar || '',
       participantUsername: user?.username || 'unknown',
       messages: [],
       lastMessageAt: new Date().toISOString(),
@@ -165,7 +166,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
     );
 
-    console.log('[MessagingContext] Shared post to users', { postId: post.id, userIds, conversationsCount: updatedConversations.length });
+    logger.info('MessagingContext', 'Shared post to users', { postId: post.id, userIds, conversationsCount: updatedConversations.length });
     persistState(updatedConversations);
   }, [conversations, getOrCreateConversation, persistState]);
 
@@ -205,7 +206,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
     );
 
-    console.log('[MessagingContext] Sent message', { participantId, messageId: newMessage.id });
+    logger.info('MessagingContext', 'Sent message', { participantId, messageId: newMessage.id });
     persistState(updatedConversations);
   }, [conversations, getOrCreateConversation, persistState]);
 
@@ -228,7 +229,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       return conv;
     });
 
-    console.log('[MessagingContext] Marked conversation as read', { participantId });
+    logger.info('MessagingContext', 'Marked conversation as read', { participantId });
     persistState(updatedConversations);
   }, [conversations, persistState]);
 

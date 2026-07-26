@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import type { Session } from '@supabase/supabase-js';
+import { logger } from '@/lib/logger';
 
 interface UserProfile {
   id: string;
@@ -83,7 +84,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (!stored || stored === 'undefined') return null;
       return JSON.parse(stored) as UserProfile;
     } catch (e) {
-      console.error('[Auth] Failed to load cached profile:', e);
+      logger.error('Auth', 'Failed to load cached profile', { e });
       return null;
     }
   }, []);
@@ -97,12 +98,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         .maybeSingle();
 
       if (error) {
-        console.error('[Auth] profiles select error:', error.message);
+        logger.error('Auth', 'profiles select error', { message: error.message });
         return null;
       }
       return (data as ProfilesRow | null) ?? null;
     } catch (e) {
-      console.error('[Auth] profiles select exception:', e);
+      logger.error('Auth', 'profiles select exception', { e });
       return null;
     }
   }, []);
@@ -147,7 +148,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       const { profile, needsName } = await buildProfile(session);
-      console.log('[Auth] Built profile:', {
+      logger.info('Auth', 'Built profile', {
         userId: profile.id,
         hasName: !needsName,
         phone: profile.phone,
@@ -170,8 +171,53 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   );
 
   useEffect(() => {
-    console.log('[Auth] DEV MODE — skipping Supabase auth, always authenticated');
-    setIsLoading(false);
+    setIsLoading(true);
+
+    // Listen for auth state changes (login, logout, session refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        logger.info('Auth', 'Auth state changed', { event, hasSession: !!session });
+        if (session) {
+          await setSessionState(session);
+        } else {
+          setProfileNeedsName(false);
+          setEmailVerificationRequired(false);
+          setPendingVerificationEmail(null);
+          setState({
+            session: null,
+            user: null,
+            isAuthenticated: false,
+            emailVerificationRequired: false,
+            pendingVerificationEmail: null,
+          });
+        }
+        setIsLoading(false);
+      }
+    );
+
+    // Get initial session (already logged in from previous session)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSessionState(session).finally(() => setIsLoading(false));
+      } else {
+        // No session — set unauthenticated immediately
+        setState({
+          session: null,
+          user: null,
+          isAuthenticated: false,
+          emailVerificationRequired: false,
+          pendingVerificationEmail: null,
+        });
+        setIsLoading(false);
+      }
+    }).catch((e) => {
+      logger.error('Auth', 'getSession failed', { message: e?.message });
+      setIsLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const checkUsernameAvailable = async (username: string): Promise<boolean> => {
@@ -183,12 +229,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         .maybeSingle();
       
       if (error) {
-        console.error('[Auth] Username check error:', error.message);
+        logger.error('Auth', 'Username check error', { message: error.message });
         return false;
       }
       return !data;
     } catch (e) {
-      console.error('[Auth] Username check exception:', e);
+      logger.error('Auth', 'Username check exception', { e });
       return false;
     }
   };
@@ -207,7 +253,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setEmailVerificationRequired(false);
       setPendingVerificationEmail(null);
 
-      console.log('[Auth] Sign up with email:', trimmedEmail, 'username:', trimmedUsername);
+      logger.info('Auth', 'Sign up with email', { trimmedEmail, trimmedUsername });
 
       if (!trimmedEmail || !trimmedEmail.includes('@')) {
         const msg = 'Please enter a valid email address.';
@@ -249,7 +295,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       });
 
       if (authError) {
-        console.error('[Auth] Sign up error:', {
+        logger.error('Auth', 'Sign up error', {
           message: authError.message,
           name: (authError as unknown as { name?: string }).name,
           status: (authError as unknown as { status?: number }).status,
@@ -283,22 +329,22 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           );
 
         if (profileError) {
-          console.error('[Auth] Profile save error:', profileError.message);
+          logger.error('Auth', 'Profile save error', { message: profileError.message });
         }
       }
 
       const needsEmailVerification = !authData.session && !authData.user?.email_confirmed_at;
       if (needsEmailVerification) {
-        console.log('[Auth] Email verification required for:', trimmedEmail);
+        logger.info('Auth', 'Email verification required for', { trimmedEmail });
         setEmailVerificationRequired(true);
         setPendingVerificationEmail(trimmedEmail);
       }
 
-      console.log('[Auth] Sign up successful');
+      logger.info('Auth', 'Sign up successful');
       return { success: true, needsEmailVerification };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sign up failed';
-      console.error('[Auth] Sign up exception:', message);
+      logger.error('Auth', 'Sign up exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     }
@@ -316,7 +362,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setEmailVerificationRequired(false);
       setPendingVerificationEmail(null);
 
-      console.log('[Auth] Sign in with', isEmail ? 'email' : 'username', ':', trimmedInput);
+      logger.info('Auth', 'Sign in with', { value: isEmail ? 'email' : 'username', trimmedInput });
 
       let loginEmail = trimmedInput;
 
@@ -328,7 +374,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           .maybeSingle();
 
         if (profileError || !profileData) {
-          console.log('[Auth] Username not found:', trimmedInput);
+          logger.info('Auth', 'Username not found', { trimmedInput });
           const msg = 'Invalid username or password.';
           setAuthError(msg);
           return { success: false, error: msg };
@@ -337,7 +383,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (profileData.email) {
           loginEmail = profileData.email;
         } else {
-          console.log('[Auth] No email found for username:', trimmedInput);
+          logger.info('Auth', 'No email found for username', { trimmedInput });
           const msg = 'Invalid username or password.';
           setAuthError(msg);
           return { success: false, error: msg };
@@ -350,7 +396,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       });
 
       if (error) {
-        console.error('[Auth] Sign in error:', error.message);
+        logger.error('Auth', 'Sign in error', { message: error.message });
         const isEmailNotConfirmed = error.message.toLowerCase().includes('email not confirmed');
 
         if (isEmailNotConfirmed) {
@@ -367,11 +413,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: userMessage };
       }
 
-      console.log('[Auth] Sign in successful');
+      logger.info('Auth', 'Sign in successful');
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sign in failed';
-      console.error('[Auth] Sign in exception:', message);
+      logger.error('Auth', 'Sign in exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     }
@@ -379,21 +425,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const signOut = async (): Promise<void> => {
     try {
-      console.log('[Auth] Signing out user...');
+      logger.info('Auth', 'Signing out user...');
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('[Auth] Sign out error:', error.message);
+        logger.error('Auth', 'Sign out error', { message: error.message });
       }
       setProfileNeedsName(false);
       setState(defaultState);
       try {
         await AsyncStorage.removeItem(PROFILE_CACHE_KEY);
       } catch (e) {
-        console.error('[Auth] Failed to clear cached profile on sign out:', e);
+        logger.error('Auth', 'Failed to clear cached profile on sign out', { e });
       }
-      console.log('[Auth] User signed out successfully');
+      logger.info('Auth', 'User signed out successfully');
     } catch (error) {
-      console.error('[Auth] Sign out exception:', error);
+      logger.error('Auth', 'Sign out exception', { error });
     }
   };
 
@@ -423,7 +469,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const userId = state.session.user.id;
       const phone = state.session.user.phone ?? state.user?.phone ?? null;
 
-      console.log('[Auth] Saving profile name (optimistic):', { userId, hasPhone: !!phone });
+      logger.info('Auth', 'Saving profile name (optimistic)', { userId, hasPhone: !!phone });
 
       const optimisticUser: UserProfile | null = state.user ? { ...state.user, fullName: trimmed } : null;
       if (optimisticUser) {
@@ -445,13 +491,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!attempt1.error) {
           dbSaved = true;
         } else {
-          console.error('[Auth] profiles upsert(full_name) error:', attempt1.error.message);
+          logger.error('Auth', 'profiles upsert(full_name) error', { message: attempt1.error.message });
         }
       } catch (e: any) {
         if (isAbortError(e)) {
-          console.log('[Auth] Query aborted — normal on navigation');
+          logger.info('Auth', 'Query aborted — normal on navigation');
         } else {
-          console.error('[Auth] profiles upsert exception:', e);
+          logger.error('Auth', 'profiles upsert exception', { e });
         }
       }
 
@@ -462,7 +508,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return { success: true };
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to save name';
-      console.error('[Auth] saveFullNameOnce exception:', message);
+      logger.error('Auth', 'saveFullNameOnce exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     }
@@ -479,13 +525,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: msg };
       }
 
-      console.log('[Auth] Resending verification email:', trimmed);
+      logger.info('Auth', 'Resending verification email', { trimmed });
       setIsResendingVerification(true);
 
       const { error } = await supabase.auth.resend({ type: 'signup', email: trimmed });
 
       if (error) {
-        console.error('[Auth] resend verification error:', error.message);
+        logger.error('Auth', 'resend verification error', { message: error.message });
         let userMessage = error.message;
         if (error.message.toLowerCase().includes('rate limit')) {
           userMessage = 'Too many requests. Please wait a minute and try again.';
@@ -497,7 +543,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return { success: true };
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to resend email';
-      console.error('[Auth] resendVerificationEmail exception:', message);
+      logger.error('Auth', 'resendVerificationEmail exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     } finally {
@@ -509,7 +555,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       setAuthError(null);
       const trimmedEmail = email.toLowerCase().trim();
-      console.log('[Auth] Sending password reset for email:', trimmedEmail);
+      logger.info('Auth', 'Sending password reset for email', { trimmedEmail });
       
       if (!trimmedEmail || !trimmedEmail.includes('@')) {
         const msg = 'Please enter a valid email address.';
@@ -522,7 +568,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       });
 
       if (error) {
-        console.error('[Auth] Password reset error:', error.message);
+        logger.error('Auth', 'Password reset error', { message: error.message });
         
         let userMessage = error.message;
         if (error.message.toLowerCase().includes('rate limit')) {
@@ -533,11 +579,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: userMessage };
       }
 
-      console.log('[Auth] Password reset email sent successfully');
+      logger.info('Auth', 'Password reset email sent successfully');
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Password reset failed';
-      console.error('[Auth] Password reset exception:', message);
+      logger.error('Auth', 'Password reset exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     }

@@ -22,12 +22,17 @@ import { ConnectionsProvider } from '@/contexts/ConnectionsContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { TabBarProvider } from '@/contexts/TabBarContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
+import { UserPostsProvider } from '@/contexts/UserPostsContext';
 
+import { BundleProvider } from '@/contexts/BundleContext';
+import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
+import { MarketplaceProvider } from '@/contexts/MarketplaceContext';
 import { SwapProvider } from '@/contexts/SwapContext';
 import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
+import { logger } from '@/lib/logger';
 
 const queryClient = new QueryClient();
 
@@ -44,7 +49,7 @@ function RootLayoutNav() {
 
   useEffect(() => {
     if (isLoading) {
-      console.log('[RootLayout] Still loading...', { authLoading, onboardingLoading });
+      logger.info('RootLayout', 'Still loading...', { authLoading, onboardingLoading });
       return;
     }
 
@@ -53,7 +58,7 @@ function RootLayoutNav() {
     const inOnboardingGroup = currentSegment === 'onboarding' as string;
     const inTabs = currentSegment === '(tabs)';
 
-    console.log('[RootLayout] Navigation check:', {
+    logger.info('RootLayout', 'Navigation check', {
       isAuthenticated,
       onboardingCompleted,
       currentSegment,
@@ -81,7 +86,7 @@ function RootLayoutNav() {
         clearTimeout(navigationTimeoutRef.current);
       }
       
-      console.log('[RootLayout] Navigating to:', targetRoute);
+      logger.info('RootLayout', 'Navigating to', { targetRoute });
       navigationTimeoutRef.current = setTimeout(() => {
         router.replace(targetRoute as never);
         hasInitialized.current = true;
@@ -188,7 +193,7 @@ class ProviderErrorBoundary extends React.Component<{ children: React.ReactNode 
   }
 
   componentDidCatch(error: Error) {
-    console.error('[ProviderErrorBoundary] Caught:', error);
+    logger.error('ProviderErrorBoundary', 'Caught', { error });
   }
 
   render() {
@@ -217,7 +222,7 @@ export default function RootLayout() {
       SplashScreen.hideAsync().catch(() => {});
     }, 3000);
     SplashScreen.hideAsync().catch(() => {});
-    console.log('[Root] DEV MODE — Supabase/auth disabled, navigating directly to tabs');
+    logger.info('Root', 'DEV MODE — Supabase/auth disabled, navigating directly to tabs');
     return () => clearTimeout(timer);
   }, []);
 
@@ -231,9 +236,13 @@ export default function RootLayout() {
                   <AuthProvider>
                     <OnboardingProvider>
                       <LifeCrmProvider>
+                        <UserPostsProvider>
                         <SocialProvider>
                           <ConnectionsProvider>
+                        <BundleProvider>
+                          <ServiceRequestProvider>
                                 <MessagingProvider>
+                                  <MarketplaceProvider>
                                   <SwapProvider>
                                     <BookingsProvider>
                                       <PlannerProvider>
@@ -245,9 +254,13 @@ export default function RootLayout() {
                                       </PlannerProvider>
                                     </BookingsProvider>
                                   </SwapProvider>
+                                  </MarketplaceProvider>
                                 </MessagingProvider>
+                          </ServiceRequestProvider>
+                        </BundleProvider>
                           </ConnectionsProvider>
                         </SocialProvider>
+                        </UserPostsProvider>
                       </LifeCrmProvider>
                     </OnboardingProvider>
                   </AuthProvider>

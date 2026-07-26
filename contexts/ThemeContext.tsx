@@ -2,6 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
+import { logger } from '@/lib/logger';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -78,10 +79,10 @@ export const [ThemeProvider, useTheme] = createContextHook(() => {
         const savedTheme = await AsyncStorage.getItem(THEME_STORAGE_KEY);
         if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
           setThemeMode(savedTheme as ThemeMode);
-          console.log('[Theme] Loaded saved theme:', savedTheme);
+          logger.info('Theme', 'Loaded saved theme', { savedTheme });
         }
       } catch (error) {
-        console.log('[Theme] Error loading theme:', error);
+        logger.info('Theme', 'Error loading theme', { error });
       } finally {
         setIsLoading(false);
       }
@@ -93,9 +94,9 @@ export const [ThemeProvider, useTheme] = createContextHook(() => {
     try {
       setThemeMode(mode);
       await AsyncStorage.setItem(THEME_STORAGE_KEY, mode);
-      console.log('[Theme] Theme saved:', mode);
+      logger.info('Theme', 'Theme saved', { mode });
     } catch (error) {
-      console.log('[Theme] Error saving theme:', error);
+      logger.info('Theme', 'Error saving theme', { error });
     }
   };
 

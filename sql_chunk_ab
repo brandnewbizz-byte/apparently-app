@@ -1,0 +1,190 @@
+  email TEXT,
+  company TEXT,
+  role TEXT,
+  needs_attention BOOLEAN DEFAULT FALSE,
+  attention_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contact interactions table
+CREATE TABLE IF NOT EXISTS contact_interactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  relationship_id UUID NOT NULL REFERENCES relationships(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('call', 'meeting', 'message', 'email', 'in_person')),
+  date DATE NOT NULL,
+  time TEXT,
+  duration INTEGER,
+  notes TEXT,
+  outcome TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contact meetings table
+CREATE TABLE IF NOT EXISTS contact_meetings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  relationship_id UUID NOT NULL REFERENCES relationships(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  date DATE NOT NULL,
+  time TEXT NOT NULL,
+  location TEXT,
+  agenda TEXT,
+  status TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'cancelled', 'rescheduled')),
+  reminder_sent BOOLEAN DEFAULT FALSE,
+  expected_income DECIMAL(10,2),
+  income_type TEXT CHECK (income_type IN ('consulting', 'service', 'product', 'commission', 'retainer', 'project', 'other')),
+  income_status TEXT CHECK (income_status IN ('planned', 'closed_paid', 'closed_unpaid', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contact follow-ups table
+CREATE TABLE IF NOT EXISTS contact_follow_ups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  relationship_id UUID NOT NULL REFERENCES relationships(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  due_date DATE NOT NULL,
+  priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'overdue')),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Pipelines table
+CREATE TABLE IF NOT EXISTS pipelines (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Pipeline stages table
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pipeline_id UUID NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT DEFAULT '#94A3B8',
+  order_index INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Pipeline items table
+CREATE TABLE IF NOT EXISTS pipeline_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pipeline_id UUID NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+  stage_id UUID NOT NULL REFERENCES pipeline_stages(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  value DECIMAL(10,2),
+  linked_contact_id UUID REFERENCES relationships(id) ON DELETE SET NULL,
+  notes TEXT,
+  tags TEXT[] DEFAULT '{}',
+  priority TEXT CHECK (priority IN ('low', 'medium', 'high')),
+  due_date DATE,
+  webhook_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Income sources table
+CREATE TABLE IF NOT EXISTS income_sources (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('business', 'freelance', 'investment', 'passive', 'salary')),
+  estimated_amount DECIMAL(10,2) NOT NULL,
+  frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+  confidence INTEGER DEFAULT 80,
+  linked_connections TEXT[] DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Plans table (planner saved plans)
+CREATE TABLE IF NOT EXISTS plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'completed', 'cancelled')),
+  date DATE NOT NULL,
+  date_label TEXT,
+  location_type TEXT,
+  custom_location TEXT,
+  transport TEXT,
+  pickup_zip TEXT,
+  pickup_city TEXT,
+  pickup_state TEXT,
+  dropoff_zip TEXT,
+  dropoff_city TEXT,
+  dropoff_state TEXT,
+  plan JSONB,
+  sent_proposals JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Job requests table (chauffeur, VA, errands, etc.)
+CREATE TABLE IF NOT EXISTS job_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('chauffeur', 'va', 'driver', 'errands', 'other')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'in_progress', 'completed', 'cancelled')),
+  title TEXT,
+  description TEXT,
+  pickup_zip TEXT,
+  pickup_city TEXT,
+  pickup_state TEXT,
+  pickup_location TEXT,
+  dropoff_zip TEXT,
+  dropoff_city TEXT,
+  dropoff_state TEXT,
+  dropoff_location TEXT,
+  pickup_time TEXT,
+  return_time TEXT,
+  payment_method TEXT,
+  hours TEXT,
+  tasks JSONB,
+  tools TEXT[],
+  notes TEXT,
+  plan_id UUID REFERENCES plans(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Market watch table
+CREATE TABLE IF NOT EXISTS market_watch (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  symbol TEXT NOT NULL,
+  name TEXT NOT NULL,
+  price DECIMAL(12,2) NOT NULL,
+  change DECIMAL(10,2) DEFAULT 0,
+  change_percent DECIMAL(6,2) DEFAULT 0,
+  type TEXT NOT NULL CHECK (type IN ('stock', 'index', 'crypto', 'forex')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stories_user_id ON stories(user_id);
+CREATE INDEX IF NOT EXISTS idx_stories_expires_at ON stories(expires_at);
+CREATE INDEX IF NOT EXISTS idx_listings_category ON listings(category);
+CREATE INDEX IF NOT EXISTS idx_listings_host_id ON listings(host_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_listing_id ON bookings(listing_id);
+CREATE INDEX IF NOT EXISTS idx_products_seller_id ON products(seller_id);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(date);
+CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills(user_id);
+CREATE INDEX IF NOT EXISTS idx_bills_due_date ON bills(due_date);
+CREATE INDEX IF NOT EXISTS idx_relationships_user_id ON relationships(user_id);
+CREATE INDEX IF NOT EXISTS idx_contact_interactions_relationship_id ON contact_interactions(relationship_id);
+CREATE INDEX IF NOT EXISTS idx_contact_meetings_relationship_id ON contact_meetings(relationship_id);
+CREATE INDEX IF NOT EXISTS idx_contact_follow_ups_relationship_id ON contact_follow_ups(relationship_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_items_pipeline_id ON pipeline_items(pipeline_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_items_stage_id ON pipeline_items(stage_id);

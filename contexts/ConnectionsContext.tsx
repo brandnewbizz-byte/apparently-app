@@ -7,6 +7,7 @@ import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import type { DbUser } from '@/lib/database.types';
 import type { MarketplaceProfile } from '@/mocks/data';
+import { logger } from '@/lib/logger';
 
 export type ConnectionStatus = 'pending' | 'approved' | 'rejected';
 
@@ -131,12 +132,12 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       try {
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
         if (stored) {
-          console.log('[ConnectionsContext] Hydrated state from storage');
+          logger.info('ConnectionsContext', 'Hydrated state from storage');
           const parsed = JSON.parse(stored);
           return ensureValidState(parsed);
         }
 
-        console.log('[ConnectionsContext] Building connections from Supabase users');
+        logger.info('ConnectionsContext', 'Building connections from Supabase users');
         try {
           const userId = await DatabaseService.getCurrentUserId();
           const users = await DatabaseService.fetchUsers({ signal });
@@ -161,20 +162,36 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
             ratings: [],
           } as ConnectionsState;
         } catch (supabaseError) {
-          console.log('[ConnectionsContext] Supabase unavailable, trying local API...');
+          logger.info('ConnectionsContext', 'Supabase unavailable, trying local API...');
         }
 
         // Fall back to local API
         try {
           const localRequests = await localApi.getConnectionRequests();
-          console.log('[ConnectionsContext] Local connection requests:', localRequests?.length || 0);
+          logger.info('ConnectionsContext', 'Local connection requests', { value: localRequests?.length || 0 });
+          const emptyProfile: MarketplaceProfile = {
+            id: '',
+            name: 'User',
+            username: '',
+            avatar: '',
+            location: '',
+            distance: 0,
+            skills: [],
+            bio: '',
+            lookingFor: 'networking',
+            category: '',
+            verified: false,
+            rating: 0,
+            reviewCount: 0,
+            availability: 'offline',
+          };
           return {
             requests: (localRequests || []).map((r: any) => ({
               id: r.id,
               fromUserId: r.from_user_id,
               toUserId: r.to_user_id,
-              fromProfile: { id: r.from_user_id, name: r.from_name || 'User', avatar: r.from_avatar || '', isVerified: false },
-              toProfile: { id: r.to_user_id, name: r.to_name || 'User', avatar: r.to_avatar || '', isVerified: false },
+              fromProfile: { ...emptyProfile, id: r.from_user_id, name: r.from_name || 'User', avatar: r.from_avatar || '' },
+              toProfile: { ...emptyProfile, id: r.to_user_id, name: r.to_name || 'User', avatar: r.to_avatar || '' },
               status: r.status || 'pending',
               message: r.message,
               createdAt: r.created_at,
@@ -185,18 +202,18 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
             hiddenProfiles: [],
             interactions: [],
             ratings: [],
-          } as ConnectionsState;
+          };
         } catch (e2) {
-          console.log('[ConnectionsContext] Local API also unavailable');
+          logger.info('ConnectionsContext', 'Local API also unavailable');
         }
 
         return defaultState;
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[ConnectionsContext] Fetch aborted (navigation)');
+          logger.info('ConnectionsContext', 'Fetch aborted (navigation)');
           return defaultState;
         }
-        console.error('[ConnectionsContext] Error loading state:', error);
+        logger.error('ConnectionsContext', 'Error loading state', { error });
         return defaultState;
       }
     },
@@ -207,7 +224,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
   const saveMutation = useMutation({
     mutationFn: async (newState: ConnectionsState) => {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
-      console.log('[ConnectionsContext] Persisted state');
+      logger.info('ConnectionsContext', 'Persisted state');
       return newState;
     },
     onSuccess: () => {
@@ -234,13 +251,13 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     );
     
     if (existingRequest) {
-      console.log('[ConnectionsContext] Request already exists for:', toProfile.name);
+      logger.info('ConnectionsContext', 'Request already exists for', { name: toProfile.name });
       return existingRequest;
     }
 
     const existingConnection = state.connections.find((c) => c.userId === toProfile.id);
     if (existingConnection) {
-      console.log('[ConnectionsContext] Already connected with:', toProfile.name);
+      logger.info('ConnectionsContext', 'Already connected with', { name: toProfile.name });
       return null;
     }
 
@@ -253,7 +270,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
         id: CURRENT_USER_ID,
         name: 'You',
         username: 'you',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+        avatar: '',
         location: 'New York, NY',
         distance: 0,
         skills: ['Networking'],
@@ -277,7 +294,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       requests: [...state.requests, newRequest],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Sent request to:', toProfile.name);
+    logger.info('ConnectionsContext', 'Sent request to', { name: toProfile.name });
     return newRequest;
   }, [state, persistState]);
 
@@ -287,7 +304,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     );
     
     if (existingRequest) {
-      console.log('[ConnectionsContext] Incoming request already exists from:', fromProfile.name);
+      logger.info('ConnectionsContext', 'Incoming request already exists from', { name: fromProfile.name });
       return existingRequest;
     }
 
@@ -308,14 +325,14 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       requests: [...state.requests, newRequest],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Received request from:', fromProfile.name);
+    logger.info('ConnectionsContext', 'Received request from', { name: fromProfile.name });
     return newRequest;
   }, [state, persistState]);
 
   const approveRequest = useCallback((requestId: string) => {
     const request = state.requests.find((r) => r.id === requestId);
     if (!request) {
-      console.log('[ConnectionsContext] Request not found:', requestId);
+      logger.info('ConnectionsContext', 'Request not found', { requestId });
       return;
     }
 
@@ -339,7 +356,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       connections: [...state.connections, newConnection],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Approved request from:', request.fromProfile.name);
+    logger.info('ConnectionsContext', 'Approved request from', { name: request.fromProfile.name });
   }, [state, persistState]);
 
   const rejectRequest = useCallback((requestId: string) => {
@@ -353,7 +370,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       requests: updatedRequests,
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Rejected request:', requestId);
+    logger.info('ConnectionsContext', 'Rejected request', { requestId });
   }, [state, persistState]);
 
   const deleteRequest = useCallback((requestId: string) => {
@@ -362,7 +379,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       requests: state.requests.filter((r) => r.id !== requestId),
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Deleted request:', requestId);
+    logger.info('ConnectionsContext', 'Deleted request', { requestId });
   }, [state, persistState]);
 
   const cancelConnectionRequest = useCallback((userId: string) => {
@@ -373,13 +390,13 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       ),
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Cancelled request to:', userId);
+    logger.info('ConnectionsContext', 'Cancelled request to', { userId });
   }, [state, persistState]);
 
   const markNotInterested = useCallback((userId: string) => {
     const hiddenProfiles = Array.isArray(state.hiddenProfiles) ? state.hiddenProfiles : [];
     if (hiddenProfiles.includes(userId)) {
-      console.log('[ConnectionsContext] Profile already hidden:', userId);
+      logger.info('ConnectionsContext', 'Profile already hidden', { userId });
       return;
     }
     const updated = {
@@ -387,7 +404,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       hiddenProfiles: [...hiddenProfiles, userId],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Marked not interested:', userId);
+    logger.info('ConnectionsContext', 'Marked not interested', { userId });
   }, [state, persistState]);
 
   const unhideProfile = useCallback((userId: string) => {
@@ -397,7 +414,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       hiddenProfiles: hiddenProfiles.filter((id) => id !== userId),
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Unhid profile:', userId);
+    logger.info('ConnectionsContext', 'Unhid profile', { userId });
   }, [state, persistState]);
 
   const clearHiddenProfiles = useCallback(() => {
@@ -406,7 +423,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       hiddenProfiles: [],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Cleared all hidden profiles');
+    logger.info('ConnectionsContext', 'Cleared all hidden profiles');
   }, [state, persistState]);
 
   const isProfileHidden = useCallback((userId: string) => {
@@ -416,7 +433,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
   const sendMessage = useCallback((connectionId: string, receiverId: string, text: string) => {
     const connection = state.connections.find((c) => c.id === connectionId);
     if (!connection || !connection.canMessage) {
-      console.log('[ConnectionsContext] Cannot send message to this connection');
+      logger.info('ConnectionsContext', 'Cannot send message to this connection');
       return null;
     }
 
@@ -435,7 +452,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       messages: [...state.messages, newMessage],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Sent message to:', receiverId);
+    logger.info('ConnectionsContext', 'Sent message to', { receiverId });
     return newMessage;
   }, [state, persistState]);
 
@@ -510,7 +527,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       interactions: [...state.interactions, newInteraction],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Added interaction:', type, 'with:', userId);
+    logger.info('ConnectionsContext', 'Added interaction', { type, userId });
     return newInteraction;
   }, [state, persistState]);
 
@@ -538,7 +555,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
 
   const addRating = useCallback((userId: string, rating: number, review?: string) => {
     if (!canRateUser(userId)) {
-      console.log('[ConnectionsContext] Cannot rate user yet - need 5 interactions or already rated');
+      logger.info('ConnectionsContext', 'Cannot rate user yet - need 5 interactions or already rated');
       return null;
     }
     const newRating: UserRating = {
@@ -554,7 +571,7 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
       ratings: [...state.ratings, newRating],
     };
     persistState(updated);
-    console.log('[ConnectionsContext] Added rating for:', userId, 'rating:', rating);
+    logger.info('ConnectionsContext', 'Added rating for', { userId, rating });
     return newRating;
   }, [state, persistState, canRateUser]);
 

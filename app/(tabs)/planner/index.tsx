@@ -8,6 +8,8 @@ import {
   RefreshControl,
   Platform,
   Alert,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -37,10 +39,20 @@ import {
   Star,
   ShoppingCart,
   Phone,
+  X,
+  Edit3,
+  DollarSign,
+  Tag,
+  Search,
+  ListFilter,
+  MessageSquare,
+  UserPlus,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner, type Plan } from '@/contexts/PlannerContext';
+import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type ServiceRequest, type RequestStatus } from '@/contexts/ServiceRequestContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -89,6 +101,251 @@ interface CalendarProps {
   onSelectDate: (date: string) => void;
   datesWithPlans: Set<string>;
   colors: any;
+}
+
+const REQUEST_STATUS_COLORS: Record<RequestStatus, string> = {
+  open: '#10B981',
+  in_progress: '#F59E0B',
+  fulfilled: '#6B7280',
+  cancelled: '#EF4444',
+};
+
+const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  fulfilled: 'Fulfilled',
+  cancelled: 'Cancelled',
+};
+
+const PLAN_CATEGORIES = [
+  { key: 'coffee', label: 'Coffee', icon: Coffee, color: '#D97706' },
+  { key: 'coworking', label: 'Work', icon: Briefcase, color: '#7C3AED' },
+  { key: 'fitness', label: 'Fitness', icon: Dumbbell, color: '#EF4444' },
+  { key: 'social', label: 'Social', icon: Users, color: '#3B82F6' },
+  { key: 'wellness', label: 'Wellness', icon: Heart, color: '#10B981' },
+  { key: 'travel', label: 'Travel', icon: Car, color: '#8B5CF6' },
+];
+
+function CreateRequestModal({
+  visible, onClose, onCreate, colors, selectedDate,
+}: { visible: boolean; onClose: () => void; onCreate: (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number }) => void; colors: any; selectedDate: string }) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<ServiceCategory>('photography');
+  const [location, setLocation] = useState('');
+  const [time, setTime] = useState('12:00 PM');
+  const [budgetMin, setBudgetMin] = useState('');
+  const [budgetMax, setBudgetMax] = useState('');
+  const [description, setDescription] = useState('');
+
+  const handleCreate = () => {
+    if (!title.trim()) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onCreate({
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      location: location.trim(),
+      date: selectedDate,
+      time,
+      budgetMin: parseInt(budgetMin, 10) || 0,
+      budgetMax: parseInt(budgetMax, 10) || 0,
+    });
+    setTitle(''); setDescription(''); setCategory('photography'); setLocation('');
+    setTime('12:00 PM'); setBudgetMin(''); setBudgetMax('');
+    onClose();
+  };
+
+  const canSubmit = title.trim().length > 0;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={[styles.qpModal, { backgroundColor: colors.background }]}>
+        <View style={[styles.qpHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.qpTitle, { color: colors.text }]}>Post Request</Text>
+          <TouchableOpacity
+            style={[styles.qpSaveBtn, { backgroundColor: canSubmit ? '#F59E0B' : colors.surface, opacity: canSubmit ? 1 : 0.5 }]}
+            onPress={handleCreate} disabled={!canSubmit}
+          >
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Post</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>What do you need?</Text>
+            <TextInput
+              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="e.g. DJ for Friday night party" placeholderTextColor={colors.textTertiary}
+              value={title} onChangeText={setTitle}
+            />
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.qpCatGrid}>
+                {SERVICE_CATEGORIES.map((cat) => {
+                  const active = category === cat.key;
+                  return (
+                    <TouchableOpacity key={cat.key}
+                      style={[styles.qpCatBtn, { backgroundColor: active ? '#F59E0B15' : colors.surface, borderColor: active ? '#F59E0B' : colors.border }]}
+                      onPress={() => setCategory(cat.key)}
+                    >
+                      <Text style={{ fontSize: 16 }}>{cat.icon}</Text>
+                      <Text style={[styles.qpCatText, { color: active ? '#F59E0B' : colors.textSecondary }]}>{cat.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Location</Text>
+            <TextInput
+              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="e.g. Williamsburg, Brooklyn" placeholderTextColor={colors.textTertiary}
+              value={location} onChangeText={setLocation}
+            />
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Date</Text>
+              <View style={[styles.qpInput, { backgroundColor: colors.surface, borderColor: colors.border, justifyContent: 'center' }]}>
+                <Text style={{ color: colors.text, fontSize: 15 }}>{getDateLabel(selectedDate)}</Text>
+              </View>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Time</Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {['9:00 AM', '12:00 PM', '3:00 PM', '6:00 PM', '8:00 PM', '10:00 PM'].map((t) => {
+                  const active = time === t;
+                  return (
+                    <TouchableOpacity key={t}
+                      style={[styles.qpTimeBtn, { backgroundColor: active ? '#F59E0B' : colors.surface, borderColor: active ? '#F59E0B' : colors.border }]}
+                      onPress={() => setTime(t)}
+                    >
+                      <Text style={[styles.qpTimeText, { color: active ? '#FFF' : colors.textSecondary }]}>{t}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Budget Min ($)</Text>
+              <TextInput
+                style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                placeholder="50" placeholderTextColor={colors.textTertiary}
+                value={budgetMin} onChangeText={setBudgetMin} keyboardType="numeric"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Budget Max ($)</Text>
+              <TextInput
+                style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                placeholder="200" placeholderTextColor={colors.textTertiary}
+                value={budgetMax} onChangeText={setBudgetMax} keyboardType="numeric"
+              />
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Description (optional)</Text>
+            <TextInput
+              style={[styles.qpInput, styles.qpNotes, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="Details about what you need..." placeholderTextColor={colors.textTertiary}
+              value={description} onChangeText={setDescription} multiline textAlignVertical="top"
+            />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function QuickPlanModal({
+  visible, onClose, onSave, colors,
+}: { visible: boolean; onClose: () => void; onSave: (plan: { title: string; date: string; time: string; category: string; notes: string }) => void; colors: any }) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('coffee');
+  const [time, setTime] = useState('12:00 PM');
+  const [notes, setNotes] = useState('');
+
+  const handleSave = () => {
+    if (!title.trim()) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onSave({ title: title.trim(), date: formatDate(new Date()), time, category, notes: notes.trim() });
+    setTitle(''); setNotes(''); setCategory('coffee'); setTime('12:00 PM');
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={[styles.qpModal, { backgroundColor: colors.background }]}>
+        <View style={[styles.qpHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.qpTitle, { color: colors.text }]}>Quick Plan</Text>
+          <TouchableOpacity
+            style={[styles.qpSaveBtn, { backgroundColor: title.trim() ? colors.accent : colors.surface, opacity: title.trim() ? 1 : 0.5 }]}
+            onPress={handleSave} disabled={!title.trim()}
+          >
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Save</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>What?</Text>
+            <TextInput
+              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="Plan title..." placeholderTextColor={colors.textTertiary}
+              value={title} onChangeText={setTitle}
+            />
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Time</Text>
+            <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+              {['9:00 AM', '12:00 PM', '3:00 PM', '6:00 PM', '8:00 PM'].map((t) => {
+                const active = time === t;
+                return (
+                  <TouchableOpacity key={t}
+                    style={[styles.qpTimeBtn, { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border }]}
+                    onPress={() => setTime(t)}
+                  >
+                    <Text style={[styles.qpTimeText, { color: active ? '#FFF' : colors.textSecondary }]}>{t}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Category</Text>
+            <View style={styles.qpCatGrid}>
+              {PLAN_CATEGORIES.map((cat) => {
+                const CatIcon = cat.icon;
+                const active = category === cat.key;
+                return (
+                  <TouchableOpacity key={cat.key}
+                    style={[styles.qpCatBtn, { backgroundColor: active ? cat.color + '15' : colors.surface, borderColor: active ? cat.color : colors.border }]}
+                    onPress={() => setCategory(cat.key)}
+                  >
+                    <CatIcon size={16} color={cat.color} />
+                    <Text style={[styles.qpCatText, { color: active ? cat.color : colors.textSecondary }]}>{cat.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Notes (optional)</Text>
+            <TextInput
+              style={[styles.qpInput, styles.qpNotes, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="Details..." placeholderTextColor={colors.textTertiary}
+              value={notes} onChangeText={setNotes} multiline textAlignVertical="top"
+            />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
 }
 
 function MonthCalendar({ selectedDate, onSelectDate, datesWithPlans, colors }: CalendarProps) {
@@ -429,11 +686,17 @@ function PlanCard({ plan, onPress, onDelete, colors }: PlanCardProps) {
 
 export default function PlannerScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { plans, deletePlan, getPlansByDate, refetch } = usePlanner();
+  const { plans, deletePlan, createPlan, getPlansByDate, refetch } = usePlanner();
 
   const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
   const [refreshing, setRefreshing] = useState(false);
+  const [showQuickPlan, setShowQuickPlan] = useState(false);
+  const [mode, setMode] = useState<'mydays' | 'requests'>('mydays');
+  const [showCreateRequest, setShowCreateRequest] = useState(false);
+
+  const { requests, createRequest, deleteRequest, getRequestsByDate } = useServiceRequests();
 
   const datesWithPlans = useMemo(() => {
     const dates = new Set<string>();
@@ -442,6 +705,8 @@ export default function PlannerScreen() {
   }, [plans]);
 
   const datePlans = useMemo(() => getPlansByDate(selectedDate), [getPlansByDate, selectedDate]);
+  const dateRequests = useMemo(() => getRequestsByDate(selectedDate), [getRequestsByDate, selectedDate]);
+  const allRequests = useMemo(() => requests, [requests]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -462,6 +727,46 @@ export default function PlannerScreen() {
     }
   }, [deletePlan]);
 
+  const handleCreateRequest = useCallback(async (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number }) => {
+    try {
+      const cat = SERVICE_CATEGORIES.find((c) => c.key === req.category);
+      createRequest({
+        title: req.title,
+        description: req.description,
+        category: req.category,
+        location: req.location,
+        date: req.date,
+        time: req.time,
+        budgetMin: req.budgetMin,
+        budgetMax: req.budgetMax,
+        tags: cat ? [cat.label] : [],
+        createdBy: { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
+      });
+      setMode('requests');
+      console.log('[Planner] Service request created:', req.title);
+    } catch (e) {
+      console.error('[Planner] Create request failed:', e);
+    }
+  }, [createRequest]);
+
+  const handleQuickCreate = useCallback(async (plan: { title: string; date: string; time: string; category: string; notes: string }) => {
+    try {
+      await createPlan({
+        date: plan.date,
+        date_label: `${plan.time} — ${plan.title}`,
+        location_type: plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home',
+        transport: 'none',
+        plan_details: {
+          location_type: plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home',
+          transport: 'none',
+        },
+      } as any);
+      console.log('[Planner] Quick plan created:', plan.title);
+    } catch (e) {
+      console.error('[Planner] Quick create failed:', e);
+    }
+  }, [createPlan]);
+
   const totalPlansCount = plans.length;
   const upcomingPlans = plans.filter(p => new Date(p.date) >= new Date(formatDate(new Date()))).length;
 
@@ -474,7 +779,7 @@ export default function PlannerScreen() {
             <TouchableOpacity
               onPress={() => {
                 if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push('/planner/plan-day' as any);
+                setShowQuickPlan(true);
               }}
               style={[styles.headerBtn, { backgroundColor: colors.accent }]}
             >
@@ -523,27 +828,75 @@ export default function PlannerScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
+        {mode === 'requests' && (
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => {
+              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/bundle-builder' as any);
+            }}
+            activeOpacity={0.9}
+          >
+            <LinearGradient
+              colors={['#0095F6', '#0084D6']}
+              style={styles.actionGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Package size={20} color="#FFF" />
+              <Text style={styles.actionText}>Build Bundle</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={styles.actionCard}
           onPress={() => {
             if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push('/planner/browse-jobs' as any);
+            if (mode === 'requests') {
+              setShowCreateRequest(true);
+            } else {
+              router.push('/planner/browse-jobs' as any);
+            }
           }}
           activeOpacity={0.9}
         >
           <LinearGradient
-            colors={['#10B981', '#059669']}
+            colors={mode === 'requests' ? ['#F59E0B', '#D97706'] : ['#10B981', '#059669']}
             style={styles.actionGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
-            <Briefcase size={20} color="#FFF" />
-            <Text style={styles.actionText}>Browse Jobs</Text>
+            {mode === 'requests' ? <Plus size={20} color="#FFF" /> : <Briefcase size={20} color="#FFF" />}
+            <Text style={styles.actionText}>{mode === 'requests' ? 'Post Request' : 'Browse Jobs'}</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
 
-      {totalPlansCount > 0 && (
+      {/* Mode Toggle */}
+      <View style={[styles.modeToggle, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <TouchableOpacity
+          style={[styles.modeBtn, mode === 'mydays' && { backgroundColor: colors.accent }]}
+          onPress={() => { setMode('mydays'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
+        >
+          <Calendar size={16} color={mode === 'mydays' ? '#FFF' : colors.textSecondary} />
+          <Text style={[styles.modeBtnText, { color: mode === 'mydays' ? '#FFF' : colors.textSecondary }]}>My Day</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modeBtn, mode === 'requests' && { backgroundColor: colors.accent }]}
+          onPress={() => { setMode('requests'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
+        >
+          <Search size={16} color={mode === 'requests' ? '#FFF' : colors.textSecondary} />
+          <Text style={[styles.modeBtnText, { color: mode === 'requests' ? '#FFF' : colors.textSecondary }]}>Requests</Text>
+          {allRequests.filter(r => r.status === 'open').length > 0 && (
+            <View style={styles.modeBadge}>
+              <Text style={styles.modeBadgeText}>{allRequests.filter(r => r.status === 'open').length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {mode === 'mydays' && totalPlansCount > 0 && (
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.statNumber, { color: colors.accent }]}>{totalPlansCount}</Text>
@@ -571,14 +924,98 @@ export default function PlannerScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {datePlans.length === 0 ? (
+        {mode === 'requests' ? (
+          <View style={styles.plansList}>
+            {allRequests.length === 0 ? (
+              <View style={styles.emptyState}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
+                  <Search size={40} color={colors.textTertiary} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No service requests yet</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                  Tap Post Request to create your first request
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  {allRequests.length} request{allRequests.length > 1 ? 's' : ''}
+                </Text>
+                {allRequests.map((req) => {
+                  const cat = SERVICE_CATEGORIES.find((c) => c.key === req.category);
+                  const statusColor = REQUEST_STATUS_COLORS[req.status];
+                  const statusLabel = REQUEST_STATUS_LABELS[req.status];
+                  return (
+                    <TouchableOpacity
+                      key={req.id}
+                      style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.requestCardHeader}>
+                        <View style={[styles.requestIcon, { backgroundColor: '#F59E0B15' }]}>
+                          <Text style={{ fontSize: 22 }}>{cat?.icon || '✨'}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.requestTitle, { color: colors.text }]}>{req.title}</Text>
+                          <Text style={[styles.requestLocation, { color: colors.textSecondary }]}>
+                            {req.location || 'No location'}
+                          </Text>
+                        </View>
+                        <View style={[styles.statusBadge, { backgroundColor: statusColor + '15' }]}>
+                          <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.requestMeta}>
+                        <View style={styles.requestMetaRow}>
+                          <DollarSign size={13} color={colors.textSecondary} />
+                          <Text style={[styles.requestMetaText, { color: colors.textSecondary }]}>
+                            ${req.budgetMin}–${req.budgetMax}
+                          </Text>
+                        </View>
+                        <View style={styles.requestMetaRow}>
+                          <Clock size={13} color={colors.textSecondary} />
+                          <Text style={[styles.requestMetaText, { color: colors.textSecondary }]}>
+                            {getDateLabel(req.date)}{req.time ? ` · ${formatTime12(req.time)}` : ''}
+                          </Text>
+                        </View>
+                        {req.responders > 0 && (
+                          <View style={styles.requestMetaRow}>
+                            <MessageSquare size={13} color={colors.accent} />
+                            <Text style={[styles.requestMetaText, { color: colors.accent }]}>
+                              {req.responders} responder{req.responders > 1 ? 's' : ''}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      {req.description ? (
+                        <Text style={[styles.requestDescription, { color: colors.textTertiary }]} numberOfLines={2}>
+                          {req.description}
+                        </Text>
+                      ) : null}
+                      {req.tags.length > 0 && (
+                        <View style={styles.assistanceTags}>
+                          {req.tags.map((tag) => (
+                            <View key={tag} style={[styles.assistanceTag, { backgroundColor: colors.accent + '15' }]}>
+                              <Tag size={10} color={colors.accent} />
+                              <Text style={[styles.assistanceTagText, { color: colors.accent }]}>{tag}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </View>
+        ) : datePlans.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
               <Calendar size={40} color={colors.textTertiary} />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No plans for {getDateLabel(selectedDate)}</Text>
             <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              Tap Plan Your Day to get started
+              Tap + to add a quick plan
             </Text>
           </View>
         ) : (
@@ -599,6 +1036,23 @@ export default function PlannerScreen() {
         )}
         <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      {/* Quick Plan Modal */}
+      <QuickPlanModal
+        visible={showQuickPlan}
+        onClose={() => setShowQuickPlan(false)}
+        onSave={handleQuickCreate}
+        colors={colors}
+      />
+
+      {/* Create Request Modal */}
+      <CreateRequestModal
+        visible={showCreateRequest}
+        onClose={() => setShowCreateRequest(false)}
+        onCreate={handleCreateRequest}
+        colors={colors}
+        selectedDate={selectedDate}
+      />
     </View>
   );
 }
@@ -845,5 +1299,101 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 40,
+  },
+  // ── Quick Plan Modal ──
+  qpModal: { flex: 1 },
+  qpHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  qpTitle: { fontSize: 17, fontWeight: '700' },
+  qpSaveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  qpLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  qpInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  qpNotes: { minHeight: 80 },
+  qpTimeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  qpTimeText: { fontSize: 13, fontWeight: '600' },
+  qpCatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  qpCatBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  qpCatText: { fontSize: 13, fontWeight: '600' },
+  // ── Mode Toggle ──
+  modeToggle: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 4,
+    gap: 4,
+  },
+  modeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  modeBtnText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  modeBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  modeBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#FFF',
+  },
+  // ── Request Cards ──
+  requestCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  requestCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  requestIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestTitle: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    marginBottom: 2,
+  },
+  requestLocation: {
+    fontSize: 12,
+  },
+  requestMeta: {
+    gap: 4,
+    marginBottom: 6,
+  },
+  requestMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  requestMetaText: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+  },
+  requestDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
   },
 });

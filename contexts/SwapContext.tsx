@@ -7,6 +7,7 @@ import { type User } from '@/mocks/data';
 import { supabase } from '@/lib/supabase';
 import * as localApi from '@/lib/api';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { logger } from '@/lib/logger';
 
 export type SwapPostStatus = 'open' | 'matched' | 'closed';
 export type SwapMatchStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
@@ -93,7 +94,7 @@ const safeParse = <T,>(raw: string | null, fallback: T): T => {
   try {
     return JSON.parse(raw) as T;
   } catch (e) {
-    console.error('[SwapContext] JSON parse error, clearing corrupted data:', e);
+    logger.error('SwapContext', 'JSON parse error, clearing corrupted data', { e });
     return fallback;
   }
 };
@@ -103,7 +104,7 @@ const getUserForAuthor = (authorName?: string, phone?: string): User => {
     id: 'current-user',
     name: 'You',
     username: 'you',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+    avatar: '',
     isVerified: false,
     followersCount: 0,
   };
@@ -145,7 +146,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
         }
         return getUserForAuthor(undefined, undefined);
       } catch (e) {
-        console.error('[SwapContext] Error loading user:', e);
+        logger.error('SwapContext', 'Error loading user', { e });
         return getUserForAuthor(undefined, undefined);
       }
     },
@@ -168,14 +169,14 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
         const raw = await AsyncStorage.getItem(POSTS_KEY);
         const parsed = safeParse<SwapPost[]>(raw, []);
         if (parsed.length > 0) {
-          console.log('[SwapContext] Hydrated posts from storage:', parsed.length);
+          logger.info('SwapContext', 'Hydrated posts from storage', { length: parsed.length });
           return parsed;
         }
         const seeds = starterPosts();
-        console.log('[SwapContext] Using starter posts:', seeds.length);
+        logger.info('SwapContext', 'Using starter posts', { length: seeds.length });
         return seeds;
       } catch (e) {
-        console.error('[SwapContext] Error loading posts:', e);
+        logger.error('SwapContext', 'Error loading posts', { e });
         return starterPosts();
       }
     },
@@ -187,10 +188,10 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       try {
         const raw = await AsyncStorage.getItem(MATCHES_KEY);
         const parsed = safeParse<SwapMatch[]>(raw, []);
-        console.log('[SwapContext] Hydrated matches from storage:', parsed.length);
+        logger.info('SwapContext', 'Hydrated matches from storage', { length: parsed.length });
         return parsed;
       } catch (e) {
-        console.error('[SwapContext] Error loading matches:', e);
+        logger.error('SwapContext', 'Error loading matches', { e });
         return [];
       }
     },
@@ -202,10 +203,10 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       try {
         const raw = await AsyncStorage.getItem(SAVED_POSTS_KEY);
         const parsed = safeParse<string[]>(raw, []);
-        console.log('[SwapContext] Hydrated saved posts from storage:', parsed.length);
+        logger.info('SwapContext', 'Hydrated saved posts from storage', { length: parsed.length });
         return parsed;
       } catch (e) {
-        console.error('[SwapContext] Error loading saved posts:', e);
+        logger.error('SwapContext', 'Error loading saved posts', { e });
         return [];
       }
     },
@@ -214,7 +215,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
   const { mutate: persistPostsMutate } = useMutation({
     mutationFn: async (payload: SwapPost[]) => {
       await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(payload));
-      console.log('[SwapContext] Persisted posts:', payload.length);
+      logger.info('SwapContext', 'Persisted posts', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -225,7 +226,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
   const { mutate: persistMatchesMutate } = useMutation({
     mutationFn: async (payload: SwapMatch[]) => {
       await AsyncStorage.setItem(MATCHES_KEY, JSON.stringify(payload));
-      console.log('[SwapContext] Persisted matches:', payload.length);
+      logger.info('SwapContext', 'Persisted matches', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -236,7 +237,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
   const { mutate: persistSavedPostsMutate } = useMutation({
     mutationFn: async (payload: string[]) => {
       await AsyncStorage.setItem(SAVED_POSTS_KEY, JSON.stringify(payload));
-      console.log('[SwapContext] Persisted saved posts:', payload.length);
+      logger.info('SwapContext', 'Persisted saved posts', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -257,7 +258,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
   }, [savedPostsQuery.data]);
 
   useEffect(() => {
-    console.log('[SwapContext] Setting up Supabase realtime subscription for offers table');
+    logger.info('SwapContext', 'Setting up Supabase realtime subscription for offers table');
     
     const channel = supabase
       .channel('offers-realtime')
@@ -269,7 +270,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
           table: 'offers',
         },
         (payload) => {
-          console.log('[SwapContext] New offer received via realtime:', payload);
+          logger.info('SwapContext', 'New offer received via realtime', { payload });
           queryClient.invalidateQueries({ queryKey: ['swapMatches'] });
         }
       )
@@ -281,18 +282,18 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
           table: 'offers',
         },
         (payload) => {
-          console.log('[SwapContext] Offer updated via realtime:', payload);
+          logger.info('SwapContext', 'Offer updated via realtime', { payload });
           queryClient.invalidateQueries({ queryKey: ['swapMatches'] });
         }
       )
       .subscribe((status) => {
-        console.log('[SwapContext] Realtime subscription status:', status);
+        logger.info('SwapContext', 'Realtime subscription status', { status });
       });
 
     realtimeChannelRef.current = channel;
 
     return () => {
-      console.log('[SwapContext] Cleaning up realtime subscription');
+      logger.info('SwapContext', 'Cleaning up realtime subscription');
       if (realtimeChannelRef.current) {
         supabase.removeChannel(realtimeChannelRef.current);
       }
@@ -322,7 +323,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       const next = [newPost, ...posts];
       setPosts(next);
       persistPostsMutate(next);
-      console.log('[SwapContext] Created post:', newPost.id);
+      logger.info('SwapContext', 'Created post', { id: newPost.id });
       return newPost.id;
     },
     [currentUser, currentUserId, persistPostsMutate, posts]
@@ -342,7 +343,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
         persistMatchesMutate(nextMatches);
       }
 
-      console.log('[SwapContext] Deleted post:', postId);
+      logger.info('SwapContext', 'Deleted post', { postId });
     },
     [matches, persistMatchesMutate, persistPostsMutate, posts]
   );
@@ -352,7 +353,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       const next = posts.map((p) => (p.id === postId ? { ...p, status: 'closed' as const } : p));
       setPosts(next);
       persistPostsMutate(next);
-      console.log('[SwapContext] Closed post:', postId);
+      logger.info('SwapContext', 'Closed post', { postId });
     },
     [persistPostsMutate, posts]
   );
@@ -362,39 +363,39 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       const isCashOffer = cashOffer !== undefined && cashOffer > 0;
       
       if (!isCashOffer && !proposerPostId) {
-        console.log('[SwapContext] proposeSwap missing proposer post for swap');
+        logger.info('SwapContext', 'proposeSwap missing proposer post for swap');
         return;
       }
       
       if (!targetPostId) {
-        console.log('[SwapContext] proposeSwap missing target post');
+        logger.info('SwapContext', 'proposeSwap missing target post');
         return;
       }
 
       if (!isCashOffer && proposerPostId === targetPostId) {
-        console.log('[SwapContext] proposeSwap blocked (same post)');
+        logger.info('SwapContext', 'proposeSwap blocked (same post)');
         return;
       }
 
       const target = posts.find((p) => p.id === targetPostId);
       if (!target) {
-        console.log('[SwapContext] proposeSwap missing target post');
+        logger.info('SwapContext', 'proposeSwap missing target post');
         return;
       }
 
       if (target.authorId === currentUserId) {
-        console.log('[SwapContext] proposeSwap blocked (cannot target your own post)');
+        logger.info('SwapContext', 'proposeSwap blocked (cannot target your own post)');
         return;
       }
 
       if (!isCashOffer) {
         const proposer = posts.find((p) => p.id === proposerPostId);
         if (!proposer) {
-          console.log('[SwapContext] proposeSwap missing proposer post');
+          logger.info('SwapContext', 'proposeSwap missing proposer post');
           return;
         }
         if (proposer.authorId !== currentUserId) {
-          console.log('[SwapContext] proposeSwap blocked (not your proposer post)');
+          logger.info('SwapContext', 'proposeSwap blocked (not your proposer post)');
           return;
         }
       }
@@ -406,7 +407,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
             (m.proposerPostId === targetPostId && m.targetPostId === proposerPostId))
       );
       if (existing && !isCashOffer) {
-        console.log('[SwapContext] proposeSwap ignored (already pending):', existing.id);
+        logger.info('SwapContext', 'proposeSwap ignored (already pending)', { id: existing.id });
         return;
       }
 
@@ -434,7 +435,8 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       const nextMatches = [newMatch, ...matches];
       setMatches(nextMatches);
       persistMatchesMutate(nextMatches);
-      console.log('[SwapContext] Proposed swap:', newMatch.id, {
+      logger.info('SwapContext', 'Proposed swap', {
+        id: newMatch.id,
         kind: isCashOffer ? 'cash' : 'swap',
         cashOffer,
         paymentMethod: newMatch.paymentMethod,
@@ -449,7 +451,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       if (!match) return;
 
       if (match.targetUserId !== currentUserId && match.proposerUserId !== currentUserId) {
-        console.log('[SwapContext] acceptMatch blocked (not participant)');
+        logger.info('SwapContext', 'acceptMatch blocked (not participant)');
         return;
       }
 
@@ -475,7 +477,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
         persistPostsMutate(nextPosts);
       }
 
-      console.log('[SwapContext] Accepted match:', matchId);
+      logger.info('SwapContext', 'Accepted match', { matchId });
     },
     [currentUserId, matches, persistMatchesMutate, persistPostsMutate, posts]
   );
@@ -486,14 +488,14 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       if (!match) return;
 
       if (match.targetUserId !== currentUserId && match.proposerUserId !== currentUserId) {
-        console.log('[SwapContext] declineMatch blocked (not participant)');
+        logger.info('SwapContext', 'declineMatch blocked (not participant)');
         return;
       }
 
       const nextMatches = matches.map((m) => (m.id === matchId ? { ...m, status: 'declined' as const } : m));
       setMatches(nextMatches);
       persistMatchesMutate(nextMatches);
-      console.log('[SwapContext] Declined match:', matchId);
+      logger.info('SwapContext', 'Declined match', { matchId });
     },
     [currentUserId, matches, persistMatchesMutate]
   );
@@ -504,14 +506,14 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
       if (!match) return;
 
       if (match.proposerUserId !== currentUserId) {
-        console.log('[SwapContext] cancelMatch blocked (only proposer)');
+        logger.info('SwapContext', 'cancelMatch blocked (only proposer)');
         return;
       }
 
       const nextMatches = matches.map((m) => (m.id === matchId ? { ...m, status: 'cancelled' as const } : m));
       setMatches(nextMatches);
       persistMatchesMutate(nextMatches);
-      console.log('[SwapContext] Cancelled match:', matchId);
+      logger.info('SwapContext', 'Cancelled match', { matchId });
     },
     [currentUserId, matches, persistMatchesMutate]
   );
@@ -540,7 +542,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
         : [...savedPosts, postId];
       setSavedPosts(next);
       persistSavedPostsMutate(next);
-      console.log('[SwapContext] Toggled save post:', postId, !isSaved);
+      logger.info('SwapContext', 'Toggled save post', { postId, value: !isSaved });
     },
     [savedPosts, persistSavedPostsMutate]
   );
@@ -557,7 +559,7 @@ export const [SwapProvider, useSwap] = createContextHook<SwapState>(() => {
     setMatches(nextMatches);
     persistPostsMutate(nextPosts);
     persistMatchesMutate(nextMatches);
-    console.log('[SwapContext] Cleared all swap data');
+    logger.info('SwapContext', 'Cleared all swap data');
   }, [persistMatchesMutate, persistPostsMutate]);
 
   const isLoading = postsQuery.isLoading || matchesQuery.isLoading || savedPostsQuery.isLoading;

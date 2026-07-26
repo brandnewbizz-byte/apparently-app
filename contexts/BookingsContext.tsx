@@ -15,6 +15,7 @@ import {
 } from '@/mocks/bookingsData';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export type { Listing, Booking, ListingCategory, RentalSubmission, RentalSubmissionStatus };
 
@@ -73,7 +74,7 @@ const safeParse = <T,>(raw: string | null, fallback: T): T => {
   try {
     return JSON.parse(raw) as T;
   } catch (e) {
-    console.error('[BookingsContext] JSON parse error:', e);
+    logger.error('BookingsContext', 'JSON parse error', { e });
     return fallback;
   }
 };
@@ -95,7 +96,7 @@ const mapDbListingToListing = (dbListing: any, host: any): Listing => ({
     id: dbListing.host_id,
     name: 'Host',
     username: 'host',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+    avatar: '',
     isVerified: false,
     followersCount: 0,
   },
@@ -134,12 +135,12 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     queryKey: ['supabaseListings'],
     queryFn: async ({ signal }) => {
       try {
-        console.log('[BookingsContext] Starting to fetch all listings from Supabase...');
+        logger.info('BookingsContext', 'Starting to fetch all listings from Supabase...');
         const dbListings = await DatabaseService.fetchListings(undefined, { signal });
-        console.log('[BookingsContext] Listings query result:', dbListings?.length || 0);
+        logger.info('BookingsContext', 'Listings query result', { value: dbListings?.length || 0 });
         
         if (dbListings && dbListings.length > 0) {
-          console.log('[BookingsContext] Fetched listings from Supabase:', dbListings.length);
+          logger.info('BookingsContext', 'Fetched listings from Supabase', { length: dbListings.length });
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, {
             id: u.id,
@@ -151,16 +152,16 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           }]));
           
           const mappedListings = dbListings.map(l => mapDbListingToListing(l, userMap.get(l.host_id)));
-          console.log('[BookingsContext] Mapped listings:', mappedListings.length);
+          logger.info('BookingsContext', 'Mapped listings', { length: mappedListings.length });
           return mappedListings;
         }
-        console.log('[BookingsContext] No listings found in Supabase');
+        logger.info('BookingsContext', 'No listings found in Supabase');
         
         // Try local API fallback
         try {
           const localBookings = await localApi.getBookings();
           if (localBookings && localBookings.length > 0) {
-            console.log('[BookingsContext] Fetched bookings from local API:', localBookings.length);
+            logger.info('BookingsContext', 'Fetched bookings from local API', { length: localBookings.length });
             return localBookings.map((b: any) => ({
               id: b.id,
               listingId: b.listing_id,
@@ -176,15 +177,15 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
             })) as any[];
           }
         } catch (e2) {
-          console.log('[BookingsContext] Local API also unavailable');
+          logger.info('BookingsContext', 'Local API also unavailable');
         }
         return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[BookingsContext] Listings fetch aborted (navigation)');
+          logger.info('BookingsContext', 'Listings fetch aborted (navigation)');
           return [];
         }
-        console.error('[BookingsContext] Error fetching listings from Supabase:', error);
+        logger.error('BookingsContext', 'Error fetching listings from Supabase', { error });
         return [];
       }
     },
@@ -203,13 +204,13 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     queryFn: async ({ signal }) => {
       try {
         const hostId = DatabaseService.getDefaultUserId();
-        console.log('[BookingsContext] Fetching my listings for host:', hostId);
+        logger.info('BookingsContext', 'Fetching my listings for host', { hostId });
         
         const dbListings = await DatabaseService.fetchUserListings(hostId, { signal });
-        console.log('[BookingsContext] My listings query result:', dbListings?.length || 0);
+        logger.info('BookingsContext', 'My listings query result', { value: dbListings?.length || 0 });
         
         if (dbListings && dbListings.length > 0) {
-          console.log('[BookingsContext] Fetched my listings from Supabase:', dbListings.length);
+          logger.info('BookingsContext', 'Fetched my listings from Supabase', { length: dbListings.length });
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, {
             id: u.id,
@@ -222,14 +223,14 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           
           return dbListings.map(l => mapDbListingToListing(l, userMap.get(l.host_id)));
         }
-        console.log('[BookingsContext] No my listings found in Supabase');
+        logger.info('BookingsContext', 'No my listings found in Supabase');
         return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[BookingsContext] My listings fetch aborted (navigation)');
+          logger.info('BookingsContext', 'My listings fetch aborted (navigation)');
           return [];
         }
-        console.error('[BookingsContext] Error fetching my listings from Supabase:', error);
+        logger.error('BookingsContext', 'Error fetching my listings from Supabase', { error });
         return [];
       }
     },
@@ -251,7 +252,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         if (userId) {
           const dbBookings = await DatabaseService.fetchBookings(userId, { signal });
           if (dbBookings && dbBookings.length > 0) {
-            console.log('[BookingsContext] Fetched bookings from Supabase:', dbBookings.length);
+            logger.info('BookingsContext', 'Fetched bookings from Supabase', { length: dbBookings.length });
             return dbBookings.map(b => {
               const listing = listings.find(l => l.id === b.listing_id);
               return {
@@ -273,14 +274,14 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         
         const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
         const parsed = safeParse<Booking[]>(raw, []);
-        console.log('[BookingsContext] Hydrated bookings from local:', parsed.length);
+        logger.info('BookingsContext', 'Hydrated bookings from local', { length: parsed.length });
         return parsed;
       } catch (e: any) {
         if (e?.name === 'AbortError') {
-          console.log('[BookingsContext] Bookings fetch aborted (navigation)');
+          logger.info('BookingsContext', 'Bookings fetch aborted (navigation)');
           return [];
         }
-        console.error('[BookingsContext] Error loading bookings:', e);
+        logger.error('BookingsContext', 'Error loading bookings', { e });
         return [];
       }
     },
@@ -294,10 +295,10 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
       try {
         const raw = await AsyncStorage.getItem(FAVORITES_KEY);
         const parsed = safeParse<string[]>(raw, []);
-        console.log('[BookingsContext] Hydrated favorites:', parsed.length);
+        logger.info('BookingsContext', 'Hydrated favorites', { length: parsed.length });
         return parsed;
       } catch (e) {
-        console.error('[BookingsContext] Error loading favorites:', e);
+        logger.error('BookingsContext', 'Error loading favorites', { e });
         return [];
       }
     },
@@ -309,10 +310,10 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
       try {
         const raw = await AsyncStorage.getItem(RENTAL_SUBMISSIONS_KEY);
         const parsed = safeParse<RentalSubmission[]>(raw, []);
-        console.log('[BookingsContext] Hydrated rental submissions:', parsed.length);
+        logger.info('BookingsContext', 'Hydrated rental submissions', { length: parsed.length });
         return parsed;
       } catch (e) {
-        console.error('[BookingsContext] Error loading rental submissions:', e);
+        logger.error('BookingsContext', 'Error loading rental submissions', { e });
         return [];
       }
     },
@@ -321,7 +322,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
   const { mutate: persistBookingsMutate } = useMutation({
     mutationFn: async (payload: Booking[]) => {
       await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(payload));
-      console.log('[BookingsContext] Persisted bookings:', payload.length);
+      logger.info('BookingsContext', 'Persisted bookings', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -332,7 +333,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
   const { mutate: persistFavoritesMutate } = useMutation({
     mutationFn: async (payload: string[]) => {
       await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(payload));
-      console.log('[BookingsContext] Persisted favorites:', payload.length);
+      logger.info('BookingsContext', 'Persisted favorites', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -343,7 +344,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
   const { mutate: persistRentalSubmissionsMutate } = useMutation({
     mutationFn: async (payload: RentalSubmission[]) => {
       await AsyncStorage.setItem(RENTAL_SUBMISSIONS_KEY, JSON.stringify(payload));
-      console.log('[BookingsContext] Persisted rental submissions:', payload.length);
+      logger.info('BookingsContext', 'Persisted rental submissions', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -366,7 +367,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           message: booking.message,
         });
         if (dbBooking) {
-          console.log('[BookingsContext] Created booking in Supabase:', dbBooking.id);
+          logger.info('BookingsContext', 'Created booking in Supabase', { id: dbBooking.id });
           return dbBooking;
         }
       }
@@ -434,7 +435,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     }) => {
       const listing = getListingById(input.listingId);
       if (!listing) {
-        console.error('[BookingsContext] Listing not found:', input.listingId);
+        logger.error('BookingsContext', 'Listing not found', { listingId: input.listingId });
         return;
       }
 
@@ -470,7 +471,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         message: input.message,
       });
       
-      console.log('[BookingsContext] Created booking:', newBooking.id);
+      logger.info('BookingsContext', 'Created booking', { id: newBooking.id });
     },
     [bookings, getListingById, persistBookingsMutate, createBookingMutate]
   );
@@ -485,11 +486,11 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
       
       DatabaseService.updateBooking(bookingId, { status: 'cancelled' }).then(result => {
         if (result) {
-          console.log('[BookingsContext] Updated booking status in Supabase:', bookingId);
+          logger.info('BookingsContext', 'Updated booking status in Supabase', { bookingId });
         }
       });
       
-      console.log('[BookingsContext] Cancelled booking:', bookingId);
+      logger.info('BookingsContext', 'Cancelled booking', { bookingId });
     },
     [bookings, persistBookingsMutate]
   );
@@ -502,7 +503,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         : [...favorites, listingId];
       setFavorites(next);
       persistFavoritesMutate(next);
-      console.log('[BookingsContext] Toggled favorite:', listingId, !isFav);
+      logger.info('BookingsContext', 'Toggled favorite', { listingId, value: !isFav });
     },
     [favorites, persistFavoritesMutate]
   );
@@ -561,11 +562,11 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
 
   const submitRental = useCallback(
     async (input: RentalSubmissionInput) => {
-      console.log('[BookingsContext] Starting rental submission to Supabase...');
+      logger.info('BookingsContext', 'Starting rental submission to Supabase...');
 
       try {
         const hostId = await DatabaseService.getOrCreateUserId();
-        console.log('[BookingsContext] Using host_id for listing:', hostId);
+        logger.info('BookingsContext', 'Using host_id for listing', { hostId });
         
         const dbListing = await DatabaseService.createListing({
           category: input.category,
@@ -588,7 +589,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         });
 
         if (dbListing) {
-          console.log('[BookingsContext] SUCCESS: Created listing in Supabase:', dbListing.id);
+          logger.info('BookingsContext', 'SUCCESS: Created listing in Supabase', { id: dbListing.id });
           queryClient.invalidateQueries({ queryKey: ['supabaseListings'] });
           queryClient.invalidateQueries({ queryKey: ['myListings'] });
           
@@ -602,7 +603,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           setRentalSubmissions(next);
           persistRentalSubmissionsMutate(next);
         } else {
-          console.error('[BookingsContext] FAILED: Could not create listing in Supabase');
+          logger.error('BookingsContext', 'FAILED: Could not create listing in Supabase');
           const newSubmission: RentalSubmission = {
             ...input,
             id: makeId(),
@@ -614,7 +615,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           persistRentalSubmissionsMutate(next);
         }
       } catch (error) {
-        console.error('[BookingsContext] Error creating listing:', error);
+        logger.error('BookingsContext', 'Error creating listing', { error });
         const newSubmission: RentalSubmission = {
           ...input,
           id: makeId(),
@@ -655,7 +656,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     
     supabaseAsSubmissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
     
-    console.log('[BookingsContext] getMyRentalSubmissions - Supabase only:', supabaseAsSubmissions.length);
+    logger.info('BookingsContext', 'getMyRentalSubmissions - Supabase only', { length: supabaseAsSubmissions.length });
     return supabaseAsSubmissions;
   }, [myListings]);
 
@@ -664,11 +665,11 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
       const next = rentalSubmissions.filter((s) => s.id !== id);
       setRentalSubmissions(next);
       persistRentalSubmissionsMutate(next);
-      console.log('[BookingsContext] Deleted rental submission locally:', id);
+      logger.info('BookingsContext', 'Deleted rental submission locally', { id });
       
       const deleted = await DatabaseService.deleteListing(id);
       if (deleted) {
-        console.log('[BookingsContext] Deleted listing from Supabase:', id);
+        logger.info('BookingsContext', 'Deleted listing from Supabase', { id });
         queryClient.invalidateQueries({ queryKey: ['supabaseListings'] });
         queryClient.invalidateQueries({ queryKey: ['myListings'] });
       }
@@ -692,7 +693,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
   const refreshMyListings = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['myListings'] });
     queryClient.invalidateQueries({ queryKey: ['supabaseListings'] });
-    console.log('[BookingsContext] Refreshing my listings');
+    logger.info('BookingsContext', 'Refreshing my listings');
   }, [queryClient]);
 
   const isLoading = bookingsQuery.isLoading || favoritesQuery.isLoading || rentalSubmissionsQuery.isLoading || listingsQuery.isLoading || myListingsQuery.isLoading;

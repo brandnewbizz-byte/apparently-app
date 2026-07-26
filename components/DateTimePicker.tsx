@@ -274,8 +274,8 @@ export default function DateTimePicker({
                     key={index}
                     style={[
                       styles.dayCell,
-                      day === selectedDay && styles.dayCellSelected,
-                      day && isToday(day) && styles.dayCellToday,
+                      day === selectedDay ? styles.dayCellSelected : null,
+                      day ? (isToday(day) ? styles.dayCellToday : null) : null,
                     ]}
                     onPress={() => day && handleDaySelect(day)}
                     disabled={!day}
@@ -283,8 +283,8 @@ export default function DateTimePicker({
                     {day && (
                       <Text style={[
                         styles.dayText,
-                        day === selectedDay && styles.dayTextSelected,
-                        isToday(day) && day !== selectedDay && styles.dayTextToday,
+                        day === selectedDay ? styles.dayTextSelected : null,
+                        isToday(day) && day !== selectedDay ? styles.dayTextToday : null,
                       ]}>
                         {day}
                       </Text>

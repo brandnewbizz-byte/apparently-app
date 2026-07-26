@@ -2,17 +2,22 @@ import {
   Calendar, Clock, MapPin, Users, Sparkles, Dumbbell, Utensils, Palette,
   Plane, Heart, Music, Zap, Play, Plus, Eye,
   MessageCircle, CheckCircle2, Wrench, Bookmark,
-  Radio, Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft,
+  Radio, Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft, Camera,
+  ShoppingBag, Home, Repeat, DollarSign, UserPlus, Search, Package,
+  Star, MessagesSquare, Forward
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   FlatList,
   Image as RNImage,
+  Keyboard,
   Modal,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -26,13 +31,30 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useTabBar } from '@/contexts/TabBarContext';
+import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useMarketplace } from '@/contexts/MarketplaceContext';
+import { useBookings } from '@/contexts/BookingsContext';
+import { useServiceRequests } from '@/contexts/ServiceRequestContext';
+import { useSwap } from '@/contexts/SwapContext';
+import { useConnections } from '@/contexts/ConnectionsContext';
+import { productToFeedPost, listingToFeedPost, swapPostToFeedPost, connectionToFeedPost, requestToFeedPost, bundleToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
+import { useBundles } from '@/contexts/BundleContext';
+import { useSocial } from '@/contexts/SocialContext';
+import { useUserPosts } from '@/contexts/UserPostsContext';
+import { EXTERNAL_EVENTS } from '@/lib/externalEvents';
+import SkeletonCard from '@/components/SkeletonCard';
+import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Reels-style 9:16 portrait container (1080×1920 proportions)
+const FEED_ASPECT = 9 / 16; // width:height
+const FEED_MEDIA_HEIGHT = Math.round(SCREEN_WIDTH / FEED_ASPECT);
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type PostType = 'text' | 'photo' | 'video' | 'live' | 'event' | 'plan' | 'achievement';
+type PostType = 'text' | 'photo' | 'video' | 'live' | 'event' | 'plan' | 'achievement' | 'marketplace' | 'rental' | 'swap' | 'connection' | 'request' | 'bundle';
 
 interface Comment {
   id: string;
@@ -50,6 +72,7 @@ interface FeedPost {
   timestamp: string;
   caption: string;
   media?: string;
+  mediaWidth?: number;
   mediaHeight?: number;
   location?: string;
   date?: string;
@@ -60,6 +83,8 @@ interface FeedPost {
   viewerCount?: number;
   streamDuration?: string;
   comments_list?: Comment[];
+  price?: number | string;
+  pricePerNight?: string;
 }
 
 const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> = {
@@ -70,6 +95,12 @@ const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> 
   Dining: { icon: Utensils, color: '#EF4444', bg: '#EF444415' },
   Travel: { icon: Plane, color: '#10B981', bg: '#10B98115' },
   Services: { icon: Wrench, color: '#6366F1', bg: '#6366F115' },
+  Marketplace: { icon: ShoppingBag, color: '#10B981', bg: '#10B98115' },
+  Rentals: { icon: Home, color: '#3B82F6', bg: '#3B82F615' },
+  Swaps: { icon: Repeat, color: '#F59E0B', bg: '#F59E0B15' },
+  Connections: { icon: UserPlus, color: '#8B5CF6', bg: '#8B5CF615' },
+  Requests: { icon: Search, color: '#F59E0B', bg: '#F59E0B15' },
+  Bundles: { icon: Package, color: '#8B5CF6', bg: '#8B5CF615' },
 };
 
 function formatViewers(n: number): string {
@@ -278,11 +309,19 @@ function PostDetailModal({
   onCelebrate: (postId: string) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const inputRef = useRef<TextInput>(null);
   const [commentText, setCommentText] = useState('');
   const [liked, setLiked] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
   const [localComments, setLocalComments] = useState<Comment[]>(post.comments_list || []);
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
   const CatIcon = cat.icon;
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', (e) => setKbHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKbHeight(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   const handleSendComment = () => {
     const trimmed = commentText.trim();
@@ -304,6 +343,7 @@ function PostDetailModal({
       case 'event': return { label: 'Event', bg: '#8B5CF615', fg: '#8B5CF6' };
       case 'plan': return { label: 'Plan', bg: '#3B82F615', fg: '#3B82F6' };
       case 'achievement': return { label: 'Milestone', bg: '#10B98115', fg: '#10B981' };
+      case 'bundle': return { label: 'Bundle', bg: '#8B5CF615', fg: '#8B5CF6' };
       default: return null;
     }
   })();
@@ -324,7 +364,7 @@ function PostDetailModal({
           data={localComments}
           keyExtractor={(c) => c.id}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: Math.max(100, kbHeight + 60) }}
           ListHeaderComponent={() => (
             <View style={styles.modalContent}>
               {/* Author header */}
@@ -429,10 +469,10 @@ function PostDetailModal({
                   style={styles.detailActionBtn}
                   onPress={() => { setLiked(!liked); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                 >
-                  <Heart size={20} color={liked ? '#EF4444' : colors.textTertiary} fill={liked ? '#EF4444' : 'none'} />
+                  <Star size={20} color={liked ? '#EF4444' : colors.textTertiary} fill={liked ? '#EF4444' : 'none'} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.detailActionBtn}>
-                  <MessageCircle size={20} color={colors.textTertiary} />
+                <TouchableOpacity style={styles.detailActionBtn} onPress={() => inputRef.current?.focus()}>
+                  <MessagesSquare size={20} color={colors.textTertiary} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)}>
                   <Bookmark size={20} color={colors.textTertiary} />
@@ -480,8 +520,8 @@ function PostDetailModal({
         />
 
         {/* Comment input */}
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
-          <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.bottom}>
+          <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 4 }]}>
             <RNImage
               source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }}
               style={styles.commentInputAvatar}
@@ -520,6 +560,8 @@ function PostCard({
   onCelebrate,
   onTagTap,
   onMediaTap,
+  onShare,
+  onDelete,
 }: {
   post: FeedPost;
   colors: any;
@@ -531,10 +573,11 @@ function PostCard({
   onCelebrate: (postId: string) => void;
   onTagTap: (tag: string) => void;
   onMediaTap: (uri: string) => void;
+  onShare: (post: FeedPost) => void;
+  onDelete?: (postId: string) => void;
 }) {
-  const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
-  const CatIcon = cat.icon;
   const [saved, setSaved] = useState(false);
+  const [liked, setLiked] = useState(false);
 
   const handleSave = () => {
     setSaved(!saved);
@@ -542,109 +585,186 @@ function PostCard({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const badge = (() => {
+  const handleLike = () => {
+    setLiked(!liked);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const handleMenuPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const options: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
+      { text: 'Report', style: 'destructive', onPress: () => {} },
+      { text: 'Hide', onPress: () => {} },
+      { text: 'Copy Link', onPress: () => { Share.share({ message: `Check this out: ${post.caption}` }); } },
+    ];
+    if (onDelete) {
+      options.push({
+        text: 'Delete Post',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert(
+            'Delete Post',
+            'Are you sure you want to delete this post? This cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: () => onDelete(post.id),
+              },
+            ],
+            { cancelable: true },
+          );
+        },
+      });
+    }
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Post Options', `By ${post.author.name}`, options, { cancelable: true });
+  };
+
+  const likeCount = (post.price != null ? Number(post.price) : post.stats.saves) + (liked ? 1 : 0);
+
+  const typeLabel = (() => {
     switch (post.type) {
-      case 'live': return { label: 'LIVE', bg: '#EF444415', fg: '#EF4444', dot: true };
-      case 'event': return { label: 'Event', bg: '#8B5CF615', fg: '#8B5CF6' };
-      case 'plan': return { label: 'Plan', bg: '#3B82F615', fg: '#3B82F6' };
-      case 'achievement': return { label: 'Milestone', bg: '#10B98115', fg: '#10B981' };
+      case 'live': return 'LIVE';
+      case 'event': return 'Event';
+      case 'plan': return 'Plan';
+      case 'marketplace': return post.price != null ? `$${post.price}` : 'For Sale';
+      case 'rental': return post.pricePerNight || 'For Rent';
+      case 'swap': return 'Trade';
+      case 'bundle': return 'Bundle';
       default: return null;
     }
   })();
 
   return (
-    <TouchableOpacity
-      style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      activeOpacity={0.95}
-      onPress={onPress}
-    >
-      {/* Header */}
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          <RNImage source={{ uri: post.author.avatar }} style={styles.avatar} />
-          <View style={{ flex: 1 }}>
-            <View style={styles.nameRow}>
-              <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
-              {badge && (
-                <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                  {badge.dot && <View style={styles.liveDot} />}
-                  <Text style={[styles.badgeText, { color: badge.fg }]}>{badge.label}</Text>
-                </View>
+    <View style={[igCardStyles.card, { backgroundColor: colors.surface }]}>
+      {/* Header — Instagram style: circle avatar + username + location */}
+      <View style={igCardStyles.header}>
+        <TouchableOpacity style={igCardStyles.headerLeft} onPress={onPress}>
+          <RNImage source={{ uri: post.author.avatar }} style={igCardStyles.avatar} />
+          <View style={igCardStyles.headerText}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
+              {typeLabel && (
+                <Text style={[igCardStyles.typeLabel, { color: colors.textTertiary }]}>· {typeLabel}</Text>
               )}
             </View>
-            <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
-              {post.timestamp}{post.location ? ` · ${post.location}` : ''}
-            </Text>
+            {post.location ? (
+              <Text style={[igCardStyles.location, { color: colors.textTertiary }]}>{post.location}</Text>
+            ) : null}
           </View>
-        </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={igCardStyles.menuBtn} onPress={handleMenuPress}>
+          <Text style={[igCardStyles.menuDots, { color: colors.textSecondary }]}>···</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Caption / Title */}
-      {(post.type === 'live' && post.title) ? (
-        <View>
-          <Text style={[styles.caption, { color: colors.text, fontWeight: '700' }]}>{post.title}</Text>
-          {post.caption ? <Text style={[styles.caption, { color: colors.textSecondary }]}>{post.caption}</Text> : null}
-        </View>
-      ) : post.caption ? (
-        <Text style={[styles.caption, { color: colors.text }]}>{post.caption}</Text>
-      ) : null}
-
-      {/* Media */}
-      {post.media && (
-        <TouchableOpacity
-          style={post.type === 'live' ? styles.liveMediaWrap : styles.mediaWrap}
-          activeOpacity={0.9}
-          onPress={() => onMediaTap(post.media!)}
-        >
+      {/* Media — Reels-style 9:16 portrait container */}
+      {post.media ? (
+        <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)}>
           <RNImage
             source={{ uri: post.media }}
-            style={[styles.mediaImg, { height: post.type === 'live' ? 240 : post.mediaHeight || 340 }]}
+            style={[
+              igCardStyles.media,
+              {
+                height: post.type === 'live' ? 240 : FEED_MEDIA_HEIGHT,
+              },
+            ]}
             resizeMode="cover"
           />
           {post.type === 'video' && (
-            <View style={styles.playOverlay}>
-              <View style={styles.playBtn}>
-                <Play size={20} color="#FFF" fill="#FFF" style={{ marginLeft: 2 }} />
+            <View style={igCardStyles.playOverlay}>
+              <View style={igCardStyles.playBtn}>
+                <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
               </View>
             </View>
           )}
           {post.type === 'live' && (
-            <View style={styles.liveOverlay}>
-              <View style={styles.livePill}>
-                <View style={styles.liveDotWhite} />
-                <Text style={styles.livePillText}>LIVE</Text>
+            <View style={igCardStyles.liveOverlay}>
+              <View style={igCardStyles.liveBadge}>
+                <View style={igCardStyles.liveDot} />
+                <Text style={igCardStyles.liveText}>LIVE</Text>
               </View>
-              <View style={styles.liveInfo}>
-                <View style={styles.liveInfoPill}>
+              <View style={igCardStyles.liveInfoRow}>
+                <View style={igCardStyles.liveCountBadge}>
                   <Eye size={11} color="#FFF" />
-                  <Text style={styles.liveInfoText}>{formatViewers(post.viewerCount || 0)}</Text>
+                  <Text style={igCardStyles.liveCountText}>{formatViewers(post.viewerCount || 0)}</Text>
                 </View>
-                <Text style={styles.liveInfoText}>{post.streamDuration}</Text>
+                <Text style={igCardStyles.liveCountText}>{post.streamDuration}</Text>
               </View>
             </View>
           )}
         </TouchableOpacity>
-      )}
+      ) : null}
 
-      {/* Event/Plan meta */}
-      {(post.type === 'event' || post.type === 'plan') && (
-        <View style={styles.metaRow}>
-          {post.date && (
-            <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-              <Clock size={11} color={colors.textTertiary} />
-              <Text style={[styles.metaChipText, { color: colors.textTertiary }]}>{post.date}</Text>
+      {/* Text-only post: larger caption area */}
+      {!post.media && post.caption ? (
+        <View style={igCardStyles.textOnlyArea}>
+          <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={6}>
+            {post.caption}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Action Bar — Instagram style: ♡ 💬 ✈  |  🔖 */}
+      <View style={igCardStyles.actionBar}>
+        <View style={igCardStyles.actionLeft}>
+          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleLike}>
+            <Star size={26} color={liked ? '#EF4444' : colors.text} fill={liked ? '#EF4444' : 'none'} />
+          </TouchableOpacity>
+          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onComment(post)}>
+            <MessagesSquare size={26} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onShare(post)}>
+            <Forward size={23} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleSave}>
+          <Bookmark size={26} color={colors.text} fill={saved ? colors.text : 'none'} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Likes count */}
+      <View style={igCardStyles.likesRow}>
+        <Text style={[igCardStyles.likesText, { color: colors.text }]}>
+          Liked by <Text style={{ fontWeight: '700' }}>you</Text> and{' '}
+          <Text style={{ fontWeight: '700' }}>{likeCount > 0 ? likeCount : 23} others</Text>
+        </Text>
+      </View>
+
+      {/* Caption — with bold username like Instagram */}
+      {post.caption && post.media ? (
+        <View style={igCardStyles.captionRow}>
+          <Text style={[igCardStyles.captionText, { color: colors.text }]} numberOfLines={3}>
+            <Text style={{ fontWeight: '700' }}>{post.author.name}</Text>{' '}
+            {post.caption}
+          </Text>
+          {post.tags.length > 0 && (
+            <View style={igCardStyles.tagRow}>
+              {post.tags.slice(0, 3).map((tag) => (
+                <TouchableOpacity key={tag} onPress={() => onTagTap(tag)}>
+                  <Text style={[igCardStyles.hashTag, { color: '#00376B' }]}>#{tag}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
-          {post.location && (
-            <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-              <MapPin size={11} color={colors.textTertiary} />
-              <Text style={[styles.metaChipText, { color: colors.textTertiary }]} numberOfLines={1}>{post.location}</Text>
+        </View>
+      ) : null}
+
+      {/* Event/Plan meta — subtle under caption */}
+      {(post.type === 'event' || post.type === 'plan') && (
+        <View style={igCardStyles.eventMeta}>
+          {post.date && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Clock size={12} color={colors.textTertiary} />
+              <Text style={[igCardStyles.eventMetaText, { color: colors.textTertiary }]}>{post.date}</Text>
             </View>
           )}
           {post.attendees != null && (
-            <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-              <Users size={11} color={colors.textTertiary} />
-              <Text style={[styles.metaChipText, { color: colors.textTertiary }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Users size={12} color={colors.textTertiary} />
+              <Text style={[igCardStyles.eventMetaText, { color: colors.textTertiary }]}>
                 {post.attendees}/{post.maxAttendees}
               </Text>
             </View>
@@ -652,213 +772,54 @@ function PostCard({
         </View>
       )}
 
-      {/* Category & Tags */}
-      <View style={styles.bottomRow}>
-        <View style={styles.tagRow}>
-          <View style={[styles.metaChip, { backgroundColor: cat.bg }]}>
-            <CatIcon size={11} color={cat.color} />
-            <Text style={[styles.metaChipText, { color: cat.color }]}>{post.category}</Text>
-          </View>
-          {post.tags.slice(0, 3).map((tag) => (
-            <TouchableOpacity
-              key={tag}
-              style={[styles.tag, { backgroundColor: colors.accent + '08' }]}
-              onPress={() => onTagTap(tag)}
-            >
-              <Text style={[styles.tagText, { color: colors.textTertiary }]}>#{tag}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      {/* Comments link */}
+      {(post.stats.comments > 0 || post.comments_list?.length) && (
+        <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
+          <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
+            View all {post.stats.comments || post.comments_list?.length || 0} comments
+          </Text>
+        </TouchableOpacity>
+      )}
 
-      {/* Actions — Save + Comment only. No Grabs. */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: colors.background }]}
-          onPress={handleSave}
-        >
-          <Bookmark size={16} color={saved ? colors.accent : colors.textTertiary} fill={saved ? colors.accent : 'none'} />
-          <Text style={[styles.actionText, { color: colors.textTertiary }]}>{post.stats.saves + (saved ? 1 : 0)}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: colors.background }]}
-          onPress={() => onComment(post)}
-        >
-          <MessageCircle size={16} color={colors.textTertiary} />
-          <Text style={[styles.actionText, { color: colors.textTertiary }]}>{post.stats.comments}</Text>
-        </TouchableOpacity>
-        <View style={{ flex: 1 }} />
+      {/* Timestamp */}
+      <View style={igCardStyles.timestampRow}>
+        <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
+          {post.timestamp}
+        </Text>
+        {/* Type-specific CTA pill */}
         {post.type === 'live' ? (
-          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: '#EF4444' }]} onPress={() => onWatch(post.id)}>
-            <Play size={13} color="#FFF" fill="#FFF" />
-            <Text style={styles.joinBtnText}>Watch</Text>
+          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#EF4444' }]} onPress={() => onWatch(post.id)}>
+            <Play size={11} color="#FFF" fill="#FFF" />
+            <Text style={igCardStyles.ctaPillText}>Watch Live</Text>
           </TouchableOpacity>
         ) : post.type === 'event' || post.type === 'plan' ? (
-          <TouchableOpacity style={[styles.joinBtn, { backgroundColor: colors.accent }]} onPress={() => onJoin(post.id)}>
-            <Users size={13} color="#FFF" />
-            <Text style={styles.joinBtnText}>Join</Text>
+          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: colors.accent }]} onPress={() => onJoin(post.id)}>
+            <Users size={11} color="#FFF" />
+            <Text style={igCardStyles.ctaPillText}>Join</Text>
+          </TouchableOpacity>
+        ) : post.type === 'marketplace' ? (
+          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={onPress}>
+            <ShoppingBag size={11} color="#FFF" />
+            <Text style={igCardStyles.ctaPillText}>View</Text>
+          </TouchableOpacity>
+        ) : post.type === 'bundle' ? (
+          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#8B5CF6' }]} onPress={onPress}>
+            <Package size={11} color="#FFF" />
+            <Text style={igCardStyles.ctaPillText}>Grab</Text>
           </TouchableOpacity>
         ) : post.type === 'achievement' ? (
-          <TouchableOpacity style={[styles.celebrateBtn, { borderColor: '#10B98140' }]} onPress={() => onCelebrate(post.id)}>
-            <Sparkles size={13} color="#10B981" />
-            <Text style={[styles.celebrateBtnText, { color: '#10B981' }]}>Celebrate</Text>
+          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={() => onCelebrate(post.id)}>
+            <Sparkles size={11} color="#FFF" />
+            <Text style={igCardStyles.ctaPillText}>Celebrate</Text>
           </TouchableOpacity>
         ) : null}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Create Post Modal
-// ═══════════════════════════════════════════════════════════════════════════
-
-const POST_CATEGORIES = ['Wellness', 'Fitness', 'Entertainment', 'Creative', 'Dining', 'Travel'];
-
-function CreatePostModal({
-  visible, onClose, onPost, colors, insets,
-}: { visible: boolean; onClose: () => void; onPost: (p: FeedPost) => void; colors: any; insets: any }) {
-  const [postType, setPostType] = useState<PostType>('text');
-  const [caption, setCaption] = useState('');
-  const [category, setCategory] = useState('Wellness');
-  const [mediaUri, setMediaUri] = useState<string | null>(null);
-  const [tagInput, setTagInput] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-
-  const handlePickMedia = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: postType === 'video' ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8, allowsEditing: false,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      setMediaUri(result.assets[0].uri);
-      if (postType === 'photo' && result.assets[0].type === 'video') setPostType('video');
-    }
-  };
-
-  const handleAddTag = () => {
-    const t = tagInput.trim().replace(/^#/, '');
-    if (t && !tags.includes(t) && tags.length < 5) { setTags((prev) => [...prev, t]); setTagInput(''); }
-  };
-
-  const handleRemoveTag = (tag: string) => { setTags((prev) => prev.filter((t) => t !== tag)); };
-
-  const handlePost = () => {
-    if (!caption.trim() && !mediaUri) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onPost({
-      id: `user-${Date.now()}`, type: postType,
-      author: { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
-      category, timestamp: 'Just now', caption: caption.trim(),
-      media: mediaUri || undefined, mediaHeight: postType === 'video' ? 420 : 340,
-      tags, stats: { saves: 0, comments: 0 }, comments_list: [],
-    });
-    setCaption(''); setMediaUri(null); setTags([]); setTagInput('');
-    setPostType('text'); setCategory('Wellness'); onClose();
-  };
-
-  const canPost = caption.trim().length > 0 || mediaUri != null;
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.createModal, { backgroundColor: colors.background }]}>
-        <View style={[styles.createHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose} style={styles.createBackBtn}><X size={22} color={colors.text} /></TouchableOpacity>
-          <Text style={[styles.createTitle, { color: colors.text }]}>New Post</Text>
-          <TouchableOpacity
-            style={[styles.createPostBtn, { backgroundColor: canPost ? colors.accent : colors.surface, opacity: canPost ? 1 : 0.5 }]}
-            onPress={handlePost} disabled={!canPost}
-          >
-            <Text style={{ color: canPost ? '#FFF' : colors.textTertiary, fontWeight: '700', fontSize: 14 }}>Post</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView style={styles.createBody} contentContainerStyle={{ padding: 16, gap: 16 }}>
-          {/* Post Type */}
-          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Post Type</Text>
-          <View style={styles.typePicker}>
-            {([{ key: 'text', label: 'Text', icon: FileText }, { key: 'photo', label: 'Photo', icon: ImageIcon }, { key: 'video', label: 'Video', icon: VideoIcon }] as const).map((t) => {
-              const Icon = t.icon; const active = postType === t.key;
-              return (
-                <TouchableOpacity key={t.key}
-                  style={[styles.typeOption, { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border }]}
-                  onPress={() => { setPostType(t.key); if (t.key === 'text') setMediaUri(null); }}
-                >
-                  <Icon size={16} color={active ? '#FFF' : colors.textSecondary} />
-                  <Text style={[styles.typeOptionText, { color: active ? '#FFF' : colors.textSecondary }]}>{t.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          {/* Category */}
-          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.catPicker}>
-              {POST_CATEGORIES.map((cat) => {
-                const cfg = CATEGORY_CONFIG[cat]; const CIcon = cfg.icon; const active = category === cat;
-                return (
-                  <TouchableOpacity key={cat}
-                    style={[styles.catOption, { backgroundColor: active ? cfg.bg : colors.surface, borderColor: active ? cfg.color : colors.border }]}
-                    onPress={() => setCategory(cat)}
-                  >
-                    <CIcon size={13} color={cfg.color} />
-                    <Text style={[styles.catOptionText, { color: active ? cfg.color : colors.textSecondary }]}>{cat}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-          {/* Caption */}
-          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Caption</Text>
-          <TextInput
-            style={[styles.createCaptionInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-            placeholder="What's on your mind?" placeholderTextColor={colors.textTertiary}
-            value={caption} onChangeText={setCaption} multiline textAlignVertical="top"
-          />
-          {/* Media */}
-          {postType !== 'text' && (
-            <>
-              <Text style={[styles.createLabel, { color: colors.textSecondary }]}>{postType === 'video' ? 'Video' : 'Photo'}</Text>
-              {mediaUri ? (
-                <View style={styles.mediaPreview}>
-                  <RNImage source={{ uri: mediaUri }} style={styles.mediaPreviewImg} />
-                  <TouchableOpacity style={styles.mediaRemoveBtn} onPress={() => setMediaUri(null)}><X size={16} color="#FFF" /></TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity style={[styles.mediaPickerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handlePickMedia}>
-                  {postType === 'video' ? <VideoIcon size={28} color={colors.textTertiary} /> : <ImageIcon size={28} color={colors.textTertiary} />}
-                  <Text style={[styles.mediaPickerText, { color: colors.textTertiary }]}>{postType === 'video' ? 'Select video' : 'Select photo'}</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
-          {/* Tags */}
-          <Text style={[styles.createLabel, { color: colors.textSecondary }]}>Tags (up to 5)</Text>
-          <View style={styles.tagInputRow}>
-            <TextInput
-              style={[styles.tagField, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Add a tag..." placeholderTextColor={colors.textTertiary}
-              value={tagInput} onChangeText={setTagInput} onSubmitEditing={handleAddTag} returnKeyType="done"
-            />
-            <TouchableOpacity style={[styles.tagAddBtn, { backgroundColor: colors.accent }]} onPress={handleAddTag}><Plus size={16} color="#FFF" /></TouchableOpacity>
-          </View>
-          {tags.length > 0 && (
-            <View style={styles.tagRow}>
-              {tags.map((tag) => (
-                <TouchableOpacity key={tag} style={[styles.tagRemovable, { backgroundColor: colors.accent + '15' }]} onPress={() => handleRemoveTag(tag)}>
-                  <Text style={[styles.tagRemovableText, { color: colors.accent }]}>#{tag}</Text>
-                  <X size={10} color={colors.accent} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Main Feed Screen
 // ═══════════════════════════════════════════════════════════════════════════
@@ -867,21 +828,84 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
-  const { handleScroll: handleTabBarScroll } = useTabBar();
+  const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
+  const { addUserPost } = useUserPosts();
+  const { deletePost } = useSocial();
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [createPreloadMedia, setCreatePreloadMedia] = useState<string | null>(null);
+  const [createPreloadMediaWidth, setCreatePreloadMediaWidth] = useState<number | undefined>(undefined);
+  const [createPreloadMediaHeight, setCreatePreloadMediaHeight] = useState<number | undefined>(undefined);
+  const [showCamera, setShowCamera] = useState(false);
+  const [createCategory, setCreateCategory] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
+  const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [viewerMedia, setViewerMedia] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Clear initial load state after first render
+  useEffect(() => {
+    const timer = setTimeout(() => setIsInitialLoad(false), 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // ── Cross-tab data ──
+  const { products } = useMarketplace();
+  const { listings } = useBookings();
+  const { posts: swapPosts } = useSwap();
+  const { connections } = useConnections();
+  const { getOpenRequests } = useServiceRequests();
+  const { bundles } = useBundles();
+
+  // Convert cross-tab data into feed posts
+  const marketplacePosts = useMemo(() => (products || []).filter((p: any) => p.status === 'active').slice(0, 8).map(productToFeedPost), [products]);
+  const rentalPosts = useMemo(() => (listings || []).slice(0, 6).map(listingToFeedPost), [listings]);
+  const swapFeedPosts = useMemo(() => (swapPosts || []).filter((p: any) => p.status === 'open').slice(0, 6).map(swapPostToFeedPost), [swapPosts]);
+  const connectionPosts = useMemo(() => (connections || []).slice(0, 4).map(connectionToFeedPost), [connections]);
+  const requestPosts = useMemo(() => getOpenRequests().slice(0, 8).map(requestToFeedPost), [getOpenRequests]);
+  const bundlePosts = useMemo(() => bundles.slice(0, 6).map(bundleToFeedPost), [bundles]);
+
+  const externalEvents = EXTERNAL_EVENTS;
 
   const filteredPosts = useMemo(() => {
-    let all = [...userPosts, ...FEED_POSTS];
+    // ── Deduplication: prefer context data over hardcoded ──
+    const seenIds = new Set<string>();
+    const seenContentKeys = new Set<string>();
+    const deduped: FeedPost[] = [];
+
+    const isDuplicate = (post: FeedPost): boolean => {
+      if (seenIds.has(post.id)) return true;
+      // Near-duplicate detection: same title/caption + author name
+      const contentKey = `${(post.title || post.caption || '').toLowerCase().trim()}|${post.author.name.toLowerCase().trim()}`;
+      if (seenContentKeys.has(contentKey)) return true;
+      return false;
+    };
+
+    const addPost = (post: FeedPost) => {
+      if (isDuplicate(post)) return;
+      seenIds.add(post.id);
+      seenContentKeys.add(`${(post.title || post.caption || '').toLowerCase().trim()}|${post.author.name.toLowerCase().trim()}`);
+      deduped.push(post);
+    };
+
+    // Priority order: user-created posts first, then context data (preferred over hardcoded), then hardcoded last
+    userPosts.forEach(addPost);
+
+    // Context data — preferred over hardcoded
+    const contextPosts = [...marketplacePosts, ...rentalPosts, ...swapFeedPosts, ...connectionPosts, ...requestPosts, ...bundlePosts];
+    contextPosts.forEach(addPost);
+
+    // Hardcoded posts — lowest priority, skip if context data already covered the same content
+    FEED_POSTS.forEach(addPost);
+
+    let all = deduped;
     if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
     // Shuffle on refresh
@@ -889,7 +913,7 @@ export default function FeedScreen() {
       all = [...all].sort(() => Math.random() - 0.5);
     }
     return all;
-  }, [activeFilter, userPosts, tagFilter, refreshKey]);
+  }, [activeFilter, userPosts, tagFilter, refreshKey, marketplacePosts, rentalPosts, swapFeedPosts, connectionPosts, requestPosts, bundlePosts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -930,8 +954,113 @@ export default function FeedScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const handleCreatePost = (post: FeedPost) => {
-    setUserPosts((prev) => [post, ...prev]);
+  const handleSharePost = async (post: FeedPost) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await Share.share({
+        message: post.title ? `${post.title}\n\n${post.caption}` : post.caption,
+        url: post.media,
+      });
+    } catch (err) {
+      // user cancelled share — ignore
+    }
+  };
+
+  const handleDeletePost = (postId: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    deletePost(postId);
+    setUserPosts((prev) => prev.filter((p) => p.id !== postId));
+  };
+
+  const handleEventCardPress = (event: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/event/${event.id}`);
+  };
+
+  const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
+    const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const timestamp = new Date().toISOString();
+
+    // Display at 9:16 Reels proportions (1080×1920) — media fills with center crop
+    let displayHeight: number | undefined;
+    let displayWidth: number | undefined;
+    if (data.mediaWidth && data.mediaHeight && data.mediaWidth > 0) {
+      displayHeight = FEED_MEDIA_HEIGHT;
+      displayWidth = SCREEN_WIDTH;
+    }
+
+    const newPost: FeedPost = {
+      id,
+      type: 'photo',
+      author: {
+        name: 'You',
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+      },
+      category: data.category || createCategory || 'General',
+      timestamp: 'Just now',
+      caption: data.caption,
+      media: data.mediaUri,
+      mediaWidth: displayWidth,
+      mediaHeight: displayHeight,
+      tags: createCategory ? [createCategory] : [],
+      stats: { saves: 0, comments: 0 },
+    };
+
+    // Add to feed
+    setUserPosts((prev) => [newPost, ...prev]);
+
+    // Share to profile
+    addUserPost({
+      id,
+      caption: data.caption,
+      mediaUri: data.mediaUri,
+      timestamp,
+    });
+
+    // Close modals
+    setShowCreate(false);
+    setCreatePreloadMedia(null);
+    setCreateCategory(null);
+  };
+
+  // ── Camera flow (Instagram-style viewfinder) ──
+  const handleCreateTap = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hideTabBar();
+    setShowCamera(true);
+  };
+
+  // Called when user captures from InstagramCamera
+  const handleCameraCapture = (media: CapturedMedia) => {
+    setCreatePreloadMedia(media.uri);
+    setCreatePreloadMediaWidth(media.width);
+    setCreatePreloadMediaHeight(media.height);
+    setShowCamera(false);
+    showTabBar();
+    setShowCreate(true);
+  };
+
+  // Called when user taps gallery from within InstagramCamera
+  const handlePickFromGallery = async () => {
+    const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!libPerm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: false,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setCreatePreloadMedia(result.assets[0].uri);
+      setShowCamera(false);
+      showTabBar();
+      setShowCreate(true);
+    }
+  };
+
+  // Called when camera is dismissed without capturing
+  const handleCameraClose = () => {
+    setShowCamera(false);
+    showTabBar();
   };
 
   const handleComment = (post: FeedPost) => {
@@ -961,7 +1090,7 @@ export default function FeedScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.accent }]}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setShowCreate(true); }}
+              onPress={handleCreateTap}
             >
               <Plus size={20} color="#FFF" />
             </TouchableOpacity>
@@ -1023,34 +1152,147 @@ export default function FeedScreen() {
         </View>
       )}
 
-      {/* Feed List */}
-      <FlatList
-        data={filteredPosts}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            colors={colors}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setSelectedPost(item);
-            }}
-            onSave={handleSavePost}
-            onComment={handleComment}
-            onWatch={handleWatchLive}
-            onJoin={handleJoinPost}
-            onCelebrate={handleCelebrate}
-            onTagTap={handleTagTap}
-            onMediaTap={(uri) => setViewerMedia(uri)}
-          />
+      {isInitialLoad ? (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+        >
+          <SkeletonCard count={5} shimmerColor={colors.accent + '30'} baseColor={colors.surface} />
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredPosts}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <PostCard
+              post={item}
+              colors={colors}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setSelectedPost(item);
+              }}
+              onSave={handleSavePost}
+              onComment={handleComment}
+              onWatch={handleWatchLive}
+              onJoin={handleJoinPost}
+              onCelebrate={handleCelebrate}
+              onShare={handleSharePost}
+              onTagTap={handleTagTap}
+              onMediaTap={(uri) => setViewerMedia(uri)}
+              onDelete={userPostIds.has(item.id) ? () => handleDeletePost(item.id) : undefined}
+            />
+          )}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+          showsVerticalScrollIndicator={false}
+          onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
+          scrollEventThrottle={16}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        ListHeaderComponent={() => (
+          <View>
+            <View style={{ height: 6 }} />
+
+            {/* ── For You Row ── */}
+            {activeFilter === 'all' && !tagFilter && (
+              <View style={{ marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={15} color={colors.accent} />
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>For You</Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+                    {filteredPosts.length} opportunities
+                  </Text>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
+                  {filteredPosts.slice(0, 5).map((post) => (
+                    <TouchableOpacity
+                      key={`fy-${post.id}`}
+                      style={{
+                        width: 160,
+                        borderRadius: 14,
+                        backgroundColor: colors.surface,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        padding: 12,
+                        gap: 6,
+                      }}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedPost(post); }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' }}>
+                        {post.type === 'marketplace' ? 'For Sale' : post.type === 'rental' ? 'Rental' : post.type === 'swap' ? 'Trade' : post.type === 'event' ? 'Event' : post.type}
+                      </Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }} numberOfLines={2}>
+                        {post.title || post.caption}
+                      </Text>
+                      {post.location ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                          <MapPin size={10} color={colors.textTertiary} />
+                          <Text style={{ fontSize: 11, color: colors.textTertiary }} numberOfLines={1}>{post.location}</Text>
+                        </View>
+                      ) : null}
+                      {post.price != null && (
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, marginTop: 'auto' }}>
+                          ${post.price}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* ── Happening This Week ── */}
+            {externalEvents.length > 0 && activeFilter === 'all' && !tagFilter && (
+              <View style={{ marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 10 }}>
+                  <Calendar size={15} color="#EF4444" />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Happening This Week</Text>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444' }} />
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
+                  {externalEvents.slice(0, 6).map((event: any) => (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={{
+                        width: 200,
+                        borderRadius: 16,
+                        backgroundColor: colors.surface,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        overflow: 'hidden',
+                      }}
+                      onPress={() => handleEventCardPress(event)}
+                    >
+                      {event.image ? (
+                        <RNImage source={{ uri: event.image }} style={{ width: '100%', height: 100 }} resizeMode="cover" />
+                      ) : (
+                        <View style={{ width: '100%', height: 100, backgroundColor: colors.accent + '15', alignItems: 'center', justifyContent: 'center' }}>
+                          <Calendar size={28} color={colors.accent} />
+                        </View>
+                      )}
+                      <View style={{ padding: 10, gap: 4 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' }}>
+                          {event.category || 'Event'}{event.is_free ? ' · FREE' : ''}
+                        </Text>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }} numberOfLines={2}>
+                          {event.title}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '500' }}>
+                          {event.date}{event.venue ? ` · ${event.venue}` : ''}
+                        </Text>
+                        {event.price && <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{event.price}</Text>}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            <View style={{ height: 4 }} />
+          </View>
         )}
-        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
-        showsVerticalScrollIndicator={false}
-        onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={16}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
-        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        ListHeaderComponent={() => <View style={{ height: 6 }} />}
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>
             <FileText size={48} color={colors.textTertiary} />
@@ -1061,6 +1303,7 @@ export default function FeedScreen() {
           </View>
         )}
       />
+      )}
 
       {/* Post Detail Modal */}
       {selectedPost && (
@@ -1076,25 +1319,43 @@ export default function FeedScreen() {
         />
       )}
 
-      {/* Create Post Modal */}
-      <CreatePostModal
+      {/* Instagram Camera — full-screen custom viewfinder (Modal overlays tab bar) */}
+      <Modal visible={showCamera} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent>
+        <InstagramCamera
+          visible={showCamera}
+          onClose={handleCameraClose}
+          onCapture={handleCameraCapture}
+          onPickFromGallery={handlePickFromGallery}
+        />
+      </Modal>
+
+      {/* Post Composer — Instagram-style single screen */}
+      <PostComposer
         visible={showCreate}
-        onClose={() => setShowCreate(false)}
+        onClose={() => { setShowCreate(false); setCreatePreloadMedia(null); }}
         onPost={handleCreatePost}
-        colors={colors}
-        insets={insets}
+        preloadMediaUri={createPreloadMedia}
+        preloadMediaWidth={createPreloadMediaWidth}
+        preloadMediaHeight={createPreloadMediaHeight}
+        backgroundColor={colors.background}
+        textColor={colors.text}
+        accentColor={colors.accent}
       />
 
-      {/* Media Viewer Modal */}
+      {/* Media Viewer Modal — full‑screen like Instagram */}
       <Modal visible={!!viewerMedia} animationType="fade" statusBarTranslucent>
-        <View style={[styles.viewerContainer, { backgroundColor: '#000' }]}>
+        <TouchableOpacity
+          style={[styles.viewerContainer, { backgroundColor: '#000' }]}
+          activeOpacity={1}
+          onPress={() => setViewerMedia(null)}
+        >
           <TouchableOpacity style={[styles.viewerClose, { top: insets.top + 12 }]} onPress={() => setViewerMedia(null)}>
             <X size={24} color="#FFF" />
           </TouchableOpacity>
           {viewerMedia && (
-            <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="contain" />
+            <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="cover" />
           )}
-        </View>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -1221,6 +1482,8 @@ const styles = StyleSheet.create({
   mediaPreview: { borderRadius: 12, overflow: 'hidden', position: 'relative' },
   mediaPreviewImg: { width: '100%', height: 240, borderRadius: 12 },
   mediaRemoveBtn: { position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+  mediaActions: { position: 'absolute', bottom: 10, left: 10, flexDirection: 'row', gap: 8 },
+  mediaActionBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   tagInputRow: { flexDirection: 'row', gap: 8 },
   tagField: { flex: 1, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
   tagAddBtn: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -1233,5 +1496,48 @@ const styles = StyleSheet.create({
   // ── Media Viewer ──
   viewerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   viewerClose: { position: 'absolute', right: 16, zIndex: 10, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  viewerImage: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.6 },
+  viewerImage: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+});
+
+// ── Instagram-Style Post Card Styles ──
+const igCardStyles = StyleSheet.create({
+  card: { marginBottom: 16, borderBottomWidth: 0.5, borderBottomColor: 'rgba(120,120,120,0.2)' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  avatar: { width: 36, height: 36, borderRadius: 18 },
+  headerText: { gap: 1 },
+  username: { fontSize: 13, fontWeight: '700' },
+  typeLabel: { fontSize: 12, fontWeight: '500' },
+  location: { fontSize: 11 },
+  menuBtn: { padding: 4 },
+  menuDots: { fontSize: 18, fontWeight: '700', letterSpacing: 1 },
+  media: { width: SCREEN_WIDTH, backgroundColor: '#0a0a0a' },
+  playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  playBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  liveOverlay: { position: 'absolute', top: 10, left: 12, right: 12, flexDirection: 'row', justifyContent: 'space-between' },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#FFF' },
+  liveText: { fontSize: 10, fontWeight: '800', color: '#FFF' },
+  liveInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveCountBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 4 },
+  liveCountText: { fontSize: 10, fontWeight: '600', color: '#FFF' },
+  textOnlyArea: { paddingHorizontal: 16, paddingVertical: 24, minHeight: 120, justifyContent: 'center' },
+  textOnlyCaption: { fontSize: 16, lineHeight: 24 },
+  actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
+  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  actionIconBtn: { padding: 4 },
+  likesRow: { paddingHorizontal: 12, paddingBottom: 4 },
+  likesText: { fontSize: 13, lineHeight: 18 },
+  captionRow: { paddingHorizontal: 12, paddingBottom: 4 },
+  captionText: { fontSize: 13, lineHeight: 18 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  hashTag: { fontSize: 13, fontWeight: '600' },
+  eventMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 12, paddingVertical: 4 },
+  eventMetaText: { fontSize: 12, fontWeight: '500' },
+  commentsLink: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 2 },
+  commentsLinkText: { fontSize: 13 },
+  timestampRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 4, paddingBottom: 14 },
+  timestamp: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
+  ctaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
+  ctaPillText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
 });

@@ -3,6 +3,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import * as localApi from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 export type LocationType = 'home' | 'hotel' | 'airbnb' | 'coffee' | 'coworking';
 export type TransportType = 'none' | 'chauffeur';
@@ -114,7 +115,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
   const plansQuery = useQuery({
     queryKey: ['plans'],
     queryFn: async () => {
-      console.log('[Planner] Fetching plans...');
+      logger.info('Planner', 'Fetching plans...');
       
       // Try Supabase first
       try {
@@ -127,7 +128,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
             .order('created_at', { ascending: false });
 
           if (!error && data) {
-            console.log('[Planner] Fetched plans from Supabase:', data.length);
+            logger.info('Planner', 'Fetched plans from Supabase', { length: data.length });
             return (data ?? []).map((row: any) => ({
               id: String(row.id),
               user_id: row.user_id,
@@ -150,14 +151,14 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
           }
         }
       } catch (e) {
-        console.log('[Planner] Supabase unavailable, trying local API...');
+        logger.info('Planner', 'Supabase unavailable, trying local API...');
       }
 
       // Fall back to local API
       try {
         const localPlans = await localApi.getPlans(localApi.DEFAULT_USER_ID);
         if (localPlans && localPlans.length > 0) {
-          console.log('[Planner] Fetched plans from local API:', localPlans.length);
+          logger.info('Planner', 'Fetched plans from local API', { length: localPlans.length });
           return localPlans.map((row: any) => ({
             id: String(row.id),
             user_id: row.user_id || localApi.DEFAULT_USER_ID,
@@ -179,7 +180,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
           })) as Plan[];
         }
       } catch (e2) {
-        console.log('[Planner] Local API also unavailable');
+        logger.info('Planner', 'Local API also unavailable');
       }
 
       return [] as Plan[];
@@ -195,7 +196,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
   const { mutateAsync: createPlanMutation } = useMutation({
     mutationFn: async (input: CreatePlanInput) => {
-      console.log('[Planner] Creating plan:', input);
+      logger.info('Planner', 'Creating plan', { input });
 
       // Try Supabase first
       try {
@@ -225,12 +226,12 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
             .single();
 
           if (!error && data) {
-            console.log('[Planner] Created plan in Supabase:', data);
+            logger.info('Planner', 'Created plan in Supabase', { data });
             return data as Plan;
           }
         }
       } catch (e) {
-        console.log('[Planner] Supabase create failed, trying local API...');
+        logger.info('Planner', 'Supabase create failed, trying local API...');
       }
 
       // Fall back to local API
@@ -250,7 +251,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
           priority: 'medium',
         };
         const result = await localApi.createPlan(localPlan);
-        console.log('[Planner] Created plan in local API:', result);
+        logger.info('Planner', 'Created plan in local API', { result });
         return {
           id: result?.id || `local-${Date.now()}`,
           user_id: localApi.DEFAULT_USER_ID,
@@ -259,7 +260,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
           created_at: new Date().toISOString(),
         } as Plan;
       } catch (e2) {
-        console.error('[Planner] Local API create also failed:', e2);
+        logger.error('Planner', 'Local API create also failed', { e2 });
         throw new Error('Could not create plan - all backends unavailable');
       }
     },
@@ -270,7 +271,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
   const { mutateAsync: updatePlanMutation } = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<CreatePlanInput> }) => {
-      console.log('[Planner] Updating plan:', id, updates);
+      logger.info('Planner', 'Updating plan', { id, updates });
 
       const payload: any = {};
       if (updates.date) payload.date = updates.date;
@@ -290,11 +291,11 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         .single();
 
       if (error) {
-        console.error('[Planner] Update error:', error.message);
+        logger.error('Planner', 'Update error', { message: error.message });
         throw error;
       }
 
-      console.log('[Planner] Updated plan:', data);
+      logger.info('Planner', 'Updated plan', { data });
       return data as Plan;
     },
     onSuccess: () => {
@@ -304,7 +305,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
   const { mutateAsync: deletePlanMutation } = useMutation({
     mutationFn: async (id: string) => {
-      console.log('[Planner] Deleting plan:', id);
+      logger.info('Planner', 'Deleting plan', { id });
 
       const { error } = await supabase
         .from('plans')
@@ -312,7 +313,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         .eq('id', id);
 
       if (error) {
-        console.error('[Planner] Delete error:', error.message);
+        logger.error('Planner', 'Delete error', { message: error.message });
         throw error;
       }
     },
@@ -326,7 +327,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
       const result = await createPlanMutation(input);
       return result;
     } catch (e) {
-      console.error('[Planner] createPlan failed:', e);
+      logger.error('Planner', 'createPlan failed', { e });
       return null;
     }
   }, [createPlanMutation]);
@@ -336,7 +337,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
       const result = await updatePlanMutation({ id, updates });
       return result;
     } catch (e) {
-      console.error('[Planner] updatePlan failed:', e);
+      logger.error('Planner', 'updatePlan failed', { e });
       return null;
     }
   }, [updatePlanMutation]);

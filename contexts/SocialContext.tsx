@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Post, Story, mockPosts, mockStories, mockUsers } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -91,7 +92,7 @@ const buildDefaultState = (posts: Post[]) => {
       comments: [],
     };
   });
-  console.log('[SocialContext] Built default state for', posts.length, 'posts');
+  logger.info('SocialContext', 'Built default state for', { length: posts.length });
   return base;
 };
 
@@ -101,7 +102,7 @@ const currentUser = {
   id: 'current-user',
   name: 'You',
   username: 'you',
-  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+  avatar: '',
   isVerified: false,
   followersCount: 0,
 };
@@ -121,7 +122,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       try {
         const dbPosts = await DatabaseService.fetchPosts({ signal });
         if (dbPosts && dbPosts.length > 0) {
-          console.log('[SocialContext] Fetched posts from Supabase:', dbPosts.length);
+          logger.info('SocialContext', 'Fetched posts from Supabase', { length: dbPosts.length });
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, u]));
           
@@ -149,14 +150,14 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
             } as Post;
           });
         }
-        console.log('[SocialContext] No Supabase posts');
+        logger.info('SocialContext', 'No Supabase posts');
         return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[SocialContext] Posts fetch aborted (navigation)');
+          logger.info('SocialContext', 'Posts fetch aborted (navigation)');
           return [];
         }
-        console.error('[SocialContext] Error fetching posts from Supabase:', error);
+        logger.error('SocialContext', 'Error fetching posts from Supabase', { error });
         return [];
       }
     },
@@ -169,7 +170,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       try {
         const dbStories = await DatabaseService.fetchStories({ signal });
         if (dbStories && dbStories.length > 0) {
-          console.log('[SocialContext] Fetched stories from Supabase:', dbStories.length);
+          logger.info('SocialContext', 'Fetched stories from Supabase', { length: dbStories.length });
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, u]));
           
@@ -191,14 +192,14 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
             } as Story;
           });
         }
-        console.log('[SocialContext] No Supabase stories');
+        logger.info('SocialContext', 'No Supabase stories');
         return [];
       } catch (error: any) {
         if (error?.name === 'AbortError') {
-          console.log('[SocialContext] Stories fetch aborted (navigation)');
+          logger.info('SocialContext', 'Stories fetch aborted (navigation)');
           return [];
         }
-        console.error('[SocialContext] Error fetching stories from Supabase:', error);
+        logger.error('SocialContext', 'Error fetching stories from Supabase', { error });
         return [];
       }
     },
@@ -221,7 +222,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const query = useQuery({
     queryKey: ['socialState'],
     queryFn: async () => {
-      console.log('[SocialContext] Social interaction state is in-memory only');
+      logger.info('SocialContext', 'Social interaction state is in-memory only');
       return defaultState;
     },
   });
@@ -229,7 +230,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const storyQuery = useQuery({
     queryKey: ['storyState'],
     queryFn: async () => {
-      console.log('[SocialContext] Story interaction state is in-memory only');
+      logger.info('SocialContext', 'Story interaction state is in-memory only');
       return {} as Record<string, StoryInteraction>;
     },
   });
@@ -237,7 +238,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const userPostsQuery = useQuery({
     queryKey: ['userPosts'],
     queryFn: async () => {
-      console.log('[SocialContext] User posts are loaded from Supabase posts table');
+      logger.info('SocialContext', 'User posts are loaded from Supabase posts table');
       return [] as UserPost[];
     },
   });
@@ -245,14 +246,14 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const userStoriesQuery = useQuery({
     queryKey: ['userStories'],
     queryFn: async () => {
-      console.log('[SocialContext] User stories are loaded from Supabase stories table');
+      logger.info('SocialContext', 'User stories are loaded from Supabase stories table');
       return [] as UserStory[];
     },
   });
 
   const { mutate: persistMutation } = useMutation({
     mutationFn: async (payload: Record<string, PostInteraction>) => {
-      console.log('[SocialContext] persistMutation ignored (no local storage)', Object.keys(payload).length);
+      logger.info('SocialContext', 'persistMutation ignored (no local storage)', { length: Object.keys(payload).length });
       return payload;
     },
     onSuccess: () => {
@@ -262,7 +263,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const { mutate: persistStoryMutation } = useMutation({
     mutationFn: async (payload: Record<string, StoryInteraction>) => {
-      console.log('[SocialContext] persistStoryMutation ignored (no local storage)', Object.keys(payload).length);
+      logger.info('SocialContext', 'persistStoryMutation ignored (no local storage)', { length: Object.keys(payload).length });
       return payload;
     },
     onSuccess: () => {
@@ -272,7 +273,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const { mutate: persistUserPostsMutation } = useMutation({
     mutationFn: async (payload: UserPost[]) => {
-      console.log('[SocialContext] persistUserPostsMutation ignored (no local storage)', payload.length);
+      logger.info('SocialContext', 'persistUserPostsMutation ignored (no local storage)', { length: payload.length });
       return payload;
     },
     onSuccess: () => {
@@ -296,7 +297,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           shares: 0,
         });
         if (dbPost) {
-          console.log('[SocialContext] Created post in Supabase:', dbPost.id);
+          logger.info('SocialContext', 'Created post in Supabase', { id: dbPost.id });
           return dbPost;
         }
       }
@@ -378,7 +379,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       likeCount: current.isLiked ? current.likeCount - 1 : current.likeCount + 1,
     };
     const next = { ...interactions, [postId]: updated };
-    console.log('[SocialContext] Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
+    logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
     // Persist to local API
     localApi.toggleLike(postId, 'u-dev').catch(() => {});
@@ -393,7 +394,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       id: Date.now().toString(),
       authorId: 'current-user',
       authorName: 'You',
-      authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+      authorAvatar: '',
       text,
       timestamp: 'Just now',
       likes: 0,
@@ -423,7 +424,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       comments: updatedComments,
     };
     const next = { ...interactions, [postId]: updated };
-    console.log('[SocialContext] Added comment', { postId, commentCount: updated.commentCount, parentId });
+    logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
     // Persist to local API
     localApi.addComment(postId, 'u-dev', text, parentId).catch(() => {});
@@ -456,7 +457,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       comments: updateCommentLike(current.comments),
     };
     const next = { ...interactions, [postId]: updated };
-    console.log('[SocialContext] Toggled comment like', { postId, commentId });
+    logger.info('SocialContext', 'Toggled comment like', { postId, commentId });
     persistState(next);
   }, [ensureInteraction, interactions, persistState]);
 
@@ -479,16 +480,16 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         }
         if (maybeNavigator?.clipboard?.writeText) {
           await maybeNavigator.clipboard.writeText(message);
-          console.log('[SocialContext] Copied share message to clipboard');
+          logger.info('SocialContext', 'Copied share message to clipboard');
           return true;
         }
-        console.log('[SocialContext] Web share fallback unavailable');
+        logger.info('SocialContext', 'Web share fallback unavailable');
         return false;
       }
       await Share.share({ title, message });
       return true;
     } catch (error) {
-      console.log('[SocialContext] Share failed', error);
+      logger.info('SocialContext', 'Share failed', { error });
       return false;
     }
   }, []);
@@ -507,7 +508,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       shareCount: current.shareCount + 1,
     };
     const next = { ...interactions, [post.id]: updated };
-    console.log('[SocialContext] Shared post', { postId: post.id, shareCount: updated.shareCount });
+    logger.info('SocialContext', 'Shared post', { postId: post.id, shareCount: updated.shareCount });
     persistState(next);
   }, [ensureInteraction, interactions, persistState, sharePayload]);
 
@@ -569,7 +570,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       likes: current.isLiked ? current.likes - 1 : current.likes + 1,
     };
     const next = { ...storyInteractions, [storyId]: updated };
-    console.log('[SocialContext] Toggled story like', { storyId, isLiked: updated.isLiked });
+    logger.info('SocialContext', 'Toggled story like', { storyId, isLiked: updated.isLiked });
     persistStoryState(next);
   }, [ensureStoryInteraction, storyInteractions, persistStoryState]);
 
@@ -580,7 +581,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       id: Date.now().toString(),
       authorId: 'current-user',
       authorName: 'You',
-      authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+      authorAvatar: '',
       text,
       timestamp: 'Just now',
       likes: 0,
@@ -592,7 +593,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       comments: [...current.comments, newComment],
     };
     const next = { ...storyInteractions, [storyId]: updated };
-    console.log('[SocialContext] Added story comment', { storyId });
+    logger.info('SocialContext', 'Added story comment', { storyId });
     persistStoryState(next);
   }, [ensureStoryInteraction, storyInteractions, persistStoryState]);
 
@@ -601,7 +602,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   }, [ensureStoryInteraction]);
 
   const updatePost = useCallback((postId: string, content: string) => {
-    console.log('[SocialContext] Post update requested', { postId });
+    logger.info('SocialContext', 'Post update requested', { postId });
   }, []);
 
   const deletePost = useCallback((postId: string) => {
@@ -615,28 +616,28 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     
     DatabaseService.deletePost(postId).then(success => {
       if (success) {
-        console.log('[SocialContext] Deleted post from Supabase:', postId);
+        logger.info('SocialContext', 'Deleted post from Supabase', { postId });
         queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
       }
     });
     
-    console.log('[SocialContext] Deleted post', { postId });
+    logger.info('SocialContext', 'Deleted post', { postId });
   }, [interactions, persistState, userPosts, persistUserPostsMutation, queryClient]);
 
   const createPostMutate = createPostMutation.mutate;
 
   const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string }) => {
-    console.log('[SocialContext] Creating post...');
+    logger.info('SocialContext', 'Creating post...');
     createPostMutate({ content, imageUrl });
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
     localApi.createPost('u-dev', content, imageUrl, options).then((saved) => {
-      console.log('[SocialContext] Post saved to local API:', saved?.id);
+      logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
       // When it's a sell post, also create a marketplace product
       if (options?.postKind === 'sell') {
         localApi.createProduct({
           seller_id: 'u-dev',
           seller_name: 'You',
-          seller_avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100',
+          seller_avatar: '',
           seller_username: 'you',
           title: content.slice(0, 100),
           description: content,
@@ -647,9 +648,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           images: imageUrl ? [{ id: '1', uri: imageUrl }] : [],
           location: 'Local',
         }).then(() => {
-          console.log('[SocialContext] Sell post also created as marketplace product');
+          logger.info('SocialContext', 'Sell post also created as marketplace product');
         }).catch((e) => {
-          console.log('[SocialContext] Marketplace product create failed:', e?.message);
+          logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
         });
       }
       apiLoaded.current = false;
@@ -679,15 +680,15 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         setInteractions(buildDefaultState(mapped));
       }).catch(() => {});
     }).catch(err => {
-      console.log('[SocialContext] Failed to save post to local API:', err.message);
+      logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
     });
   }, [createPostMutate, queryClient]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
-    console.log('[SocialContext] Creating story in Supabase...');
+    logger.info('SocialContext', 'Creating story in Supabase...');
     DatabaseService.getCurrentUserId().then(async (userId) => {
       if (!userId) {
-        console.log('[SocialContext] createStory blocked - no user session');
+        logger.info('SocialContext', 'createStory blocked - no user session');
         return;
       }
 
@@ -702,7 +703,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       };
 
       const res = await DatabaseService.createStory(payload as any);
-      console.log('[SocialContext] Save response:', res);
+      logger.info('SocialContext', 'Save response', { res });
       queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
     });
   }, [queryClient]);
@@ -721,7 +722,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           id: p.user_id,
           name: p.author_name || 'Unknown',
           username: p.author_username || 'unknown',
-          avatar: p.author_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+          avatar: p.author_avatar || '',
           isVerified: !!p.author_verified,
           followersCount: p.author_followers || 0,
           relationshipCategory: p.author_relationship,
@@ -738,11 +739,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         isApparently: !!p.is_apparently,
         apparentlyTag: p.apparently_tag,
       }));
-      console.log('[SocialContext] Loaded', mapped.length, 'posts from local API');
+      logger.info('SocialContext', 'Loaded', { length: mapped.length });
       setApiPosts(mapped);
       setInteractions(buildDefaultState(mapped));
     }).catch(err => {
-      console.log('[SocialContext] Local API unavailable, using mock data:', err.message);
+      logger.info('SocialContext', 'Local API unavailable, using mock data', { message: err.message });
     });
   }, []);
 
