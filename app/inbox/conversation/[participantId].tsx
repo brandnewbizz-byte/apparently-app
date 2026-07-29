@@ -19,7 +19,7 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
-import { mockUsers } from '@/mocks/data';
+
 
 export default function ConversationScreen() {
   const router = useRouter();
@@ -33,7 +33,7 @@ export default function ConversationScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const conversation = getConversation(participantId || '');
-  const participant = mockUsers.find(u => u.id === participantId) || {
+  const participant = {
     id: participantId || '',
     name: conversation?.participantName || 'Unknown',
     username: conversation?.participantUsername || 'unknown',
@@ -88,9 +88,7 @@ export default function ConversationScreen() {
     setMentionQuery('');
   };
 
-  const filteredUsers = mockUsers.filter(user =>
-    user.username.toLowerCase().includes(mentionQuery.toLowerCase())
-  );
+  const filteredUsers: { id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[] = [];
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);

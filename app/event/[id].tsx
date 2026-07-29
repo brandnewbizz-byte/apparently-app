@@ -1,7 +1,7 @@
 // app/event/[id].tsx — Event Detail Page
 // Full-featured event page with hero, info, ticket booking
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   Share,
   Linking,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +25,7 @@ import {
   Ticket, ChevronLeft, Heart, Info,
 } from 'lucide-react-native';
 
+import { supabase } from '@/lib/supabase';
 import { EXTERNAL_EVENTS, ExternalEvent } from '@/lib/externalEvents';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -34,7 +36,30 @@ export default function EventDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const event = useMemo(() => EXTERNAL_EVENTS.find((e) => e.id === id), [id]);
+  const [event, setEvent] = useState<ExternalEvent | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchEvent = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('calendar_events')
+          .select('*')
+          .eq('id', id)
+          .single();
+        if (data && !error) {
+          setEvent(data);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+      // Fallback to EXTERNAL_EVENTS hardcoded data
+      const fallback = EXTERNAL_EVENTS.find((e) => e.id === id) || null;
+      setEvent(fallback);
+      setLoading(false);
+    };
+    fetchEvent();
+  }, [id]);
 
   const [ticketCount, setTicketCount] = useState(1);
   const [isBookmarked, setIsBookmarked] = useState(false);

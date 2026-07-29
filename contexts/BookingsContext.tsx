@@ -189,7 +189,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
         return [];
       }
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
     retry: (failureCount, error: any) => error?.name !== 'AbortError' && failureCount < 2,
   });
 

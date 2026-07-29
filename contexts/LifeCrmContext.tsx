@@ -164,7 +164,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       }
       return null;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   const billsQuery = useQuery({
@@ -209,7 +209,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
       }
       return null;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   const relationshipsQuery = useQuery({
@@ -246,7 +246,7 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
         return null;
       }
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   const query = useQuery({

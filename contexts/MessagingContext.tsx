@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 
-import { Post, mockUsers } from '@/mocks/data';
+import { Post } from '@/mocks/data';
 import { logger } from '@/lib/logger';
 
 export interface SharedPost {
@@ -103,19 +103,27 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     persistMutation(next);
   }, [persistMutation]);
 
-  const getOrCreateConversation = useCallback((participantId: string): Conversation => {
+  const getOrCreateConversation = useCallback((participantId: string, participantInfo?: { name?: string; avatar?: string; username?: string }): Conversation => {
     const existing = conversations.find(c => c.participantId === participantId);
     if (existing) {
+      // Update participant info if it was previously unknown
+      if (existing.participantName === 'Unknown User' && participantInfo?.name) {
+        return {
+          ...existing,
+          participantName: participantInfo.name,
+          participantAvatar: participantInfo.avatar || existing.participantAvatar,
+          participantUsername: participantInfo.username || existing.participantUsername,
+        };
+      }
       return existing;
     }
 
-    const user = mockUsers.find(u => u.id === participantId);
     const newConversation: Conversation = {
       id: `conv-${participantId}-${Date.now()}`,
       participantId,
-      participantName: user?.name || 'Unknown User',
-      participantAvatar: user?.avatar || '',
-      participantUsername: user?.username || 'unknown',
+      participantName: participantInfo?.name || 'Unknown User',
+      participantAvatar: participantInfo?.avatar || '',
+      participantUsername: participantInfo?.username || 'unknown',
       messages: [],
       lastMessageAt: new Date().toISOString(),
       unreadCount: 0,
@@ -135,7 +143,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       if (existingIndex >= 0) {
         conversation = { ...updatedConversations[existingIndex] };
       } else {
-        conversation = getOrCreateConversation(userId);
+        conversation = getOrCreateConversation(userId, { name: post.user?.name, avatar: post.user?.avatar, username: post.user?.username });
       }
 
       const newMessage: Message = {
@@ -170,7 +178,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     persistState(updatedConversations);
   }, [conversations, getOrCreateConversation, persistState]);
 
-  const sendMessage = useCallback((participantId: string, text: string) => {
+  const sendMessage = useCallback((participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }) => {
     if (!text.trim()) return;
 
     const timestamp = new Date().toISOString();
@@ -181,7 +189,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     if (existingIndex >= 0) {
       conversation = { ...updatedConversations[existingIndex] };
     } else {
-      conversation = getOrCreateConversation(participantId);
+      conversation = getOrCreateConversation(participantId, participantInfo);
     }
 
     const newMessage: Message = {

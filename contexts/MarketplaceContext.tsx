@@ -175,7 +175,7 @@ export const [MarketplaceProvider, useMarketplace] = createContextHook<Marketpla
 
       return [];
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   const savedQuery = useQuery({

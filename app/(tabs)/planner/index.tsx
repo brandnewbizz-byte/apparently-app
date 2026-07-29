@@ -139,7 +139,9 @@ function CreateRequestModal({
 
   const handleCreate = () => {
     if (!title.trim()) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (Platform.OS !== 'web') {
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
+    }
     onCreate({
       title: title.trim(),
       description: description.trim(),
@@ -693,7 +695,7 @@ export default function PlannerScreen() {
   const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
   const [refreshing, setRefreshing] = useState(false);
   const [showQuickPlan, setShowQuickPlan] = useState(false);
-  const [mode, setMode] = useState<'mydays' | 'requests'>('mydays');
+  const [mode, setMode] = useState<'mydays' | 'requests' | 'allplans'>('mydays');
   const [showCreateRequest, setShowCreateRequest] = useState(false);
 
   const { requests, createRequest, deleteRequest, getRequestsByDate } = useServiceRequests();
@@ -740,7 +742,7 @@ export default function PlannerScreen() {
         budgetMin: req.budgetMin,
         budgetMax: req.budgetMax,
         tags: cat ? [cat.label] : [],
-        createdBy: { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
+        createdBy: { name: 'You', avatar: '' },
       });
       setMode('requests');
       console.log('[Planner] Service request created:', req.title);
@@ -759,8 +761,10 @@ export default function PlannerScreen() {
         plan_details: {
           location_type: plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home',
           transport: 'none',
+          assistance: [],
+          payment: 'cash',
         },
-      } as any);
+      });
       console.log('[Planner] Quick plan created:', plan.title);
     } catch (e) {
       console.error('[Planner] Quick create failed:', e);
@@ -769,6 +773,18 @@ export default function PlannerScreen() {
 
   const totalPlansCount = plans.length;
   const upcomingPlans = plans.filter(p => new Date(p.date) >= new Date(formatDate(new Date()))).length;
+  const activePlans = plans.filter(p => p.status === 'active').length;
+  const completedPlans = plans.filter(p => p.status === 'completed').length;
+
+  // Group all plans by date for activity timeline
+  const plansByDate = useMemo(() => {
+    const grouped: Record<string, Plan[]> = {};
+    [...plans].sort((a, b) => b.date.localeCompare(a.date)).forEach(p => {
+      if (!grouped[p.date]) grouped[p.date] = [];
+      grouped[p.date].push(p);
+    });
+    return Object.entries(grouped);
+  }, [plans]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -883,6 +899,13 @@ export default function PlannerScreen() {
           <Text style={[styles.modeBtnText, { color: mode === 'mydays' ? '#FFF' : colors.textSecondary }]}>My Day</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={[styles.modeBtn, mode === 'allplans' && { backgroundColor: colors.accent }]}
+          onPress={() => { setMode('allplans'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
+        >
+          <LayoutGrid size={16} color={mode === 'allplans' ? '#FFF' : colors.textSecondary} />
+          <Text style={[styles.modeBtnText, { color: mode === 'allplans' ? '#FFF' : colors.textSecondary }]}>My Plans</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.modeBtn, mode === 'requests' && { backgroundColor: colors.accent }]}
           onPress={() => { setMode('requests'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
         >
@@ -896,25 +919,39 @@ export default function PlannerScreen() {
         </TouchableOpacity>
       </View>
 
-      {mode === 'mydays' && totalPlansCount > 0 && (
+      {(mode === 'mydays' || mode === 'allplans') && totalPlansCount > 0 && (
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.statNumber, { color: colors.accent }]}>{totalPlansCount}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total Plans</Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.statNumber, { color: '#10B981' }]}>{upcomingPlans}</Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Upcoming</Text>
           </View>
+          {mode === 'allplans' && (
+            <>
+              <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.statNumber, { color: '#3B82F6' }]}>{activePlans}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Active</Text>
+              </View>
+              <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.statNumber, { color: '#6366F1' }]}>{completedPlans}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Done</Text>
+              </View>
+            </>
+          )}
         </View>
       )}
 
-      <MonthCalendar
-        selectedDate={selectedDate}
-        onSelectDate={setSelectedDate}
-        datesWithPlans={datesWithPlans}
-        colors={colors}
-      />
+      {mode !== 'allplans' && (
+        <MonthCalendar
+          selectedDate={selectedDate}
+          onSelectDate={setSelectedDate}
+          datesWithPlans={datesWithPlans}
+          colors={colors}
+        />
+      )}
 
       <ScrollView
         style={styles.scrollView}
@@ -924,7 +961,58 @@ export default function PlannerScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
-        {mode === 'requests' ? (
+        {mode === 'allplans' ? (
+          <View style={styles.plansList}>
+            {plansByDate.length === 0 ? (
+              <View style={styles.emptyState}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
+                  <LayoutGrid size={40} color={colors.textTertiary} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No plans yet</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                  Tap + to create your first plan
+                </Text>
+              </View>
+            ) : (
+              plansByDate.map(([date, datePlanList]) => (
+                <View key={date} style={{ marginBottom: 20 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingHorizontal: 4 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{getDateLabel(date)}</Text>
+                    <View style={{ height: 1, flex: 1, marginHorizontal: 10, backgroundColor: colors.border }} />
+                    <Text style={{ fontSize: 12, color: colors.textTertiary }}>{datePlanList.length} plan{datePlanList.length !== 1 ? 's' : ''}</Text>
+                  </View>
+                  {datePlanList.map(plan => {
+                    const statusColor = plan.status === 'completed' ? '#6366F1' : plan.status === 'active' ? '#10B981' : plan.status === 'cancelled' ? '#EF4444' : '#F59E0B';
+                    return (
+                      <TouchableOpacity
+                        key={plan.id}
+                        style={{ flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 6, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}
+                        onPress={() => router.push(`/planner/${plan.id}` as any)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColor, marginRight: 12 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }} numberOfLines={1}>{plan.date_label || 'Plan'}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                            {plan.location_type ? (
+                              <Text style={{ fontSize: 12, color: colors.textSecondary }}>{plan.location_type.charAt(0).toUpperCase() + plan.location_type.slice(1)}</Text>
+                            ) : null}
+                            {plan.transport && plan.transport !== 'none' ? (
+                              <Text style={{ fontSize: 11, color: colors.textTertiary }}>· {plan.transport}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: statusColor + '18' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: statusColor }}>{plan.status}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))
+            )}
+          </View>
+        ) : mode === 'requests' ? (
           <View style={styles.plansList}>
             {allRequests.length === 0 ? (
               <View style={styles.emptyState}>

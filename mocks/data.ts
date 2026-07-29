@@ -26,6 +26,8 @@ export interface Post {
   user: User;
   content: string;
   imageUrl?: string;
+  videoUrl?: string;
+  mediaType?: 'image' | 'video';
   timestamp: string;
   likes: number;
   comments: number;

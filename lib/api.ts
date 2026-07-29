@@ -11,9 +11,21 @@ export const DEFAULT_USER_ID = 'u-dev';
 
 // ─── Posts ───
 export async function getPosts() {
+  // Join with users table so author name/avatar are always correct
   const { data, error } = await supabase
     .from('posts')
-    .select('*')
+    .select(`
+      *,
+      user:user_id (
+        id,
+        name,
+        username,
+        avatar,
+        is_verified,
+        followers_count,
+        relationship_category
+      )
+    `)
     .order('created_at', { ascending: false })
     .limit(500);
   if (error) throw error;

@@ -33,7 +33,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
-import { mockUsers, mockPosts } from '@/mocks/data';
+
 import PostCard from '@/components/PostCard';
 import { supabase } from '@/lib/supabase';
 
@@ -52,9 +52,9 @@ export default function UserProfileScreen() {
   const slideAnim = useRef(new Animated.Value(20)).current;
   const followButtonScale = useRef(new Animated.Value(1)).current;
 
-  const user = mockUsers.find(u => u.id === userId) || mockUsers[0];
-  const userPosts = mockPosts.filter(p => p.user.id === userId);
-  const userMedia = mockPosts.filter(p => p.user.id === userId && p.imageUrl);
+  const user = { id: userId || '', name: 'Unknown User', username: 'unknown', avatar: '', isVerified: false, followersCount: 0, isLive: false };
+  const userPosts: any[] = [];
+  const userMedia: any[] = [];
 
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [reviewsCount, setReviewsCount] = useState<number>(0);

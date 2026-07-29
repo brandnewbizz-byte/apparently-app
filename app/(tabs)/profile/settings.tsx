@@ -10,7 +10,8 @@ import {
   Shield,
   HelpCircle,
   LogOut,
-
+  Camera,
+  Mail,
   MapPin,
   Target,
   Edit3,
@@ -26,6 +27,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Image,
   Platform,
   Modal,
   Alert,
@@ -36,6 +38,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -98,7 +101,9 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark, toggleTheme } = useTheme();
-  const { signOut } = useAuth();
+  const { user, signOut, updateAvatar } = useAuth();
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+  const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
   const { 
     personalization, 
     profile,
@@ -258,6 +263,66 @@ export default function SettingsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     toggleTheme();
+  };
+
+  const handleChangeAvatar = async () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (!mediaPerm?.granted) {
+      const { status } = await requestMediaPerm();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your photos to change your avatar.');
+        return;
+      }
+    }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const uri = result.assets[0].uri;
+        // Optimistic local update first
+        setAvatarUrl(uri);
+        // Persist to backend + AuthContext
+        const saveResult = await updateAvatar(uri);
+        if (!saveResult.success) {
+          Alert.alert('Error', saveResult.error || 'Failed to save profile photo.');
+        } else if (saveResult.error) {
+          // Partial success — saved locally but DB sync pending
+          Alert.alert('Saved Locally', saveResult.error);
+        }
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const handlePrivacySecurity = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    Alert.alert(
+      'Privacy & Security',
+      'Your data is stored securely and never shared with third parties.\n\n• End-to-end encrypted messages\n• Secure authentication\n• You control your data\n• Delete your account anytime\n\nFor full details, visit our Privacy Policy.',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const handleHelpSupport = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    Alert.alert(
+      'Help & Support',
+      'Need assistance? Reach us at:\n\n📧 support@apparently.app\n\nWe typically respond within 24 hours.',
+      [
+        { text: 'OK' },
+      ]
+    );
   };
 
   const getProfileFieldTitle = (field: ProfileEditType) => {
@@ -756,8 +821,77 @@ export default function SettingsScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
+          <Text style={styles.sectionSubtitle}>
+            Manage your account details
+          </Text>
 
-          <TouchableOpacity style={styles.settingItem}>
+          {/* Avatar & Email */}
+          <TouchableOpacity 
+            style={styles.settingItem}
+            onPress={handleChangeAvatar}
+          >
+            <Image
+              source={{ uri: avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200' }}
+              style={{ width: 40, height: 40, borderRadius: 20, marginRight: 14 }}
+            />
+            <View style={styles.settingContent}>
+              <Text style={styles.settingLabel}>Profile Picture</Text>
+              <Text style={styles.settingValue}>Tap to change your avatar</Text>
+            </View>
+            <Camera size={18} color={colors.textTertiary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => handleEditProfile('displayName')}
+          >
+            <View style={styles.settingIcon}>
+              <User size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingLabel}>Name</Text>
+              <Text style={styles.settingValue}>
+                {user?.fullName || profile?.displayName || 'Not set'}
+              </Text>
+            </View>
+            <Edit3 size={18} color={colors.textTertiary} />
+          </TouchableOpacity>
+
+          <View style={[styles.settingItem, { opacity: 0.8 }]}>
+            <View style={styles.settingIcon}>
+              <Mail size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingLabel}>Email</Text>
+              <Text style={styles.settingValue}>
+                {user?.email || 'Not signed in'}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => {
+              if (Platform.OS !== 'web') {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }
+              router.back();
+            }}
+          >
+            <View style={styles.settingIcon}>
+              <Edit3 size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingLabel}>Edit Full Profile</Text>
+              <Text style={styles.settingValue}>View and edit your public profile</Text>
+            </View>
+            <ChevronRight size={20} color={colors.textTertiary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.settingItem}
+            onPress={handlePrivacySecurity}
+          >
             <View style={styles.settingIcon}>
               <Shield size={20} color={colors.accent} />
             </View>
@@ -768,7 +902,10 @@ export default function SettingsScreen() {
             <ChevronRight size={20} color={colors.textTertiary} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.settingItem}>
+          <TouchableOpacity 
+            style={styles.settingItem}
+            onPress={handleHelpSupport}
+          >
             <View style={styles.settingIcon}>
               <HelpCircle size={20} color={colors.accent} />
             </View>

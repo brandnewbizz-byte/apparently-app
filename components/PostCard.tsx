@@ -1,12 +1,13 @@
 import { Heart, MessageCircle, ThumbsUp, Share2, MoreHorizontal, BadgeCheck, Zap, Send, X, AtSign, Bookmark, EyeOff, Flag, UserMinus, Link2, Bell, BellOff, Star, CornerDownRight, Copy, MessageSquare, Users, Check, Trash2, MessagesSquare, Forward } from 'lucide-react-native';
 import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, TextInput, Modal, KeyboardAvoidingView, ScrollView, Animated, Alert } from 'react-native';
+import { Video } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 
 import { useTheme } from '@/contexts/ThemeContext';
-import { Post, mockUsers } from '@/mocks/data';
+import { Post } from '@/mocks/data';
 import { useSocial, SocialComment } from '@/contexts/SocialContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PhotoViewer from '@/components/PhotoViewer';
@@ -142,9 +143,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
     setMentionQuery('');
   };
 
-  const filteredUsers = mockUsers.filter(user =>
-    user.username.toLowerCase().includes(mentionQuery.toLowerCase())
-  );
+  const filteredUsers: { id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[] = [];
 
   const handleShare = () => {
     if (Platform.OS !== 'web') {
@@ -475,7 +474,34 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
 
       <Text style={[styles.content, { color: colors.text }]}>{post.content}</Text>
 
-      {post.imageUrl && (
+      {/* Video Post */}
+      {(post.videoUrl || post.mediaType === 'video') && post.videoUrl ? (
+        <View style={styles.imageContainer}>
+          <Video
+            source={{ uri: post.videoUrl }}
+            style={styles.postImage}
+            shouldPlay={false}
+            isLooping
+            useNativeControls
+          />
+          {showLikeAnimation && (
+            <Animated.View
+              style={[
+                styles.likeAnimation,
+                {
+                  transform: [{ scale: likeAnimationScale }],
+                  opacity: likeAnimationOpacity,
+                },
+              ]}
+            >
+              <Heart size={80} color={colors.live} fill={colors.live} />
+            </Animated.View>
+          )}
+        </View>
+      ) : null}
+
+      {/* Image Post */}
+      {post.imageUrl && post.mediaType !== 'video' ? (
         <TouchableOpacity 
           onPress={handleImageTap}
           activeOpacity={1}
@@ -500,7 +526,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             </Animated.View>
           )}
         </TouchableOpacity>
-      )}
+      ) : null}
 
       <View style={styles.actions}>
         <View style={styles.actionsLeft}>
@@ -787,34 +813,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.shareFriendsList}
                 >
-                  {mockUsers.map((user) => (
-                    <TouchableOpacity
-                      key={user.id}
-                      style={[
-                        styles.shareFriendItem,
-                        selectedFriends.includes(user.id) && styles.shareFriendItemSelected
-                      ]}
-                      onPress={() => toggleFriendSelection(user.id)}
-                    >
-                      <View style={styles.shareFriendAvatarContainer}>
-                        <Image source={{ uri: user.avatar }} style={styles.shareFriendAvatar} />
-                        {selectedFriends.includes(user.id) && (
-                          <View style={[styles.shareFriendCheck, { backgroundColor: colors.accent }]}>
-                            <Check size={10} color="#FFFFFF" strokeWidth={3} />
-                          </View>
-                        )}
-                      </View>
-                      <Text 
-                        style={[
-                          styles.shareFriendName, 
-                          { color: selectedFriends.includes(user.id) ? colors.accent : colors.text }
-                        ]} 
-                        numberOfLines={1}
-                      >
-                        {user.name.split(' ')[0]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                  {[]}
                 </ScrollView>
 
                 {selectedFriends.length > 0 && (

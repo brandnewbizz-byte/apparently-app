@@ -17,11 +17,11 @@ export function bundleToFeedPost(bundle: UserBundle): AggregatedFeedPost {
   return {
     id: `bundle-${bundle.id}`,
     type: 'bundle',
-    title: bundle.title,
     author: {
       name: bundle.creator.name,
       avatar: bundle.creator.avatar,
     },
+    authorId: bundle.creatorId,
     category: 'Bundles',
     timestamp: 'Available',
     caption: bundle.description || bundle.title,
@@ -29,6 +29,7 @@ export function bundleToFeedPost(bundle: UserBundle): AggregatedFeedPost {
     mediaHeight: 200,
     location: bundle.location,
     tags: bundle.tags,
+    likes: 0,
     stats: { saves: 0, comments: 0 },
     price: bundle.price,
   };
@@ -42,6 +43,8 @@ export interface AggregatedFeedPost {
   type: FeedPostType;
   title?: string;
   author: { name: string; avatar: string };
+  /** The creator's user ID — used to resolve live profile photos at render time */
+  authorId?: string;
   category: string;
   timestamp: string;
   caption: string;
@@ -52,6 +55,7 @@ export interface AggregatedFeedPost {
   attendees?: number;
   maxAttendees?: number;
   tags: string[];
+  likes: number;
   stats: { saves: number; comments: number };
   viewerCount?: number;
   streamDuration?: string;
@@ -76,8 +80,9 @@ export function productToFeedPost(product: Product): AggregatedFeedPost {
     type: 'marketplace',
     author: {
       name: product.sellerName,
-      avatar: product.sellerAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+      avatar: product.sellerAvatar || '',
     },
+    authorId: product.userId,
     category: 'Marketplace',
     timestamp: timeAgo,
     caption: product.title,
@@ -85,6 +90,7 @@ export function productToFeedPost(product: Product): AggregatedFeedPost {
     mediaHeight: 240,
     location: product.location,
     tags: [product.category, product.condition, product.acceptsSwap ? 'Accepts Swaps' : ''].filter(Boolean),
+    likes: product.saves || 0,
     stats: { saves: product.saves || 0, comments: product.inquiries?.length || 0 },
     price: product.price,
     condition: product.condition,
@@ -103,8 +109,9 @@ export function listingToFeedPost(listing: any): AggregatedFeedPost {
     type: 'rental',
     author: {
       name: listing.hostName || listing.ownerName || 'Host',
-      avatar: listing.hostAvatar || listing.ownerAvatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100',
+      avatar: listing.hostAvatar || listing.ownerAvatar || '',
     },
+    authorId: listing.hostId || listing.ownerId || listing.userId,
     category: 'Rentals',
     timestamp: 'Available',
     caption: listing.title || listing.name,
@@ -112,6 +119,7 @@ export function listingToFeedPost(listing: any): AggregatedFeedPost {
     mediaHeight: 220,
     location: listing.location || listing.city,
     tags: [listing.category || 'Rental', listing.type, listing.instantBook ? 'Instant Book' : ''].filter(Boolean),
+    likes: 0,
     stats: { saves: listing.favorites?.length || 0, comments: 0 },
     price: listing.price,
     pricePerNight: listing.price ? `$${listing.price}/night` : undefined,
@@ -130,13 +138,15 @@ export function swapPostToFeedPost(post: SwapPost): AggregatedFeedPost {
     type: 'swap',
     author: {
       name: post.author?.name || 'User',
-      avatar: post.author?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+      avatar: post.author?.avatar || '',
     },
+    authorId: post.authorId,
     category: 'Swaps',
     timestamp: timeAgo,
     caption: post.title,
     location: post.location,
     tags: [post.category, post.offering ? `Offering: ${post.offering}` : '', post.needing ? `Needs: ${post.needing}` : ''].filter(Boolean),
+    likes: 0,
     stats: { saves: 0, comments: 0 },
     price: post.price,
   };
@@ -151,13 +161,15 @@ export function connectionToFeedPost(connection: Connection): AggregatedFeedPost
     type: 'connection',
     author: {
       name: connection.profile?.name || 'User',
-      avatar: connection.profile?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+      avatar: connection.profile?.avatar || '',
     },
+    authorId: connection.profile?.id,
     category: 'Connections',
     timestamp: connection.connectedAt || 'Recently',
     caption: `${connection.profile?.name || 'Someone'} is now connected${connection.canMessage ? ' — say hello!' : ''}`,
     media: connection.profile?.avatar,
     tags: ['Connection', 'Network'],
+    likes: 0,
     stats: { saves: 0, comments: 0 },
     canMessage: connection.canMessage,
   };
@@ -177,12 +189,14 @@ export function requestToFeedPost(request: ServiceRequest): AggregatedFeedPost {
       name: request.createdBy.name,
       avatar: request.createdBy.avatar,
     },
+    authorId: request.creatorId,
     category: 'Requests',
     timestamp: timeAgo,
     caption: request.title,
     location: request.location,
     date: request.date,
     tags: request.tags,
+    likes: 0,
     stats: { saves: 0, comments: request.responders },
     price: request.budgetMin,
     pricePerNight: `$${request.budgetMin}–$${request.budgetMax}`,

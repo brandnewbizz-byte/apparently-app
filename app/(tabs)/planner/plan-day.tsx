@@ -481,6 +481,7 @@ export default function PlanDayScreen() {
         transport: form.transport,
         pickup_zip: form.chauffeur.pickupZip || null,
         dropoff_zip: form.chauffeur.dropoffZip || null,
+        plan: planDetails,
         status: 'pending',
       };
 

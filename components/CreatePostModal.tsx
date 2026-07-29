@@ -77,7 +77,9 @@ export default function CreatePostModal({ visible, onClose, onPost, preloadMedia
       onPost({ caption: content.trim(), mediaUri: selectedMedia?.uri });
     } else {
       // Standard flow: use SocialContext
-      createPost(content.trim(), selectedMedia?.uri || undefined);
+      createPost(content.trim(), selectedMedia?.uri || undefined, {
+        mediaType: selectedMedia?.type,
+      });
     }
     
     console.log('[CreatePostModal] Post created', { content, selectedMedia, privacy });

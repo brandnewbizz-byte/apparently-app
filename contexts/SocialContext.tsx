@@ -2,9 +2,10 @@ import createContextHook from '@nkzw/create-context-hook';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Share, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState, useRef } from 'react';
 
-import { Post, Story, mockPosts, mockStories, mockUsers } from '@/mocks/data';
+import { Post, Story } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import { logger } from '@/lib/logger';
@@ -63,8 +64,9 @@ interface SocialState {
   storyInteractions: Record<string, StoryInteraction>;
   userPosts: UserPost[];
   userStories: UserStory[];
+  feedStories: Story[];
   isLoading: boolean;
-  toggleLike: (postId: string) => void;
+  toggleLike: (postId: string, initialLikeCount?: number) => void;
   addComment: (postId: string, text: string, parentId?: string) => void;
   toggleCommentLike: (postId: string, commentId: string) => void;
   sharePost: (post: Post) => Promise<void>;
@@ -74,7 +76,7 @@ interface SocialState {
   getStoryInteraction: (storyId: string) => StoryInteraction;
   updatePost: (postId: string, content: string) => void;
   deletePost: (postId: string) => void;
-  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string }) => void;
+  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => void;
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
@@ -161,7 +163,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         return [];
       }
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   const storiesQuery = useQuery({
@@ -203,13 +205,43 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         return [];
       }
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
   });
 
   useEffect(() => {
     if (postsQuery.data) {
       setFeedPosts(postsQuery.data);
-      setInteractions(buildDefaultState(postsQuery.data));
+      // Build defaults from DB, then overlay any persisted likes/stats from AsyncStorage
+      const defaults = buildDefaultState(postsQuery.data);
+      AsyncStorage.getItem('apparently_social_interactions').then((persisted) => {
+        if (persisted) {
+          try {
+            const saved: Record<string, PostInteraction> = JSON.parse(persisted);
+            // Merge: persisted values win over defaults
+            const merged: Record<string, PostInteraction> = {};
+            for (const id of new Set([...Object.keys(defaults), ...Object.keys(saved)])) {
+              const d = defaults[id] || { likeCount: 0, commentCount: 0, shareCount: 0, isLiked: false, comments: [] };
+              const s = saved[id] || { likeCount: 0, commentCount: 0, shareCount: 0, isLiked: false, comments: [] };
+              merged[id] = {
+                ...d,
+                likeCount: s.likeCount !== undefined ? s.likeCount : d.likeCount,
+                isLiked: s.isLiked !== undefined ? s.isLiked : d.isLiked,
+                commentCount: s.commentCount !== undefined ? s.commentCount : d.commentCount,
+                shareCount: s.shareCount !== undefined ? s.shareCount : d.shareCount,
+                comments: s.comments || d.comments,
+              };
+            }
+            setInteractions(merged);
+            logger.info('SocialContext', 'Merged persisted interactions', { merged: Object.keys(merged).length });
+          } catch {
+            setInteractions(defaults);
+          }
+        } else {
+          setInteractions(defaults);
+        }
+      }).catch(() => {
+        setInteractions(defaults);
+      });
     }
   }, [postsQuery.data]);
 
@@ -253,7 +285,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const { mutate: persistMutation } = useMutation({
     mutationFn: async (payload: Record<string, PostInteraction>) => {
-      logger.info('SocialContext', 'persistMutation ignored (no local storage)', { length: Object.keys(payload).length });
+      await AsyncStorage.setItem('apparently_social_interactions', JSON.stringify(payload));
       return payload;
     },
     onSuccess: () => {
@@ -263,7 +295,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const { mutate: persistStoryMutation } = useMutation({
     mutationFn: async (payload: Record<string, StoryInteraction>) => {
-      logger.info('SocialContext', 'persistStoryMutation ignored (no local storage)', { length: Object.keys(payload).length });
+      await AsyncStorage.setItem('apparently_story_interactions', JSON.stringify(payload));
       return payload;
     },
     onSuccess: () => {
@@ -273,7 +305,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const { mutate: persistUserPostsMutation } = useMutation({
     mutationFn: async (payload: UserPost[]) => {
-      logger.info('SocialContext', 'persistUserPostsMutation ignored (no local storage)', { length: payload.length });
+      await AsyncStorage.setItem('apparently_user_posts', JSON.stringify(payload));
       return payload;
     },
     onSuccess: () => {
@@ -355,12 +387,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     };
   }, [interactions]);
 
-  const ensureInteraction = useCallback((postId: string): PostInteraction => {
+  const ensureInteraction = useCallback((postId: string, initialLikeCount?: number): PostInteraction => {
     if (interactions[postId]) {
       return interactions[postId];
     }
     const fallback: PostInteraction = {
-      likeCount: 0,
+      likeCount: initialLikeCount ?? 0,
       commentCount: 0,
       shareCount: 0,
       isLiked: false,
@@ -371,8 +403,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     return fallback;
   }, [interactions, persistState]);
 
-  const toggleLike = useCallback((postId: string) => {
-    const current = ensureInteraction(postId);
+  const toggleLike = useCallback((postId: string, initialLikeCount?: number) => {
+    const current = ensureInteraction(postId, initialLikeCount);
     const updated: PostInteraction = {
       ...current,
       isLiked: !current.isLiked,
@@ -626,9 +658,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   const createPostMutate = createPostMutation.mutate;
 
-  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string }) => {
-    logger.info('SocialContext', 'Creating post...');
-    createPostMutate({ content, imageUrl });
+  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => {
+    const isVideo = options?.mediaType === 'video';
+    const videoUrl = isVideo ? imageUrl : undefined;
+    const finalImageUrl = isVideo ? undefined : imageUrl;
+    logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
+    createPostMutate({ content, imageUrl: finalImageUrl });
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
     localApi.createPost('u-dev', content, imageUrl, options).then((saved) => {
       logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
@@ -655,27 +690,32 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       }
       apiLoaded.current = false;
       localApi.getPosts().then((rawPosts: any[]) => {
-        const mapped: Post[] = rawPosts.map((p: any) => ({
-          id: p.id,
-          user: {
-            id: p.user_id,
-            name: p.author_name || 'Unknown',
-            username: p.author_username || 'unknown',
-            avatar: p.author_avatar || '',
-            isVerified: !!p.author_verified,
-            followersCount: p.author_followers || 0,
-            relationshipCategory: p.author_relationship,
-          },
-          content: p.content,
-          imageUrl: p.image_url,
-          timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
-          likes: p.likes || 0,
-          comments: p.comments || 0,
-          shares: p.shares || 0,
-          category: p.category || undefined,
-          postKind: p.post_kind || 'post',
-          renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-        }));
+        const mapped: Post[] = rawPosts.map((p: any) => {
+          const joinedUser = p.user;
+          return {
+            id: p.id,
+            user: {
+              id: p.user_id,
+              name: joinedUser?.name || p.author_name || 'Unknown',
+              username: joinedUser?.username || p.author_username || 'unknown',
+              avatar: joinedUser?.avatar || p.author_avatar || '',
+              isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
+              followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
+              relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
+            },
+            content: p.content,
+            imageUrl: p.image_url,
+            videoUrl: p.video_url,
+            mediaType: p.media_type as 'image' | 'video' | undefined,
+            timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
+            likes: p.likes || 0,
+            comments: p.comments || 0,
+            shares: p.shares || 0,
+            category: p.category || undefined,
+            postKind: p.post_kind || 'post',
+            renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
+          };
+        });
         setApiPosts(mapped);
         setInteractions(buildDefaultState(mapped));
       }).catch(() => {});
@@ -716,29 +756,32 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     if (apiLoaded.current) return;
     apiLoaded.current = true;
     localApi.getPosts().then((rawPosts: any[]) => {
-      const mapped: Post[] = rawPosts.map((p: any) => ({
-        id: p.id,
-        user: {
-          id: p.user_id,
-          name: p.author_name || 'Unknown',
-          username: p.author_username || 'unknown',
-          avatar: p.author_avatar || '',
-          isVerified: !!p.author_verified,
-          followersCount: p.author_followers || 0,
-          relationshipCategory: p.author_relationship,
-        },
-        content: p.content,
-        imageUrl: p.image_url,
-        timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
-        likes: p.likes || 0,
-        comments: p.comments || 0,
-        shares: p.shares || 0,
-        category: p.category || undefined,
-        postKind: p.post_kind || 'post',
-        renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-        isApparently: !!p.is_apparently,
-        apparentlyTag: p.apparently_tag,
-      }));
+      const mapped: Post[] = rawPosts.map((p: any) => {
+        const joinedUser = p.user;
+        return {
+          id: p.id,
+          user: {
+            id: p.user_id,
+            name: joinedUser?.name || p.author_name || 'Unknown',
+            username: joinedUser?.username || p.author_username || 'unknown',
+            avatar: joinedUser?.avatar || p.author_avatar || '',
+            isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
+            followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
+            relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
+          },
+          content: p.content,
+          imageUrl: p.image_url,
+          timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
+          likes: p.likes || 0,
+          comments: p.comments || 0,
+          shares: p.shares || 0,
+          category: p.category || undefined,
+          postKind: p.post_kind || 'post',
+          renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
+          isApparently: !!p.is_apparently,
+          apparentlyTag: p.apparently_tag,
+        };
+      });
       logger.info('SocialContext', 'Loaded', { length: mapped.length });
       setApiPosts(mapped);
       setInteractions(buildDefaultState(mapped));
@@ -750,7 +793,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const getAllPosts = useCallback((): Post[] => {
     if (apiPosts && apiPosts.length > 0) return [...apiPosts];
     if (feedPosts && feedPosts.length > 0) return [...feedPosts];
-    return [...mockPosts];
+    return [];
   }, [apiPosts, feedPosts]);
 
   const getAllStories = useCallback((): Story[] => {
@@ -762,6 +805,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     storyInteractions,
     userPosts,
     userStories,
+    feedStories,
     isLoading: query.isLoading || postsQuery.isLoading,
     toggleLike,
     addComment,

@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -25,23 +26,27 @@ import {
   Calendar,
   Tag,
   Camera,
-  Check,
   Star,
+  Trash2,
+  GripVertical,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles, type BundleItem } from '@/contexts/BundleContext';
-import { SERVICE_CATEGORIES } from '@/contexts/ServiceRequestContext';
 
 type Step = 'services' | 'details' | 'preview';
 
+let serviceIdCounter = 0;
+
 interface ServiceDraft {
-  key: string;
-  label: string;
-  icon: string;
+  id: string;
   name: string;
+  description: string;
   price: number;
   provider: string;
+  providerLink: string;
+  deliveryNotes: string;
+  resourcesNeeded: string;
 }
 
 export default function BundleBuilderScreen() {
@@ -52,12 +57,13 @@ export default function BundleBuilderScreen() {
 
   const [step, setStep] = useState<Step>('services');
 
-  // Step 1 state
-  const [selectedServices, setSelectedServices] = useState<ServiceDraft[]>([]);
+  // Step 1 state — free-form service entries
+  const [selectedServices, setSelectedServices] = useState<ServiceDraft[]>([
+    { id: `svc-${++serviceIdCounter}`, name: '', description: '', price: 0, provider: '', providerLink: '', deliveryNotes: '', resourcesNeeded: '' },
+  ]);
 
   // Step 2 state
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
   const [bundlePrice, setBundlePrice] = useState('');
   const [location, setLocation] = useState('');
   const [dateRange, setDateRange] = useState('');
@@ -65,32 +71,32 @@ export default function BundleBuilderScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [availableCount, setAvailableCount] = useState('10');
+  const [plannerNotes, setPlannerNotes] = useState('');
 
   const totalItemsPrice = selectedServices.reduce((sum, s) => sum + s.price, 0);
   const finalPrice = bundlePrice ? parseFloat(bundlePrice) : totalItemsPrice;
 
-  const addService = useCallback((cat: typeof SERVICE_CATEGORIES[number]) => {
-    const existing = selectedServices.find((s) => s.key === cat.key);
-    if (existing) {
-      setSelectedServices((prev) => prev.filter((s) => s.key !== cat.key));
-      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      return;
-    }
+  const addServiceDraft = useCallback(() => {
+    const id = `svc-${++serviceIdCounter}`;
     setSelectedServices((prev) => [
       ...prev,
-      { key: cat.key, label: cat.label, icon: cat.icon, name: '', price: 0, provider: '' },
+      { id, name: '', description: '', price: 0, provider: '', providerLink: '', deliveryNotes: '', resourcesNeeded: '' },
     ]);
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [selectedServices]);
+  }, []);
 
-  const updateServiceField = useCallback((key: string, field: 'name' | 'price' | 'provider', value: string) => {
+  const updateServiceField = useCallback((id: string, field: keyof ServiceDraft, value: string) => {
     setSelectedServices((prev) =>
-      prev.map((s) => (s.key === key ? { ...s, [field]: field === 'price' ? parseFloat(value) || 0 : value } : s))
+      prev.map((s) => (s.id === id ? { ...s, [field]: field === 'price' ? parseFloat(value) || 0 : value } : s))
     );
   }, []);
 
-  const removeService = useCallback((key: string) => {
-    setSelectedServices((prev) => prev.filter((s) => s.key !== key));
+  const removeService = useCallback((id: string) => {
+    setSelectedServices((prev) => {
+      if (prev.length <= 1) return prev; // keep at least one
+      return prev.filter((s) => s.id !== id);
+    });
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
   const pickImage = useCallback(async () => {
@@ -146,32 +152,47 @@ export default function BundleBuilderScreen() {
 
     const items: BundleItem[] = selectedServices.map((s, i) => ({
       id: `item-${Date.now()}-${i}`,
-      name: s.name || s.label,
-      category: s.key,
+      name: s.name || 'Untitled Service',
+      description: s.description || undefined,
+      category: 'service',
       provider: s.provider || 'You',
-      providerAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+      providerAvatar: '',
+      providerLink: s.providerLink || undefined,
       price: s.price || 0,
-      icon: s.icon,
+      icon: '📦',
+      deliveryNotes: s.deliveryNotes || undefined,
+      resourcesNeeded: s.resourcesNeeded || undefined,
     }));
 
-    createBundle({
+    // Build bundle description from first service's description or item names
+    const bundleDescription = selectedServices[0]?.description?.trim()
+      || selectedServices.map(s => s.name).filter(Boolean).join(', ')
+      || `${items.length} service${items.length !== 1 ? 's' : ''}`;
+
+    const result = createBundle({
       title: title.trim(),
-      description: description.trim(),
+      description: bundleDescription,
       price: finalPrice,
       items,
-      imageUrl: coverImage || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800',
-      category: selectedServices[0]?.key || 'other',
+      imageUrl: coverImage || '',
+      category: 'service',
       location: location.trim(),
       dateRange: dateRange.trim(),
       tags: tags.length ? tags : ['Bundle'],
       creator: {
         name: 'You',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+        avatar: '',
         rating: 5.0,
         reviews: 0,
       },
       availableCount: parseInt(availableCount, 10) || 10,
+      plannerNotes: plannerNotes.trim() || undefined,
     });
+
+    if (!result.success) {
+      Alert.alert('Limit Reached', result.error);
+      return;
+    }
 
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.back();
@@ -220,96 +241,139 @@ export default function BundleBuilderScreen() {
       >
         {step === 'services' && (
           <>
-            <Text style={[styles.stepTitle, { color: colors.text }]}>Pick Services</Text>
+            <Text style={[styles.stepTitle, { color: colors.text }]}>Add Services</Text>
             <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>
-              Tap categories to add services to your bundle
+              Write in each service you're bundling — name it, describe it, price it
             </Text>
 
-            {/* Category Grid */}
-            <View style={styles.categoryGrid}>
-              {SERVICE_CATEGORIES.map((cat) => {
-                const isSelected = selectedServices.some((s) => s.key === cat.key);
-                return (
-                  <TouchableOpacity
-                    key={cat.key}
-                    style={[
-                      styles.categoryCard,
-                      {
-                        backgroundColor: isSelected ? `${colors.accent}20` : colors.surface,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                    onPress={() => addService(cat)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.categoryEmoji}>{cat.icon}</Text>
-                    <Text style={[styles.categoryLabel, { color: isSelected ? colors.accent : colors.text }]} numberOfLines={1}>
-                      {cat.label}
+            {/* Service Cards */}
+            {selectedServices.map((service, idx) => (
+              <View key={service.id} style={[styles.serviceCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={styles.serviceCardHeader}>
+                  <View style={styles.serviceCardHandle}>
+                    <GripVertical size={14} color={colors.textTertiary} />
+                    <Text style={[styles.serviceCardIndex, { color: colors.textTertiary }]}>
+                      Service {idx + 1}
                     </Text>
-                    {isSelected && (
-                      <View style={[styles.selectedBadge, { backgroundColor: colors.accent }]}>
-                        <Check size={10} color="#FFF" />
-                      </View>
-                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => removeService(service.id)}
+                    disabled={selectedServices.length <= 1}
+                    style={[styles.removeBtn, selectedServices.length <= 1 && { opacity: 0.3 }]}
+                  >
+                    <Trash2 size={16} color={colors.error || '#EF4444'} />
                   </TouchableOpacity>
-                );
-              })}
-            </View>
+                </View>
 
-            {/* Selected Services Editor */}
-            {selectedServices.length > 0 && (
-              <View style={{ marginTop: 24 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Selected Services ({selectedServices.length})</Text>
-                {selectedServices.map((service) => (
-                  <View key={service.key} style={[styles.serviceEditor, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <View style={styles.serviceEditorHeader}>
-                      <View style={styles.serviceEditorIcon}>
-                        <Text style={styles.serviceEmoji}>{service.icon}</Text>
-                        <Text style={[styles.serviceCategoryLabel, { color: colors.text }]}>{service.label}</Text>
-                      </View>
-                      <TouchableOpacity onPress={() => removeService(service.key)}>
-                        <X size={16} color={colors.textTertiary} />
-                      </TouchableOpacity>
-                    </View>
-                    <TextInput
-                      style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                      placeholder="Service name"
-                      placeholderTextColor={colors.textTertiary}
-                      value={service.name}
-                      onChangeText={(v) => updateServiceField(service.key, 'name', v)}
-                    />
-                    <View style={styles.serviceRow}>
-                      <View style={styles.serviceRowField}>
-                        <TextInput
-                          style={[styles.input, styles.priceInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                          placeholder="Price"
-                          placeholderTextColor={colors.textTertiary}
-                          value={service.price > 0 ? String(service.price) : ''}
-                          onChangeText={(v) => updateServiceField(service.key, 'price', v)}
-                          keyboardType="decimal-pad"
-                        />
-                        <DollarSign size={14} color={colors.textTertiary} style={{ position: 'absolute', left: 12, top: 13 }} />
-                      </View>
-                      <View style={[styles.serviceRowField, { flex: 1 }]}>
-                        <TextInput
-                          style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                          placeholder="Provider name"
-                          placeholderTextColor={colors.textTertiary}
-                          value={service.provider}
-                          onChangeText={(v) => updateServiceField(service.key, 'provider', v)}
-                        />
-                      </View>
+                {/* Service Name — free text */}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Service Name</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder='e.g. "Website Redesign" or "Plumbing Inspection"'
+                  placeholderTextColor={colors.textTertiary}
+                  value={service.name}
+                  onChangeText={(v) => updateServiceField(service.id, 'name', v)}
+                />
+
+                {/* Per-item Description — THE MAIN NEW FEATURE */}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 10 }]}>
+                  Description
+                </Text>
+                <TextInput
+                  style={[styles.input, styles.descInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder="What this service includes, what's delivered, timeline, etc."
+                  placeholderTextColor={colors.textTertiary}
+                  value={service.description}
+                  onChangeText={(v) => updateServiceField(service.id, 'description', v)}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+
+                {/* Price + Provider row */}
+                <View style={styles.serviceRow}>
+                  <View style={styles.serviceRowField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Price</Text>
+                    <View>
+                      <TextInput
+                        style={[styles.input, styles.priceInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                        placeholder="0"
+                        placeholderTextColor={colors.textTertiary}
+                        value={service.price > 0 ? String(service.price) : ''}
+                        onChangeText={(v) => updateServiceField(service.id, 'price', v)}
+                        keyboardType="decimal-pad"
+                      />
+                      <DollarSign size={14} color={colors.textTertiary} style={{ position: 'absolute', left: 12, top: 13 }} />
                     </View>
                   </View>
-                ))}
-
-                {/* Total */}
-                <View style={[styles.totalRow, { borderTopColor: colors.border }]}>
-                  <Text style={[styles.totalLabel, { color: colors.textSecondary }]}>Items Total</Text>
-                  <Text style={[styles.totalValue, { color: colors.accent }]}>${totalItemsPrice}</Text>
+                  <View style={[styles.serviceRowField, { flex: 1 }]}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Provider (optional)</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                      placeholder="Who's fulfilling this?"
+                      placeholderTextColor={colors.textTertiary}
+                      value={service.provider}
+                      onChangeText={(v) => updateServiceField(service.id, 'provider', v)}
+                    />
+                  </View>
                 </View>
+
+                {/* Provider Link */}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 10 }]}>Provider Link (optional)</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder="URL for booking or delivery"
+                  placeholderTextColor={colors.textTertiary}
+                  value={service.providerLink}
+                  onChangeText={(v) => updateServiceField(service.id, 'providerLink', v)}
+                  autoCapitalize="none"
+                  keyboardType="url"
+                />
+
+                {/* Delivery Notes */}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 10 }]}>Delivery Notes (optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.descInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder="What's needed to fulfill this service?"
+                  placeholderTextColor={colors.textTertiary}
+                  value={service.deliveryNotes}
+                  onChangeText={(v) => updateServiceField(service.id, 'deliveryNotes', v)}
+                  multiline
+                  numberOfLines={2}
+                  textAlignVertical="top"
+                />
+
+                {/* Resources Needed */}
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 10 }]}>Resources Needed (optional)</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                  placeholder="Tools, contacts, materials required"
+                  placeholderTextColor={colors.textTertiary}
+                  value={service.resourcesNeeded}
+                  onChangeText={(v) => updateServiceField(service.id, 'resourcesNeeded', v)}
+                />
               </View>
-            )}
+            ))}
+
+            {/* Add Another Service button */}
+            <TouchableOpacity
+              style={[styles.addServiceBtn, { borderColor: colors.accent }]}
+              onPress={addServiceDraft}
+              activeOpacity={0.7}
+            >
+              <Plus size={18} color={colors.accent} />
+              <Text style={[styles.addServiceBtnText, { color: colors.accent }]}>
+                Add Another Service
+              </Text>
+            </TouchableOpacity>
+
+            {/* Total */}
+            <View style={[styles.totalRow, { borderTopColor: colors.border }]}>
+              <Text style={[styles.totalLabel, { color: colors.textSecondary }]}>
+                {selectedServices.length} service{selectedServices.length !== 1 ? 's' : ''} — items total
+              </Text>
+              <Text style={[styles.totalValue, { color: colors.accent }]}>${totalItemsPrice}</Text>
+            </View>
           </>
         )}
 
@@ -317,7 +381,7 @@ export default function BundleBuilderScreen() {
           <>
             <Text style={[styles.stepTitle, { color: colors.text }]}>Bundle Details</Text>
             <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>
-              Add a title, description, and set your price
+              Give your bundle a title, cover image, and price
             </Text>
 
             {/* Cover Image */}
@@ -328,9 +392,7 @@ export default function BundleBuilderScreen() {
             >
               {coverImage ? (
                 <View style={styles.imagePreview}>
-                  <View style={[styles.imagePlaceholder, { backgroundColor: colors.surfaceHighlight }]}>
-                    <Text style={{ fontSize: 48 }}>📦</Text>
-                  </View>
+                  <Image source={{ uri: coverImage }} style={styles.coverImage} />
                   <View style={[styles.imageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
                     <Camera size={16} color="#FFF" />
                     <Text style={styles.imageOverlayText}>Change Cover</Text>
@@ -352,18 +414,6 @@ export default function BundleBuilderScreen() {
               value={title}
               onChangeText={setTitle}
               maxLength={80}
-            />
-
-            {/* Description */}
-            <TextInput
-              style={[styles.input, styles.descInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Describe your bundle..."
-              placeholderTextColor={colors.textTertiary}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
             />
 
             {/* Bundle Price */}
@@ -447,6 +497,21 @@ export default function BundleBuilderScreen() {
                 />
               </View>
             </View>
+
+            {/* Planner Notes */}
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginTop: 20, marginBottom: 8 }]}>
+              Planner Notes (private)
+            </Text>
+            <TextInput
+              style={[styles.input, styles.descInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder="Links, contacts, instructions — everything you'll need to deliver this bundle smoothly"
+              placeholderTextColor={colors.textTertiary}
+              value={plannerNotes}
+              onChangeText={setPlannerNotes}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
           </>
         )}
 
@@ -461,7 +526,11 @@ export default function BundleBuilderScreen() {
             <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               {/* Cover */}
               <View style={[styles.previewCover, { backgroundColor: colors.surfaceHighlight }]}>
-                <Text style={{ fontSize: 56 }}>📦</Text>
+                {coverImage ? (
+                  <Image source={{ uri: coverImage }} style={styles.previewCoverImage} />
+                ) : (
+                  <Text style={{ fontSize: 56 }}>📦</Text>
+                )}
               </View>
 
               <View style={styles.previewBody}>
@@ -472,9 +541,16 @@ export default function BundleBuilderScreen() {
                   </View>
                 </View>
 
-                <Text style={[styles.previewDesc, { color: colors.textSecondary }]} numberOfLines={3}>
-                  {description || 'No description'}
-                </Text>
+                {/* Bundle summary — uses first service description as overview */}
+                {selectedServices[0]?.description ? (
+                  <Text style={[styles.previewDesc, { color: colors.textSecondary }]} numberOfLines={3}>
+                    {selectedServices[0].description}
+                  </Text>
+                ) : (
+                  <Text style={[styles.previewDesc, { color: colors.textTertiary }]} numberOfLines={1}>
+                    {selectedServices.length} service{selectedServices.length !== 1 ? 's' : ''} bundled together
+                  </Text>
+                )}
 
                 {/* Items */}
                 <View style={styles.previewItems}>
@@ -482,12 +558,33 @@ export default function BundleBuilderScreen() {
                     {selectedServices.length} Services Included:
                   </Text>
                   {selectedServices.map((s) => (
-                    <View key={s.key} style={styles.previewItemRow}>
-                      <Text style={styles.previewItemEmoji}>{s.icon}</Text>
-                      <Text style={[styles.previewItemName, { color: colors.text }]}>{s.name || s.label}</Text>
-                      <Text style={[styles.previewItemPrice, { color: colors.accent }]}>
-                        {s.price > 0 ? `$${s.price}` : ''}
-                      </Text>
+                    <View key={s.id} style={styles.previewItemBlock}>
+                      <View style={styles.previewItemRow}>
+                        <Text style={styles.previewItemEmoji}>📦</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.previewItemName, { color: colors.text }]}>
+                            {s.name || 'Untitled Service'}
+                          </Text>
+                          {s.description ? (
+                            <Text style={[styles.previewItemDesc, { color: colors.textTertiary }]} numberOfLines={2}>
+                              {s.description}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Text style={[styles.previewItemPrice, { color: colors.accent }]}>
+                          {s.price > 0 ? `$${s.price}` : ''}
+                        </Text>
+                      </View>
+                      {s.providerLink ? (
+                        <Text style={[styles.previewItemDetail, { color: colors.accent }]} numberOfLines={1}>
+                          🔗 {s.providerLink}
+                        </Text>
+                      ) : null}
+                      {s.deliveryNotes ? (
+                        <Text style={[styles.previewItemDetail, { color: colors.textTertiary }]} numberOfLines={2}>
+                          📋 {s.deliveryNotes}
+                        </Text>
+                      ) : null}
                     </View>
                   ))}
                 </View>
@@ -524,6 +621,18 @@ export default function BundleBuilderScreen() {
                     ))}
                   </View>
                 )}
+
+                {/* Planner Notes */}
+                {plannerNotes.trim() ? (
+                  <View style={[styles.previewPlannerNotes, { borderTopColor: colors.border }]}>
+                    <Text style={[styles.previewPlannerNotesLabel, { color: colors.textTertiary }]}>
+                      📝 Planner Notes
+                    </Text>
+                    <Text style={[styles.previewPlannerNotesText, { color: colors.textSecondary }]}>
+                      {plannerNotes.trim()}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {/* Creator */}
                 <View style={[styles.previewCreator, { borderTopColor: colors.border }]}>
@@ -605,37 +714,48 @@ const styles = StyleSheet.create({
   stepTitle: { fontSize: 24, fontWeight: '800', marginBottom: 4 },
   stepSubtitle: { fontSize: 14, marginBottom: 20 },
 
-  // Step 1 — Categories
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  categoryCard: {
-    width: '30%',
-    aspectRatio: 1,
+  // Step 1 — Service Cards (free-form entry)
+  serviceCard: {
     borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 14,
+  },
+  serviceCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  serviceCardHandle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  serviceCardIndex: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  removeBtn: {
+    padding: 6,
+    borderRadius: 8,
+  },
+  addServiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
     borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 8,
+    borderStyle: 'dashed',
+    marginTop: 4,
+    marginBottom: 20,
   },
-  categoryEmoji: { fontSize: 28, marginBottom: 4 },
-  categoryLabel: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  selectedBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+  addServiceBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
-
-  // Service Editor
-  sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  serviceEditor: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 10 },
-  serviceEditorHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  serviceEditorIcon: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  serviceEmoji: { fontSize: 20 },
-  serviceCategoryLabel: { fontSize: 14, fontWeight: '600' },
   input: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   serviceRow: { flexDirection: 'row', gap: 10 },
   serviceRowField: { position: 'relative' },
@@ -647,6 +767,7 @@ const styles = StyleSheet.create({
   // Step 2 — Details
   imagePicker: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 16 },
   imagePreview: { position: 'relative' },
+  coverImage: { height: 180, width: '100%', borderRadius: 14 },
   imagePlaceholder: { height: 180, alignItems: 'center', justifyContent: 'center', gap: 8 },
   imageOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   imageOverlayText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
@@ -669,6 +790,7 @@ const styles = StyleSheet.create({
   // Step 3 — Preview
   previewCard: { borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
   previewCover: { height: 180, alignItems: 'center', justifyContent: 'center' },
+  previewCoverImage: { width: '100%', height: '100%' },
   previewBody: { padding: 18 },
   previewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   previewTitle: { fontSize: 20, fontWeight: '700', flex: 1, marginRight: 12 },
@@ -678,8 +800,11 @@ const styles = StyleSheet.create({
   previewItems: { marginBottom: 14 },
   previewItemsTitle: { fontSize: 13, fontWeight: '600', marginBottom: 8 },
   previewItemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, gap: 8 },
+  previewItemBlock: { paddingVertical: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  previewItemDetail: { fontSize: 11, marginLeft: 24, marginBottom: 2, lineHeight: 15 },
   previewItemEmoji: { fontSize: 16 },
-  previewItemName: { flex: 1, fontSize: 14 },
+  previewItemName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  previewItemDesc: { fontSize: 12, marginTop: 2, lineHeight: 16 },
   previewItemPrice: { fontSize: 14, fontWeight: '600' },
   previewDetails: { marginBottom: 12, gap: 6 },
   previewDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -694,6 +819,9 @@ const styles = StyleSheet.create({
   previewCreatorRating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   previewCreatorRatingText: { fontSize: 12 },
   previewStatusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
+  previewPlannerNotes: { paddingVertical: 12, borderTopWidth: 1 },
+  previewPlannerNotesLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  previewPlannerNotesText: { fontSize: 13, lineHeight: 18 },
 
   // Bottom Bar
   bottomBar: { paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1 },

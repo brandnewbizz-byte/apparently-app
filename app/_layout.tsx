@@ -25,6 +25,7 @@ import { MessagingProvider } from '@/contexts/MessagingContext';
 import { UserPostsProvider } from '@/contexts/UserPostsContext';
 
 import { BundleProvider } from '@/contexts/BundleContext';
+import { SkillProvider } from '@/contexts/SkillContext';
 import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
 import { MarketplaceProvider } from '@/contexts/MarketplaceContext';
 import { SwapProvider } from '@/contexts/SwapContext';
@@ -240,6 +241,7 @@ export default function RootLayout() {
                         <SocialProvider>
                           <ConnectionsProvider>
                         <BundleProvider>
+                          <SkillProvider>
                           <ServiceRequestProvider>
                                 <MessagingProvider>
                                   <MarketplaceProvider>
@@ -257,6 +259,7 @@ export default function RootLayout() {
                                   </MarketplaceProvider>
                                 </MessagingProvider>
                           </ServiceRequestProvider>
+                          </SkillProvider>
                         </BundleProvider>
                           </ConnectionsProvider>
                         </SocialProvider>

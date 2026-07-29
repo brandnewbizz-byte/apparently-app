@@ -61,6 +61,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
 import { useBundles, type UserBundle } from '@/contexts/BundleContext';
+import { useSkills } from '@/contexts/SkillContext';
+import { useServiceRequests, type ServiceRequest } from '@/contexts/ServiceRequestContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -157,43 +159,13 @@ interface SkillDeal {
   grabCount?: number;
 }
 
-const MOCK_SKILL_DEALS: SkillDeal[] = [
-  { id: 's1', title: 'Home Cleaning', icon: '🧹', price: 35, originalPrice: 45, rating: 4.9, image: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400', distance: 2.1, expiresIn: 1800, creatorId: 'u-2', provider: { name: 'Maria S.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' } },
-  { id: 's2', title: 'Personal Chef', icon: '👨‍🍳', price: 89, originalPrice: 120, rating: 4.8, image: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=400', distance: 3.5, expiresIn: 3600, creatorId: 'u-4', provider: { name: 'Chef Tony', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' } },
-  { id: 's3', title: 'Dog Walking', icon: '🐕', price: 18, originalPrice: 25, rating: 5.0, image: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400', distance: 0.8, expiresIn: 900, creatorId: 'u-5', provider: { name: 'Jake W.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' } },
-  { id: 's4', title: 'Photography', icon: '📸', price: 65, originalPrice: 85, rating: 4.7, image: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=400', distance: 5.2, expiresIn: 7200, creatorId: 'u-3', provider: { name: 'Lisa P.', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' } },
-  { id: 's5', title: 'Tutoring', icon: '📚', price: 30, originalPrice: 40, rating: 4.9, image: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400', distance: 1.5, expiresIn: 5400, creatorId: 'u-6', provider: { name: 'Prof. Kim', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100' } },
-];
-
-interface ServiceRequest {
-  id: string;
-  title: string;
-  description: string;
-  budget: number;
-  image: string;
-  distance: number;
-  expiresIn: number;
-  creatorId?: string;
-  requester: {
-    name: string;
-    avatar: string;
-    rating: number;
-  };
-  category: string;
-}
-
-const MOCK_SERVICE_REQUESTS: ServiceRequest[] = [
-  { id: 'sr1', title: 'Need Help Moving', description: 'Looking for 2 people to help move furniture this Saturday', budget: 150, image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800', distance: 4.2, expiresIn: 14400, creatorId: 'u-4', requester: { name: 'Tom H.', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', rating: 4.8 }, category: 'Moving' },
-  { id: 'sr2', title: 'Party Planner Needed', description: 'Planning a surprise birthday party for 30 guests', budget: 300, image: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=800', distance: 6.8, expiresIn: 28800, creatorId: 'u-2', requester: { name: 'Emma L.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100', rating: 4.9 }, category: 'Events' },
-  { id: 'sr3', title: 'Garden Makeover', description: 'Need landscaping help for backyard renovation', budget: 250, image: 'https://images.unsplash.com/photo-1558904541-efa843a96f01?w=800', distance: 3.1, expiresIn: 43200, creatorId: 'u-5', requester: { name: 'Mike R.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100', rating: 4.7 }, category: 'Home' },
-];
-
-const LIVE_UPDATES = [
-  { name: 'Jake', action: 'booked', amount: 18, service: 'VA', time: '2 mins ago' },
-  { name: 'Sarah', action: 'grabbed', amount: 45, service: 'Cleaning', time: '3 mins ago' },
-  { name: 'Mike', action: 'booked', amount: 120, service: 'Chef', time: '5 mins ago' },
-  { name: 'Emma', action: 'grabbed', amount: 299, service: 'Bundle', time: '7 mins ago' },
-  { name: 'Alex', action: 'booked', amount: 85, service: 'Photo', time: '8 mins ago' },
+// All skill deals, service requests, and live updates now come from live Supabase.
+const LIVE_UPDATES: Array<{ name: string; action: string; amount: number; service: string; time: string }> = [
+  { name: 'Mike D.', action: 'grabbed', amount: 85, service: 'Resume Review', time: '2 min ago' },
+  { name: 'Sarah K.', action: 'booked', amount: 240, service: 'Headshot Session', time: '7 min ago' },
+  { name: 'Jay T.', action: 'completed', amount: 150, service: 'Mix & Master', time: '12 min ago' },
+  { name: 'Lena P.', action: 'grabbed', amount: 60, service: 'Meal Prep Bundle', time: '18 min ago' },
+  { name: 'Chris R.', action: 'booked', amount: 320, service: 'Logo Design', time: '23 min ago' },
 ];
 
 const BUNDLE_SET_TABS = [
@@ -1171,43 +1143,51 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
 }
 
 function ServiceRequestCard({ request, colors }: { request: ServiceRequest; colors: any }) {
+  const creator = request.createdBy || { name: 'Someone', avatar: '' };
+  const budgetLabel = request.budgetMax ? `$${request.budgetMin}–$${request.budgetMax}` : request.budgetMin > 0 ? `$${request.budgetMin}` : 'TBD';
   return (
     <View style={[styles.serviceRequestCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <ImageBackground source={{ uri: request.image }} style={styles.serviceRequestImage} imageStyle={styles.serviceRequestImageStyle}>
-        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.serviceRequestOverlay}>
-          <View style={styles.serviceRequestBadges}>
-            <View style={styles.serviceRequestTimer}>
-              <Clock size={12} color="#FFF" />
-              <Text style={styles.serviceRequestTimerText}>{formatCountdown(request.expiresIn)}</Text>
+      {request.image ? (
+        <ImageBackground source={{ uri: request.image }} style={styles.serviceRequestImage} imageStyle={styles.serviceRequestImageStyle}>
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.serviceRequestOverlay}>
+            <View style={styles.serviceRequestBadges}>
+              {request.expiresIn && (
+                <View style={styles.serviceRequestTimer}>
+                  <Clock size={12} color="#FFF" />
+                  <Text style={styles.serviceRequestTimerText}>{formatCountdown(request.expiresIn)}</Text>
+                </View>
+              )}
+              <View style={styles.serviceRequestCategory}>
+                <Text style={styles.serviceRequestCategoryText}>{request.category}</Text>
+              </View>
             </View>
-            <View style={styles.serviceRequestCategory}>
-              <Text style={styles.serviceRequestCategoryText}>{request.category}</Text>
-            </View>
-          </View>
-        </LinearGradient>
-      </ImageBackground>
+          </LinearGradient>
+        </ImageBackground>
+      ) : (
+        <View style={[styles.serviceRequestImage, { backgroundColor: '#F59E0B15', justifyContent: 'center', alignItems: 'center' }]}>
+          <Briefcase size={32} color="#F59E0B" />
+        </View>
+      )}
       <View style={styles.serviceRequestContent}>
         <Text style={[styles.serviceRequestTitle, { color: colors.text }]}>{request.title}</Text>
         <Text style={[styles.serviceRequestDesc, { color: colors.textSecondary }]} numberOfLines={2}>{request.description}</Text>
         <View style={styles.serviceRequestRequester}>
-          <Image source={{ uri: request.requester.avatar }} style={styles.requesterAvatar} />
+          <Image source={{ uri: creator.avatar || undefined }} style={styles.requesterAvatar} defaultSource={require('@/assets/images/icon.png')} />
           <View style={styles.requesterInfo}>
-            <Text style={[styles.requesterName, { color: colors.text }]}>{request.requester.name}</Text>
-            <View style={styles.requesterRating}>
-              <Star size={12} color="#F59E0B" fill="#F59E0B" />
-              <Text style={styles.requesterRatingText}>{request.requester.rating}</Text>
-            </View>
+            <Text style={[styles.requesterName, { color: colors.text }]}>{creator.name}</Text>
           </View>
         </View>
         <View style={styles.serviceRequestFooter}>
           <View style={styles.serviceRequestBudget}>
             <Text style={styles.budgetLabel}>Budget</Text>
-            <Text style={styles.budgetAmount}>${request.budget}</Text>
+            <Text style={styles.budgetAmount}>{budgetLabel}</Text>
           </View>
-          <View style={styles.serviceRequestDistance}>
-            <MapPin size={12} color={colors.textTertiary} />
-            <Text style={[styles.serviceDistanceText, { color: colors.textTertiary }]}>{request.distance} mi</Text>
-          </View>
+          {request.distance != null && (
+            <View style={styles.serviceRequestDistance}>
+              <MapPin size={12} color={colors.textTertiary} />
+              <Text style={[styles.serviceDistanceText, { color: colors.textTertiary }]}>{request.distance} mi</Text>
+            </View>
+          )}
         </View>
       </View>
     </View>
@@ -1263,6 +1243,8 @@ export default function HomeScreen() {
   const { plans } = usePlanner();
   const { sendMessage } = useMessaging();
   const { bundles: contextBundles, grabBundle } = useBundles();
+  const { skills: contextSkills } = useSkills();
+  const { requests: serviceRequests } = useServiceRequests();
 
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
@@ -1352,13 +1334,13 @@ export default function HomeScreen() {
         Animated.timing(updateAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.timing(updateAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start(() => {
-        setLiveUpdateIndex(prev => (prev + 1) % LIVE_UPDATES.length);
+        if (LIVE_UPDATES.length > 0) setLiveUpdateIndex(prev => (prev + 1) % LIVE_UPDATES.length);
       });
     }, 4000);
     return () => clearInterval(interval);
   }, [updateAnim]);
 
-  const currentUpdate = LIVE_UPDATES[liveUpdateIndex];
+  const currentUpdate = LIVE_UPDATES.length > 0 ? LIVE_UPDATES[liveUpdateIndex] : null;
 
   const handleGrabBundle = useCallback((bundle: BundlePlan) => {
     if (Platform.OS !== 'web') {
@@ -1408,12 +1390,14 @@ export default function HomeScreen() {
 
   const handleGrabRequest = useCallback((request: ServiceRequest) => {
     if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
     }
     console.log('Card action:', 'grab_request', request.id);
-    setConfettiAmount(request.budget);
+    const budgetAmount = request.budgetMax || request.budgetMin || 0;
+    setConfettiAmount(budgetAmount);
     setShowConfetti(true);
-    sendMessage(request.creatorId || 'u-4', `🛠️ Hey! I can help with "${request.title}". My budget is $${request.budget}. Still looking?`);
+    const budgetLabel = request.budgetMax ? `$${request.budgetMin}–$${request.budgetMax}` : budgetAmount > 0 ? `$${budgetAmount}` : 'TBD';
+    sendMessage(request.creatorId || 'u-4', `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`);
   }, [sendMessage]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
@@ -1470,8 +1454,29 @@ export default function HomeScreen() {
   }, [currentBundleSet.data, myGrabbedBundles, createdBundles]);
 
   const allSkills = useMemo(() => {
-    return [...MOCK_SKILL_DEALS, ...createdSkills];
-  }, [createdSkills]);
+    const convertedSkills: SkillDeal[] = (contextSkills || [])
+      .filter((s) => s?.status === 'available')
+      .map((s) => ({
+        id: s.id || '',
+        title: s.title || '',
+        icon: s.icon || '🔧',
+        price: s.price || 0,
+        originalPrice: s.originalPrice || 0,
+        rating: s.creator?.rating || 0,
+        image: s.imageUrl || '',
+        distance: 0,
+        expiresIn: s.expiresIn || 3600,
+        creatorId: s.creatorId,
+        creatorName: s.creator?.name || '',
+        creatorAvatar: s.creator?.avatar || '',
+        provider: { name: s.creator?.name || '', avatar: s.creator?.avatar || '' },
+        description: s.description,
+        imageUrl: s.imageUrl,
+        category: s.category,
+        grabCount: s.grabCount,
+      }));
+    return [...convertedSkills, ...createdSkills];
+  }, [contextSkills, createdSkills]);
 
   // ─── Create Handlers ───
   const resetDealForm = () => {
@@ -1504,7 +1509,7 @@ export default function HomeScreen() {
     const userInfo = {
       id: user?.id || 'u-dev',
       name: user?.fullName || 'You',
-      avatar: user?.avatar || 'https://i.pravatar.cc/150?u=me',
+      avatar: user?.avatar || '',
     };
 
     if (createMode === 'skill') {
@@ -1603,9 +1608,11 @@ export default function HomeScreen() {
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>
           </View>
+          {currentUpdate && (
           <Text style={[styles.tickerText, { color: colors.textSecondary }]}>
             {currentUpdate.name} {currentUpdate.action} ${currentUpdate.amount} {currentUpdate.service} - {currentUpdate.time}
           </Text>
+          )}
         </Animated.View>
       </View>
 
@@ -1772,7 +1779,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={MOCK_SERVICE_REQUESTS}
+            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests : []}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}

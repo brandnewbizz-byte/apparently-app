@@ -1,9 +1,9 @@
 import {
-  Play, Radio, Users, Clock, Eye, Flame, Zap, Calendar, ChevronRight,
-  MapPin, Sparkles, MessageCircle, Send, X, Heart, MoreHorizontal,
+  Play, Radio, Clock, Eye, Flame, Zap, Calendar,
+  Sparkles, Send, X, Heart, MoreHorizontal,
 } from 'lucide-react-native';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ImageBackground, Image, Animated, RefreshControl, Dimensions,
@@ -316,7 +316,6 @@ function GoLiveModal({
 
 export default function LiveScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { colors } = useTheme();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const [refreshing, setRefreshing] = useState(false);

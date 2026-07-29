@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
-import { mockUsers } from '@/mocks/data';
 
 interface Message {
   id: string;
@@ -32,31 +31,12 @@ export default function ConversationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [messageText, setMessageText] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hey! Thanks for following up on that investment opportunity.',
-      userId: mockUsers[0].id,
-      timestamp: '2h ago',
-    },
-    {
-      id: '2',
-      text: 'Of course! I wanted to discuss the real estate building project. Are you still interested?',
-      userId: 'me',
-      timestamp: '1h ago',
-    },
-    {
-      id: '3',
-      text: 'Absolutely! The $50,000 investment looks promising. Let\'s schedule a call this Thursday?',
-      userId: mockUsers[0].id,
-      timestamp: '45m ago',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const currentUser = mockUsers[0];
+  const currentUser = { name: 'Unknown User', avatar: '' };
   const myAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
 
   const handleSendMessage = () => {
@@ -108,9 +88,7 @@ export default function ConversationScreen() {
     setMentionQuery('');
   };
 
-  const filteredUsers = mockUsers.filter(user =>
-    user.username.toLowerCase().includes(mentionQuery.toLowerCase())
-  );
+  const filteredUsers: { id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[] = [];
 
   const renderMessage = (message: Message, index: number) => {
     const isMe = message.userId === 'me';

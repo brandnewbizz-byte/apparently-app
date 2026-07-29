@@ -33,6 +33,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTabBar } from '@/contexts/TabBarContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useMarketplace } from '@/contexts/MarketplaceContext';
 import { useBookings } from '@/contexts/BookingsContext';
 import { useServiceRequests } from '@/contexts/ServiceRequestContext';
@@ -45,6 +46,7 @@ import { useUserPosts } from '@/contexts/UserPostsContext';
 import { EXTERNAL_EVENTS } from '@/lib/externalEvents';
 import SkeletonCard from '@/components/SkeletonCard';
 import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
+import { supabase } from '@/lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -79,9 +81,11 @@ interface FeedPost {
   attendees?: number;
   maxAttendees?: number;
   tags: string[];
+  likes: number;
   stats: { saves: number; comments: number };
   viewerCount?: number;
   streamDuration?: string;
+  videoUrl?: string;
   comments_list?: Comment[];
   price?: number | string;
   pricePerNight?: string;
@@ -108,173 +112,9 @@ function formatViewers(n: number): string {
   return String(n);
 }
 
-const MOCK_COMMENTS: Comment[] = [
-  { id: 'c1', user: { name: 'Riley Nomad', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100' }, text: 'This is incredible! 🔥', timestamp: '10m ago' },
-  { id: 'c2', user: { name: 'Coach Ray', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100' }, text: 'Where can I sign up for the next one?', timestamp: '25m ago' },
-  { id: 'c3', user: { name: 'Crafty Kate', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100' }, text: 'Love seeing this kind of content on here 🙌', timestamp: '1h ago' },
-  { id: 'c4', user: { name: 'Marcus Beats', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' }, text: 'Respect! Keep grinding 💪', timestamp: '1h ago' },
-  { id: 'c5', user: { name: 'Lena Wellness', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' }, text: 'The vibes are immaculate ✨', timestamp: '2h ago' },
-];
-
-const FEED_POSTS: FeedPost[] = [
-  // ── LIVE STREAMS ──
-  {
-    id: 'live-1', type: 'live', title: 'Sunday Jazz & Lo-Fi Session 🎷',
-    caption: 'Live from Brooklyn. Chilled beats, good vibes, taking requests.',
-    author: { name: 'Marcus Beats', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' },
-    category: 'Entertainment', timestamp: 'Live now',
-    media: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600',
-    viewerCount: 1247, streamDuration: '42m streaming',
-    tags: ['Jazz', 'Lo-Fi', 'Live'], stats: { saves: 56, comments: 89 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'live-2', type: 'live', title: 'Morning Yoga Flow — All Levels 🧘',
-    caption: 'Join live for a guided flow. Modifications shown for every pose.',
-    author: { name: 'Lena Wellness', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' },
-    category: 'Wellness', timestamp: 'Live now',
-    media: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=600',
-    viewerCount: 892, streamDuration: '18m streaming',
-    tags: ['Yoga', 'Morning', 'Wellness'], stats: { saves: 112, comments: 34 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'live-3', type: 'live', title: 'NYC Night Photography Walk 📸',
-    caption: 'Exploring Times Square at night — gear talk and shooting tips.',
-    author: { name: 'Lisa Captures', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' },
-    category: 'Creative', timestamp: 'Live now',
-    media: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=600',
-    viewerCount: 456, streamDuration: '1h 5m streaming',
-    tags: ['Photography', 'NYC', 'Night'], stats: { saves: 34, comments: 18 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── PHOTO POSTS ──
-  {
-    id: 'photo-1', type: 'photo', category: 'Creative', timestamp: '2h ago',
-    author: { name: 'Crafty Kate', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100' },
-    caption: 'Just unloaded the kiln. This batch came out perfect — loving how the ocean blue glaze settled in the ridges.',
-    media: 'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=600', mediaHeight: 340,
-    tags: ['Ceramics', 'Handmade'], stats: { saves: 52, comments: 15 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'photo-2', type: 'photo', category: 'Fitness', timestamp: '4h ago',
-    author: { name: 'Fit With Zoe', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100' },
-    caption: 'Morning set done by 7. 315x5 felt light today — the program is working.',
-    media: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=600', mediaHeight: 340,
-    tags: ['Training', 'Morning'], stats: { saves: 23, comments: 8 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'photo-3', type: 'photo', category: 'Dining', timestamp: '5h ago',
-    author: { name: 'Chef Tony', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' },
-    caption: 'Pistachio-crusted salmon with saffron risotto. Off-menu special tonight only.',
-    media: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=600', mediaHeight: 340,
-    tags: ['Cooking', 'Seafood'], stats: { saves: 78, comments: 31 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'photo-4', type: 'photo', category: 'Travel', timestamp: '8h ago',
-    author: { name: 'Riley Nomad', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100' },
-    caption: 'Golden hour hits different in Santorini. Never gets old.',
-    media: 'https://images.unsplash.com/photo-1613395877344-13d4a8e0d49e?w=600', mediaHeight: 420,
-    location: 'Santorini, Greece',
-    tags: ['Travel', 'Sunset', 'Greece'], stats: { saves: 134, comments: 42 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── VIDEO POSTS ──
-  {
-    id: 'video-1', type: 'video', category: 'Entertainment', timestamp: '1h ago',
-    author: { name: 'DJ Aria', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100' },
-    caption: 'Preview of Friday\'s rooftop set. This transition has been living rent-free in my head all week.',
-    media: 'https://images.unsplash.com/photo-1571266028243-e4733b0f0bb0?w=600', mediaHeight: 420,
-    tags: ['DJ', 'Music', 'Preview'], stats: { saves: 67, comments: 23 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'video-2', type: 'video', category: 'Fitness', timestamp: '6h ago',
-    author: { name: 'Coach Ray', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100' },
-    caption: 'Quick form check — 3 common deadlift mistakes and how to fix them in 60 seconds.',
-    media: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=600', mediaHeight: 420,
-    tags: ['Tutorial', 'Form', 'Fitness'], stats: { saves: 91, comments: 34 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── TEXT POSTS ──
-  {
-    id: 'text-1', type: 'text', category: 'Wellness', timestamp: '3h ago',
-    author: { name: 'Lena Wellness', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' },
-    caption: 'Day 30 of no sugar. Here\'s what I learned:\n\n1. First week is hell. Push through.\n2. Fruit tastes like candy now. No joke.\n3. Sleep improved dramatically by week 2.\n4. Skin cleared up. Didn\'t expect that.\n5. Energy is steady all day — no crashes.\n\nIf you\'re on the fence, just try 2 weeks.',
-    tags: ['Health', 'No Sugar', 'Journey'], stats: { saves: 203, comments: 67 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'text-2', type: 'text', category: 'Creative', timestamp: '9h ago',
-    author: { name: 'Lisa Captures', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' },
-    caption: 'Unpopular opinion: you don\'t need a $2,000 camera to take great photos. The best camera is the one you have with you. I shot my first paid gig on a used DSLR I got for $300.\n\nLearn composition first. Gear second.',
-    tags: ['Photography', 'Advice'], stats: { saves: 156, comments: 48 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── EVENTS ──
-  {
-    id: 'event-1', type: 'event', caption: 'Drinks included with ticket. Skyline views from the 25th floor.',
-    author: { name: 'DJ Aria', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100' },
-    category: 'Entertainment', timestamp: '3h ago',
-    date: 'Fri · 8:00 PM', location: 'SoHo Rooftop', attendees: 45, maxAttendees: 60,
-    media: 'https://images.unsplash.com/photo-1571266028243-e4733b0f0bb0?w=600', mediaHeight: 280,
-    tags: ['DJ', 'Rooftop', 'Music'], stats: { saves: 67, comments: 23 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'event-2', type: 'event', caption: 'High intensity interval training. Modifications for all levels. Bring water!',
-    author: { name: 'Fit With Zoe', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100' },
-    category: 'Fitness', timestamp: '6h ago',
-    date: 'Daily · 7:00 AM', location: 'Hudson Yards', attendees: 18, maxAttendees: 25,
-    tags: ['HIIT', 'Bootcamp', 'Morning'], stats: { saves: 34, comments: 9 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── PLANS ──
-  {
-    id: 'plan-1', type: 'plan', caption: 'All levels welcome — bring your own mat. We\'ll flow as the sun comes up.',
-    author: { name: 'Lena Wellness', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' },
-    category: 'Wellness', timestamp: '2h ago',
-    date: 'Tomorrow · 6:30 AM', location: 'Central Park, NYC', attendees: 12, maxAttendees: 20,
-    media: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=600', mediaHeight: 280,
-    tags: ['Yoga', 'Outdoors', 'Morning'], stats: { saves: 28, comments: 7 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'plan-2', type: 'plan', caption: 'Hit 4 spots in one afternoon. Fixed-price menu at each stop.',
-    author: { name: 'Chef Tony', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' },
-    category: 'Dining', timestamp: '5h ago',
-    date: 'Sat · 11:00 AM', location: 'East Village, NYC', attendees: 8, maxAttendees: 15,
-    tags: ['Brunch', 'Food Tour', 'Weekend'], stats: { saves: 45, comments: 12 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'plan-3', type: 'plan', caption: 'Capture golden hour at Brooklyn Bridge. Bring any camera — phone, DSLR, film.',
-    author: { name: 'Lisa Captures', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100' },
-    category: 'Creative', timestamp: '8h ago',
-    date: 'Sun · 6:00 PM', location: 'Brooklyn Bridge', attendees: 5, maxAttendees: 12,
-    tags: ['Photography', 'Sunset', 'Brooklyn'], stats: { saves: 19, comments: 4 },
-    comments_list: MOCK_COMMENTS,
-  },
-  // ── ACHIEVEMENTS ──
-  {
-    id: 'achieve-1', type: 'achievement', caption: '30 consecutive days of yoga. Never missed a morning. Feeling stronger, calmer, and more flexible than ever. This practice changed my life and I\'m never going back.',
-    author: { name: 'Marcus Beats', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' },
-    category: 'Wellness', timestamp: '2h ago',
-    media: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=600', mediaHeight: 300,
-    tags: ['Yoga', 'Streak', 'Milestone'], stats: { saves: 0, comments: 31 },
-    comments_list: MOCK_COMMENTS,
-  },
-  {
-    id: 'achieve-2', type: 'achievement', caption: '1:52 finish at the Brooklyn Half. The crowd energy was unreal — strangers cheering your name for 13 miles. Already signed up for the full marathon in November.',
-    author: { name: 'Fit With Zoe', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100' },
-    category: 'Fitness', timestamp: '12h ago',
-    tags: ['Running', 'Half Marathon', 'Personal Best'], stats: { saves: 0, comments: 47 },
-    comments_list: MOCK_COMMENTS,
-  },
-];
+// All mock data removed — feed is live-only from Supabase + user posts
+const MOCK_COMMENTS: Comment[] = [];
+const FEED_POSTS: FeedPost[] = [];
 
 const FILTERS = [
   { key: 'all', label: 'All', icon: FileText },
@@ -311,7 +151,9 @@ function PostDetailModal({
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
   const [commentText, setCommentText] = useState('');
-  const [liked, setLiked] = useState(false);
+  const { interactions, toggleLike } = useSocial();
+  const interaction = interactions[post.id];
+  const liked = interaction?.isLiked ?? false;
   const [kbHeight, setKbHeight] = useState(0);
   const [localComments, setLocalComments] = useState<Comment[]>(post.comments_list || []);
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
@@ -323,13 +165,16 @@ function PostDetailModal({
     return () => { show.remove(); hide.remove(); };
   }, []);
 
+  const { user: currentUser } = useAuth();
+  const commentAvatar = currentUser?.avatar || '';
+
   const handleSendComment = () => {
     const trimmed = commentText.trim();
     if (!trimmed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newComment: Comment = {
       id: `c-new-${Date.now()}`,
-      user: { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' },
+      user: { name: 'You', avatar: commentAvatar },
       text: trimmed,
       timestamp: 'Just now',
     };
@@ -403,12 +248,15 @@ function PostDetailModal({
                     style={[styles.modalMedia, { height: post.type === 'live' ? 280 : 400 }]}
                     resizeMode="cover"
                   />
-                  {post.type === 'video' && (
-                    <View style={styles.playOverlay}>
+                  {post.type === 'video' && post.videoUrl && (
+                    <TouchableOpacity style={styles.playOverlay} onPress={() => {
+                      // TODO: wire expo-av video player
+                      Alert.alert('Coming Soon', 'Video playback will be available soon.');
+                    }}>
                       <View style={[styles.playBtn, { width: 56, height: 56, borderRadius: 28 }]}>
                         <Play size={24} color="#FFF" fill="#FFF" style={{ marginLeft: 2 }} />
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   )}
                   {post.type === 'live' && (
                     <View style={styles.liveOverlay}>
@@ -467,7 +315,7 @@ function PostDetailModal({
               <View style={[styles.detailActions, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
                 <TouchableOpacity
                   style={styles.detailActionBtn}
-                  onPress={() => { setLiked(!liked); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  onPress={() => { toggleLike(post.id, post.likes ?? 0); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                 >
                   <Star size={20} color={liked ? '#EF4444' : colors.textTertiary} fill={liked ? '#EF4444' : 'none'} />
                 </TouchableOpacity>
@@ -523,7 +371,7 @@ function PostDetailModal({
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.bottom}>
           <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 4 }]}>
             <RNImage
-              source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }}
+              source={{ uri: commentAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }}
               style={styles.commentInputAvatar}
             />
             <TextInput
@@ -577,7 +425,10 @@ function PostCard({
   onDelete?: (postId: string) => void;
 }) {
   const [saved, setSaved] = useState(false);
-  const [liked, setLiked] = useState(false);
+  const { interactions, toggleLike } = useSocial();
+  const interaction = interactions[post.id];
+  const liked = interaction?.isLiked ?? false;
+  const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
 
   const handleSave = () => {
     setSaved(!saved);
@@ -586,15 +437,17 @@ function PostCard({
   };
 
   const handleLike = () => {
-    setLiked(!liked);
+    // Pass post.likes as initialLikeCount so aggregated posts (marketplace, bundles, etc.)
+    // don't reset to 0 on first interaction
+    toggleLike(post.id, post.likes ?? 0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const handleMenuPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const options: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
-      { text: 'Report', style: 'destructive', onPress: () => {} },
-      { text: 'Hide', onPress: () => {} },
+      { text: 'Report', style: 'destructive', onPress: () => { Alert.alert('Report submitted', 'Thank you. We will review this content.'); } },
+      { text: 'Hide', onPress: () => { onDelete?.(post.id); } },
       { text: 'Copy Link', onPress: () => { Share.share({ message: `Check this out: ${post.caption}` }); } },
     ];
     if (onDelete) {
@@ -621,8 +474,6 @@ function PostCard({
     options.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Post Options', `By ${post.author.name}`, options, { cancelable: true });
   };
-
-  const likeCount = (post.price != null ? Number(post.price) : post.stats.saves) + (liked ? 1 : 0);
 
   const typeLabel = (() => {
     switch (post.type) {
@@ -673,7 +524,16 @@ function PostCard({
             ]}
             resizeMode="cover"
           />
-          {post.type === 'video' && (
+          {post.type === 'video' && post.videoUrl && (
+            <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
+              Alert.alert('Coming Soon', 'Video playback will be available soon.');
+            }}>
+              <View style={igCardStyles.playBtn}>
+                <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
+              </View>
+            </TouchableOpacity>
+          )}
+          {post.type === 'video' && !post.videoUrl && (
             <View style={igCardStyles.playOverlay}>
               <View style={igCardStyles.playBtn}>
                 <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
@@ -729,7 +589,7 @@ function PostCard({
       <View style={igCardStyles.likesRow}>
         <Text style={[igCardStyles.likesText, { color: colors.text }]}>
           Liked by <Text style={{ fontWeight: '700' }}>you</Text> and{' '}
-          <Text style={{ fontWeight: '700' }}>{likeCount > 0 ? likeCount : 23} others</Text>
+          <Text style={{ fontWeight: '700' }}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
         </Text>
       </View>
 
@@ -829,9 +689,12 @@ export default function FeedScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
+  const { user: authUser } = useAuth();
+  const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost } = useSocial();
+  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory } = useSocial();
   const [activeFilter, setActiveFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -841,6 +704,15 @@ export default function FeedScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [createCategory, setCreateCategory] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+
+  // Load saved post IDs from Supabase
+  useEffect(() => {
+    if (!authUser?.id) return;
+    supabase.from('saved_posts').select('post_id').eq('user_id', authUser.id).then(({ data, error }) => {
+      if (!error && data) setSavedIds(new Set((data as any[]).map(r => r.post_id)));
+    });
+  }, [authUser?.id]);
+
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
@@ -898,9 +770,11 @@ export default function FeedScreen() {
     // Priority order: user-created posts first, then context data (preferred over hardcoded), then hardcoded last
     userPosts.forEach(addPost);
 
-    // Context data — preferred over hardcoded
+    // Context data — preferred over hardcoded, but skip the current user's own
+    // bundles, marketplace listings, rentals, swaps, requests & connections.
+    // The feed is for discovering other users' content.
     const contextPosts = [...marketplacePosts, ...rentalPosts, ...swapFeedPosts, ...connectionPosts, ...requestPosts, ...bundlePosts];
-    contextPosts.forEach(addPost);
+    contextPosts.filter(p => p.author.name !== 'You').forEach(addPost);
 
     // Hardcoded posts — lowest priority, skip if context data already covered the same content
     FEED_POSTS.forEach(addPost);
@@ -908,12 +782,16 @@ export default function FeedScreen() {
     let all = deduped;
     if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      all = all.filter(p => (p.caption || p.title || '').toLowerCase().includes(q) || p.tags?.some(t => t.toLowerCase().includes(q)));
+    }
     // Shuffle on refresh
     if (refreshKey > 0 && activeFilter === 'all' && !tagFilter) {
       all = [...all].sort(() => Math.random() - 0.5);
     }
     return all;
-  }, [activeFilter, userPosts, tagFilter, refreshKey, marketplacePosts, rentalPosts, swapFeedPosts, connectionPosts, requestPosts, bundlePosts]);
+  }, [activeFilter, userPosts, tagFilter, searchQuery, refreshKey, marketplacePosts, rentalPosts, swapFeedPosts, connectionPosts, requestPosts, bundlePosts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -925,7 +803,19 @@ export default function FeedScreen() {
   const handleSavePost = (postId: string) => {
     setSavedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(postId)) next.delete(postId); else next.add(postId);
+      if (next.has(postId)) {
+        next.delete(postId);
+        // Remove from Supabase
+        if (authUser?.id) supabase.from('saved_posts').delete().eq('user_id', authUser.id).eq('post_id', postId).then(({ error }) => {
+          if (error) console.warn('[Feed] Unsave failed:', error.message);
+        });
+      } else {
+        next.add(postId);
+        // Save to Supabase
+        if (authUser?.id) supabase.from('saved_posts').insert({ user_id: authUser.id, post_id: postId, created_at: new Date().toISOString() }).then(({ error }) => {
+          if (error) console.warn('[Feed] Save failed:', error.message);
+        });
+      }
       return next;
     });
   };
@@ -946,12 +836,16 @@ export default function FeedScreen() {
   };
 
   const handleCelebrate = (postId: string) => {
+    const isAdding = !celebratedIds.has(postId);
     setCelebratedIds((prev) => {
       const next = new Set(prev);
       if (next.has(postId)) next.delete(postId); else next.add(postId);
       return next;
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (isAdding) {
+      Alert.alert('🎉 Celebrated!', 'You showed some love.');
+    }
   };
 
   const handleSharePost = async (post: FeedPost) => {
@@ -994,7 +888,7 @@ export default function FeedScreen() {
       type: 'photo',
       author: {
         name: 'You',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+        avatar: userAvatar,
       },
       category: data.category || createCategory || 'General',
       timestamp: 'Just now',
@@ -1002,12 +896,16 @@ export default function FeedScreen() {
       media: data.mediaUri,
       mediaWidth: displayWidth,
       mediaHeight: displayHeight,
+      likes: 0,
       tags: createCategory ? [createCategory] : [],
       stats: { saves: 0, comments: 0 },
     };
 
     // Add to feed
     setUserPosts((prev) => [newPost, ...prev]);
+
+    // Persist to SocialContext so posts appear in getAllPosts() and profile grid
+    createPost(data.caption, data.mediaUri, undefined);
 
     // Share to profile
     addUserPost({
@@ -1192,6 +1090,59 @@ export default function FeedScreen() {
         ListHeaderComponent={() => (
           <View>
             <View style={{ height: 6 }} />
+
+            {/* ── Stories Row ── */}
+            {(feedStories.length > 0 || userStories.length > 0) && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 12, gap: 12, paddingVertical: 4, marginBottom: 12 }}>
+                {/* Your Story */}
+                <TouchableOpacity
+                  onPress={() => router.push({ pathname: '/create-content', params: { type: 'story' } })}
+                  style={{ alignItems: 'center', gap: 4, width: 68 }}>
+                  <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' }}>
+                    <Plus size={22} color={colors.accent} />
+                  </View>
+                  <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>Your Story</Text>
+                </TouchableOpacity>
+                {/* Other stories */}
+                {[...userStories, ...feedStories].slice(0, 10).map(story => {
+                  const isMine = userStories.some(s => s.id === story.id);
+                  return (
+                    <TouchableOpacity key={story.id}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                      style={{ alignItems: 'center', gap: 4, width: 68 }}>
+                      <View style={{ width: 68, height: 68, borderRadius: 34, padding: 2.5, borderWidth: 2, borderColor: story.viewed ? colors.border : '#E04040' }}>
+                        <RNImage source={{ uri: (story.user?.avatar || story.imageUrl) }}
+                          style={{ width: '100%', height: '100%', borderRadius: 32 }} />
+                      </View>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>
+                        {isMine ? 'You' : (story.user?.name || story.user?.username || 'User')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* ── Search Bar ── */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.border }}>
+                <Search size={16} color={colors.textTertiary} />
+                <TextInput
+                  style={{ flex: 1, marginLeft: 8, fontSize: 14, color: colors.text }}
+                  placeholder="Search posts, bundles, services..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="search"
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <X size={16} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
 
             {/* ── For You Row ── */}
             {activeFilter === 'all' && !tagFilter && (

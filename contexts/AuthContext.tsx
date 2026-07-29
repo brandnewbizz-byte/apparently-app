@@ -2,6 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { File as ExpoFile } from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import type { Session } from '@supabase/supabase-js';
@@ -54,6 +55,7 @@ type ProfilesRow = {
   username?: string | null;
   phone?: string | null;
   email?: string | null;
+  avatar?: string | null;
 };
 
 
@@ -93,7 +95,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, phone, email')
+        .select('id, full_name, username, phone, email, avatar')
         .eq('id', userId)
         .maybeSingle();
 
@@ -118,7 +120,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const phone = dbProfile?.phone ?? cached?.phone ?? null;
       const username = dbProfile?.username ?? cached?.username ?? null;
 
-      const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`;
+      // Use DB avatar if set, then cached avatar, fallback to DiceBear
+      const dbAvatar = dbProfile?.avatar || null;
+      const cachedAvatar = cached?.avatar || null;
+      const diceBearAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`;
+      const avatar = dbAvatar || cachedAvatar || diceBearAvatar;
       const fullName = dbName ?? cached?.fullName ?? null;
       const needsName = !fullName || fullName.trim().length === 0;
 
@@ -431,7 +437,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         logger.error('Auth', 'Sign out error', { message: error.message });
       }
       setProfileNeedsName(false);
-      setState(defaultState);
+      setEmailVerificationRequired(false);
+      setPendingVerificationEmail(null);
+      setState({
+        session: null,
+        user: null,
+        isAuthenticated: false,
+        emailVerificationRequired: false,
+        pendingVerificationEmail: null,
+      });
       try {
         await AsyncStorage.removeItem(PROFILE_CACHE_KEY);
       } catch (e) {
@@ -509,6 +523,100 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to save name';
       logger.error('Auth', 'saveFullNameOnce exception', { message });
+      setAuthError(message);
+      return { success: false, error: message };
+    }
+  };
+
+  const updateAvatar = async (imageUri: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setAuthError(null);
+
+      if (!state.session?.user) {
+        const msg = 'Not signed in.';
+        setAuthError(msg);
+        return { success: false, error: msg };
+      }
+
+      const userId = state.session.user.id;
+      logger.info('Auth', 'Updating avatar', { userId });
+
+      // Read image file as base64 using expo-file-system new API
+      let base64Data: string;
+      try {
+        base64Data = await new ExpoFile(imageUri).base64();
+      } catch (readErr) {
+        logger.error('Auth', 'Failed to read image file', { readErr });
+        return { success: false, error: 'Failed to read the selected image. Please try again.' };
+      }
+
+      // Determine MIME type from URI
+      const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+        webp: 'image/webp',
+      };
+      const mimeType = mimeMap[ext] || 'image/jpeg';
+      const dataUri = `data:${mimeType};base64,${base64Data}`;
+
+      // Optimistic update
+      const optimisticUser: UserProfile | null = state.user
+        ? { ...state.user, avatar: dataUri }
+        : null;
+      if (optimisticUser) {
+        setState((prev) => ({ ...prev, user: optimisticUser }));
+        await saveProfileCache(optimisticUser);
+      }
+
+      // Persist to database — update BOTH profiles and users tables
+      let dbSaved = false;
+      try {
+        const abortController = new AbortController();
+        // Save to profiles table (used by AuthContext)
+        const profileResult = await withAbortSignal(
+          supabase
+            .from('profiles')
+            .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
+          abortController.signal
+        );
+        // Also save to users table (used by SocialContext, feed, inbox, PostCard, etc.)
+        const userResult = await withAbortSignal(
+          supabase
+            .from('users')
+            .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
+          abortController.signal
+        );
+        if (!profileResult.error && !userResult.error) {
+          dbSaved = true;
+          logger.info('Auth', 'Avatar saved to both tables', { userId });
+        } else {
+          const errs = [profileResult.error?.message, userResult.error?.message]
+            .filter(Boolean)
+            .join('; ');
+          logger.error('Auth', 'profiles/users upsert(avatar) errors', { errors: errs });
+        }
+      } catch (e: any) {
+        if (isAbortError(e)) {
+          logger.info('Auth', 'Avatar upsert aborted');
+        } else {
+          logger.error('Auth', 'profiles upsert exception', { e });
+        }
+      }
+
+      if (!dbSaved) {
+        return {
+          success: true,
+          error: 'Saved locally. We will retry syncing to your profile later.',
+        };
+      }
+
+      return { success: true };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to update avatar';
+      logger.error('Auth', 'updateAvatar exception', { message });
       setAuthError(message);
       return { success: false, error: message };
     }
@@ -604,6 +712,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     isResendingVerification,
     displayName,
     saveFullNameOnce,
+    updateAvatar,
     signUp,
     signIn,
     signOut,

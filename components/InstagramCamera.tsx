@@ -1,6 +1,7 @@
 // InstagramCamera.tsx — Full-screen camera viewfinder
 // Flash toggle · Flip camera · Grid overlay · Pinch-to-zoom · Capture
 // 9:16 crop overlay · Swipe-to-dismiss · Post-capture crop
+// v2 — iPhone-quality: continuous AF, tap-to-focus, lens stepping, focus indicator
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -30,7 +31,9 @@ const FEED_ASPECT = 9 / 16;               // 9:16 Reels-style
 const CROP_OVERLAY_TOP = (SCREEN_HEIGHT - SCREEN_WIDTH / FEED_ASPECT) / 2;
 const CROP_OVERLAY_BOTTOM = CROP_OVERLAY_TOP;
 const SWIPE_THRESHOLD = 100;               // px to trigger dismiss
-const SWIPE_VELOCITY_THRESHOLD = 300;
+const FOCUS_SQUARE_SIZE = 72;              // size of tap-to-focus indicator
+const FOCUS_ANIM_DURATION = 200;           // ms for focus square appear
+const FOCUS_FADE_DELAY = 800;             // ms before focus square fades out
 
 // ── Types ──
 export interface CapturedMedia {
@@ -46,6 +49,13 @@ interface Props {
   onPickFromGallery: () => void;
 }
 
+// Lens presets (0-1 range mapped to device zoom)
+const LENS_PRESETS = [
+  { label: '0.5', zoom: 0 },       // Ultra-wide
+  { label: '1', zoom: 1 / 9 },     // Standard wide (default)
+  { label: '2', zoom: 2 / 9 },     // 2× tele
+] as const;
+
 // ── Component ──
 export default function InstagramCamera({ visible, onClose, onCapture, onPickFromGallery }: Props) {
   const cameraRef = useRef<CameraView>(null);
@@ -57,10 +67,16 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const [isReady, setIsReady] = useState(false);
   const [permission, setPermission] = useState(false);
 
-  // iPhone lens mapping: zoom 0 = 0.5× (ultra-wide), ∼0.11 = 1× (standard wide), 1 = ∼5×
-  const DEFAULT_ZOOM = 1 / 9;
+  // ── Zoom with lens-step awareness ──
+  const DEFAULT_ZOOM = 1 / 9; // 1× standard lens
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const pinchRef = useRef({ initialDistance: 0, initialZoom: 0 });
+
+  // ── Tap-to-focus state ──
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
+  const focusOpacity = useRef(new Animated.Value(0)).current;
+  const focusScale = useRef(new Animated.Value(0.5)).current;
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Swipe-to-dismiss state ──
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
@@ -81,9 +97,46 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
       setCapturedUri(null);
       setIsReady(false);
       setZoom(DEFAULT_ZOOM);
+      setFocusPoint(null);
       swipeTranslateX.setValue(0);
     }
   }, [visible]);
+
+  // ── Tap-to-focus animation ──
+  const triggerFocusIndicator = useCallback((x: number, y: number) => {
+    // Cancel any existing animation
+    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+    
+    setFocusPoint({ x, y });
+    focusScale.setValue(1.2);
+    focusOpacity.setValue(0);
+    
+    // Animate in: scale down + fade in (emulates iPhone focus lock)
+    Animated.parallel([
+      Animated.spring(focusScale, {
+        toValue: 1.0,
+        tension: 200,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.timing(focusOpacity, {
+        toValue: 0.9,
+        duration: FOCUS_ANIM_DURATION,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Animate out after delay
+    focusTimerRef.current = setTimeout(() => {
+      Animated.timing(focusOpacity, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start(() => {
+        setFocusPoint(null);
+      });
+    }, FOCUS_FADE_DELAY);
+  }, [focusOpacity, focusScale]);
 
   // ── Pinch-to-zoom helpers ──
   const getTouchDistance = (touches: React.TouchList | any[]) => {
@@ -96,13 +149,25 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const handleTouchStart = (e: GestureResponderEvent) => {
     const touches = e.nativeEvent.touches;
     if (touches && touches.length === 2) {
+      // Pinch-to-zoom
       pinchRef.current.initialDistance = getTouchDistance(touches);
       pinchRef.current.initialZoom = zoom;
       swipeRef.current.active = false;
     } else if (touches && touches.length === 1) {
-      // Start tracking swipe
-      swipeRef.current.startX = touches[0].pageX;
-      swipeRef.current.currentX = touches[0].pageX;
+      // Single tap → set focus point
+      const { pageX, pageY } = touches[0];
+      
+      // Only focus within the 9:16 crop area
+      if (pageY > CROP_OVERLAY_TOP && pageY < SCREEN_HEIGHT - CROP_OVERLAY_BOTTOM) {
+        triggerFocusIndicator(pageX, pageY);
+        
+        // Trigger autofocus on tap (refocus at point)
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+
+      // Also track swipe
+      swipeRef.current.startX = pageX;
+      swipeRef.current.currentX = pageX;
       swipeRef.current.active = true;
     }
   };
@@ -134,7 +199,6 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
     if (swipeRef.current.active) {
       const dx = swipeRef.current.currentX - swipeRef.current.startX;
       if (dx < -SWIPE_THRESHOLD) {
-        // Swiped left enough — dismiss
         Animated.timing(swipeTranslateX, {
           toValue: -SCREEN_WIDTH,
           duration: 200,
@@ -144,7 +208,6 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         });
         return;
       }
-      // Spring back
       Animated.spring(swipeTranslateX, {
         toValue: 0,
         tension: 100,
@@ -157,14 +220,20 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
     swipeRef.current.active = false;
   };
 
+  // ── Lens step tap (0.5× / 1× / 2×) ──
+  const handleLensStep = useCallback((newZoom: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setZoom(newZoom);
+  }, []);
+
   // ── Capture photo ──
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current || !isReady) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
+      // Take at maximum quality — no skipProcessing, full quality
       const photo = await cameraRef.current.takePictureAsync({
         quality: 1.0,
-        skipProcessing: false,
       });
       const { width: rawW, height: rawH } = photo;
 
@@ -224,6 +293,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const handleRetake = () => {
     setCapturedUri(null);
     setZoom(DEFAULT_ZOOM);
+    setFocusPoint(null);
   };
 
   // ── Flash cycling: off → on → auto → off ──
@@ -312,9 +382,10 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         mode="picture"
         ratio="4:3"
         zoom={zoom}
+        autofocus="off"
         onCameraReady={() => setIsReady(true)}
       >
-        {/* Pinch-to-zoom + swipe touch layer — auto so it actually receives events */}
+        {/* Pinch-to-zoom + tap-to-focus + swipe touch layer */}
         <View
           style={StyleSheet.absoluteFill}
           onTouchStart={handleTouchStart}
@@ -322,6 +393,28 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
           onTouchEnd={handleTouchEnd}
           pointerEvents="auto"
         />
+
+        {/* ── Tap-to-focus indicator (iPhone-style yellow square) ── */}
+        {focusPoint && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.focusSquare,
+              {
+                left: focusPoint.x - FOCUS_SQUARE_SIZE / 2,
+                top: focusPoint.y - FOCUS_SQUARE_SIZE / 2,
+                opacity: focusOpacity,
+                transform: [{ scale: focusScale }],
+              },
+            ]}
+          >
+            {/* Outer square */}
+            <View style={styles.focusSquareOuter} />
+            {/* Inner crosshair */}
+            <View style={styles.focusCrosshairH} />
+            <View style={styles.focusCrosshairV} />
+          </Animated.View>
+        )}
 
         {/* Grid overlay */}
         {showGrid && (
@@ -344,7 +437,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
           </View>
         )}
 
-        {/* ── 9:16 crop overlay matte (Instagram-style framing guide) ── */}
+        {/* ── 9:16 crop overlay matte ── */}
         <View style={styles.cropMatteTop} pointerEvents="none" />
         <View style={styles.cropMatteBottom} pointerEvents="none" />
         <View style={styles.cropBorderTop} pointerEvents="none" />
@@ -380,10 +473,31 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
           </View>
         </View>
 
-        {/* Zoom indicator */}
-        <View style={styles.zoomIndicator}>
-          <Text style={styles.zoomText}>{(0.5 + 4.5 * zoom).toFixed(1)}×</Text>
+        {/* ── Lens stepping buttons (iPhone-style) ── */}
+        <View style={styles.lensRow} pointerEvents="box-none">
+          {LENS_PRESETS.map((preset) => {
+            const isActive = Math.abs(zoom - preset.zoom) < 0.01;
+            return (
+              <TouchableOpacity
+                key={preset.label}
+                style={[styles.lensBtn, isActive && styles.lensBtnActive]}
+                onPress={() => handleLensStep(preset.zoom)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.lensLabel, isActive && styles.lensLabelActive]}>
+                  {preset.label}×
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
+
+        {/* Zoom indicator (shows during pinch or when not at preset) */}
+        {!LENS_PRESETS.some(p => Math.abs(zoom - p.zoom) < 0.01) && (
+          <View style={styles.zoomIndicator}>
+            <Text style={styles.zoomText}>{(0.5 + 4.5 * zoom).toFixed(1)}×</Text>
+          </View>
+        )}
 
         {/* Loading overlay */}
         {!isReady && (
@@ -511,6 +625,70 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
+  // ── Tap-to-focus indicator ──
+  focusSquare: {
+    position: 'absolute',
+    width: FOCUS_SQUARE_SIZE,
+    height: FOCUS_SQUARE_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 25,
+  },
+  focusSquareOuter: {
+    position: 'absolute',
+    width: FOCUS_SQUARE_SIZE,
+    height: FOCUS_SQUARE_SIZE,
+    borderWidth: 2,
+    borderColor: '#FFD700',  // iPhone-style yellow
+    borderRadius: 2,
+    backgroundColor: 'transparent',
+  },
+  focusCrosshairH: {
+    position: 'absolute',
+    width: 28,
+    height: 1,
+    backgroundColor: '#FFD700',
+    borderRadius: 0.5,
+  },
+  focusCrosshairV: {
+    position: 'absolute',
+    width: 1,
+    height: 28,
+    backgroundColor: '#FFD700',
+    borderRadius: 0.5,
+  },
+
+  // ── Lens stepping ──
+  lensRow: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 120 : 100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 20,
+    padding: 3,
+    zIndex: 14,
+  },
+  lensBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 17,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  lensBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  lensLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  lensLabelActive: {
+    color: '#FFF',
+  },
+
   // ── 9:16 Crop Matte Overlay ──
   cropMatteTop: {
     position: 'absolute',
@@ -588,7 +766,7 @@ const styles = StyleSheet.create({
   // ── Zoom indicator ──
   zoomIndicator: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 140 : 120,
+    top: Platform.OS === 'ios' ? 170 : 150,
     alignSelf: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
     paddingHorizontal: 14,
