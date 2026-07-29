@@ -82,7 +82,7 @@ export function productToFeedPost(product: Product): AggregatedFeedPost {
       name: product.sellerName,
       avatar: product.sellerAvatar || '',
     },
-    authorId: product.userId,
+    authorId: product.sellerId,
     category: 'Marketplace',
     timestamp: timeAgo,
     caption: product.title,
