@@ -54,26 +54,57 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const loadSkills = async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed: UserSkill[] = JSON.parse(stored);
-          const storedIds = new Set(parsed.map((s) => s.id));
-          const merged = [
-            ...parsed,
-            ...SEED_SKILLS.filter((s) => !storedIds.has(s.id)),
-          ];
-          setSkills(merged);
-          setMySkills(parsed.filter((s) => s.creatorId));
+        const { data, error } = await supabase
+          .from('skills')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (cancelled) return;
+
+        if (error) {
+          logger.error('SkillContext', 'Failed to fetch skills from Supabase', { error });
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setSkills(JSON.parse(stored));
+          return;
         }
+
+        const liveSkills: UserSkill[] = (data || []).map((row: any) => ({
+          id: row.id,
+          title: row.title || '',
+          description: row.description || '',
+          icon: row.icon || '🛠️',
+          price: row.price || 0,
+          originalPrice: row.original_price || row.price || 0,
+          imageUrl: row.image_url || '',
+          category: row.category || '',
+          tags: row.tags || [],
+          creatorId: row.creator_id || '',
+          creator: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '', rating: 0, reviews: 0 },
+          status: row.status || 'available',
+          grabCount: row.grab_count || 0,
+          createdAt: row.created_at || new Date().toISOString(),
+          availableCount: row.available_count || 1,
+        }));
+
+        setSkills(liveSkills);
+        setMySkills(liveSkills.filter((s) => s.creatorId));
+        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveSkills)); } catch {}
       } catch (e) {
         logger.error('SkillContext', 'Failed to load skills', { e });
+        try {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setSkills(JSON.parse(stored));
+        } catch {}
       } finally {
-        setIsLoaded(true);
+        if (!cancelled) setIsLoaded(true);
       }
     };
     loadSkills();
+    return () => { cancelled = true; };
   }, []);
 
   const saveSkills = useCallback(async (updatedSkills: UserSkill[]) => {

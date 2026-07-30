@@ -81,22 +81,58 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load persisted requests from AsyncStorage on mount
+  // Load requests from Supabase on mount (live backend)
   useEffect(() => {
+    let cancelled = false;
     const loadRequests = async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed: ServiceRequest[] = JSON.parse(stored);
-          setRequests(parsed);
+        const { data, error } = await supabase
+          .from('service_requests')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (cancelled) return;
+
+        if (error) {
+          logger.error('ServiceRequestContext', 'Failed to fetch from Supabase', { error });
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setRequests(JSON.parse(stored));
+          return;
         }
+
+        const liveRequests: ServiceRequest[] = (data || []).map((row: any) => ({
+          id: row.id,
+          title: row.title || '',
+          description: row.description || '',
+          category: row.category || 'other',
+          location: row.location || '',
+          date: row.date || '',
+          time: row.time || undefined,
+          budgetMin: row.budget_min || 0,
+          budgetMax: row.budget_max || 0,
+          status: row.status || 'open',
+          tags: row.tags || [],
+          createdAt: row.created_at || new Date().toISOString(),
+          creatorId: row.creator_id || '',
+          createdBy: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '' },
+          responders: row.responders || 0,
+        }));
+
+        setRequests(liveRequests);
+        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveRequests)); } catch {}
       } catch (e) {
         logger.error('ServiceRequestContext', 'Failed to load requests', { e });
+        try {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setRequests(JSON.parse(stored));
+        } catch {}
       } finally {
-        setIsLoaded(true);
+        if (!cancelled) setIsLoaded(true);
       }
     };
     loadRequests();
+    return () => { cancelled = true; };
   }, []);
 
   // Save requests to AsyncStorage whenever they change (after initial load)

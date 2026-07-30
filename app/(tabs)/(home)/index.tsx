@@ -127,14 +127,15 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
 
 
 
-const LIFESTYLE_CATEGORIES: LifestyleCategory[] = [
-  { id: 'wellness', title: 'Wellness', icon: Heart, color: '#EC4899', count: 24, image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=400' },
-  { id: 'fitness', title: 'Fitness', icon: Dumbbell, color: '#10B981', count: 18, image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400' },
-  { id: 'dining', title: 'Dining', icon: Utensils, color: '#F59E0B', count: 32, image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400' },
-  { id: 'travel', title: 'Travel', icon: Plane, color: '#3B82F6', count: 15, image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400' },
-  { id: 'entertainment', title: 'Entertainment', icon: Music, color: '#8B5CF6', count: 28, image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400' },
-  { id: 'creative', title: 'Creative', icon: Palette, color: '#EF4444', count: 12, image: 'https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b?w=400' },
-];
+// Category metadata lookup (static UI mapping — actual data comes from Supabase)
+const CATEGORY_META: Record<string, { icon: any; color: string; image: string }> = {
+  wellness: { icon: Heart, color: '#EC4899', image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=400' },
+  fitness: { icon: Dumbbell, color: '#10B981', image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400' },
+  dining: { icon: Utensils, color: '#F59E0B', image: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400' },
+  travel: { icon: Plane, color: '#3B82F6', image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400' },
+  entertainment: { icon: Music, color: '#8B5CF6', image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400' },
+  creative: { icon: Palette, color: '#EF4444', image: 'https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b?w=400' },
+};
 
 interface SkillDeal {
   id: string;
@@ -1267,6 +1268,42 @@ export default function HomeScreen() {
   const [dealItemText, setDealItemText] = useState('');
   const [createdSkills, setCreatedSkills] = useState<SkillDeal[]>([]);
   const [createdBundles, setCreatedBundles] = useState<BundlePlan[]>([]);
+  const [lifestyleCategories, setLifestyleCategories] = useState<LifestyleCategory[]>([]);
+
+  // Fetch categories dynamically from Supabase bundles table
+  useEffect(() => {
+    let cancelled = false;
+    const loadCategories = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('bundles')
+          .select('category')
+          .order('created_at', { ascending: false });
+        if (cancelled || error || !data) return;
+        // Count bundles per category
+        const categoryCounts: Record<string, number> = {};
+        data.forEach((row: any) => {
+          const cat = (row.category || '').toLowerCase();
+          if (cat) categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        });
+        // Build LifestyleCategory[] from counts, using CATEGORY_META for visuals
+        const cats: LifestyleCategory[] = Object.entries(categoryCounts).map(([key, count]) => {
+          const meta = CATEGORY_META[key] || { icon: Package, color: '#6B7280', image: '' };
+          return {
+            id: key,
+            title: key.charAt(0).toUpperCase() + key.slice(1),
+            icon: meta.icon,
+            color: meta.color,
+            count,
+            image: meta.image,
+          };
+        });
+        if (!cancelled) setLifestyleCategories(cats);
+      } catch { /* silent */ }
+    };
+    loadCategories();
+    return () => { cancelled = true; };
+  }, [contextBundles.length]);
 
   const updateAnim = useRef(new Animated.Value(0)).current;
 
@@ -1666,7 +1703,7 @@ export default function HomeScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.lifestyleScroll}
           >
-            {LIFESTYLE_CATEGORIES.map((category) => {
+            {lifestyleCategories.map((category) => {
               const IconComponent = category.icon;
               return (
                 <TouchableOpacity
