@@ -729,100 +729,119 @@ export default function ProfileScreen() {
 // Instagram-Style Fullscreen Post Viewer
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Instagram-Style Fullscreen Post Viewer (profile)
+// ═══════════════════════════════════════════════════════════════════════════
 function InstagramPostViewer({ visible, post, onClose, colors }: {
   visible: boolean;
   post: any;
   onClose: () => void;
   colors: any;
 }) {
-  const { user } = useAuth();
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(300)).current;
+  const bgOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 8 }),
-        Animated.timing(opacityAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 8, tension: 80 }),
+        Animated.timing(bgOpacity, { toValue: 1, duration: 280, useNativeDriver: true }),
       ]).start();
     } else {
-      scaleAnim.setValue(0.95);
-      opacityAnim.setValue(0);
+      translateY.setValue(300);
+      bgOpacity.setValue(0);
     }
   }, [visible]);
 
   if (!post) return null;
 
-  const authorName = post.user?.name || post.author_name || user?.fullName || 'User';
-  const authorAvatar = post.user?.avatar || post.author_avatar || user?.avatar || '';
+  // Use ONLY post data — never fall back to current user
+  const authorName = post.user?.name || post.author_name || post.author?.name || '@user';
   const caption = post.caption || post.content || '';
   const likes = post.likes ?? 0;
   const timestamp = post.timestamp || post.created_at || '';
   const imageUrl = post.imageUrl || post.image_url || '';
 
+  const screenHeight = Dimensions.get('window').height;
+  const screenWidth = Dimensions.get('window').width;
+
+  const handleClose = () => {
+    Animated.parallel([
+      Animated.timing(translateY, { toValue: 300, duration: 250, useNativeDriver: true }),
+      Animated.timing(bgOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]).start(() => onClose());
+  };
+
+  if (!imageUrl) {
+    // No image — just show text post
+    return (
+      <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
+        <View style={viewerStyles.backdrop}>
+          <Animated.View style={[viewerStyles.textCard, { transform: [{ translateY }] }]}>
+            <View style={viewerStyles.textCardHandle} />
+            <Text style={viewerStyles.authorLabel}>{authorName}</Text>
+            <Text style={viewerStyles.captionText}>{caption || 'No caption'}</Text>
+            <View style={viewerStyles.engagementRow}>
+              <Heart size={20} color={likes > 0 ? '#EF4444' : '#999'} fill={likes > 0 ? '#EF4444' : 'none'} />
+              <Text style={viewerStyles.likesText}>{likes}</Text>
+            </View>
+            <TouchableOpacity style={viewerStyles.dismissBtn} onPress={handleClose}>
+              <Text style={viewerStyles.dismissBtnText}>Close</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+    );
+  }
+
   return (
     <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
-      <View style={viewerStyles.overlay}>
-        <Animated.View style={[viewerStyles.container, { opacity: opacityAnim, transform: [{ scale: scaleAnim }] }]}>
-          {/* Close button */}
-          <TouchableOpacity
-            style={viewerStyles.closeButton}
-            onPress={() => {
-              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onClose();
-            }}
-          >
-            <X size={24} color="#FFF" />
-          </TouchableOpacity>
+      <Animated.View style={[viewerStyles.backdrop, { opacity: bgOpacity }]}>
+        {/* Tap-to-dismiss background */}
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
 
-          {/* Photo */}
-          <Image
-            source={{ uri: imageUrl }}
-            style={viewerStyles.image}
-            resizeMode="contain"
-          />
+        {/* Image — full-width, Instagram-style */}
+        <Animated.Image
+          source={{ uri: imageUrl }}
+          style={[
+            viewerStyles.igImage,
+            { width: screenWidth, height: screenHeight * 0.55, transform: [{ translateY }] },
+          ]}
+          resizeMode="cover"
+        />
 
-          {/* Bottom sheet with post info */}
-          <View style={viewerStyles.infoSheet}>
-            {/* Author row */}
-            <View style={viewerStyles.authorRow}>
-              <Image
-                source={{ uri: authorAvatar || undefined }}
-                style={viewerStyles.authorAvatar}
-                defaultSource={require('@/assets/images/icon.png')}
-              />
-              <Text style={viewerStyles.authorName}>{authorName}</Text>
-            </View>
+        {/* Bottom sheet */}
+        <Animated.View style={[viewerStyles.igSheet, { transform: [{ translateY }] }]}>
+          {/* Drag handle */}
+          <View style={viewerStyles.sheetHandle} />
 
-            {/* Caption */}
-            {caption ? (
-              <Text style={viewerStyles.caption} numberOfLines={3}>
-                {caption}
-              </Text>
-            ) : null}
-
-            {/* Engagement row */}
-            <View style={viewerStyles.engagementRow}>
-              <Heart size={20} color={likes > 0 ? '#EF4444' : '#FFF'} fill={likes > 0 ? '#EF4444' : 'none'} />
-              <Text style={viewerStyles.likesText}>{likes} {likes === 1 ? 'like' : 'likes'}</Text>
-            </View>
-
-            {/* Timestamp */}
-            {timestamp ? (
-              <Text style={viewerStyles.timestamp}>
+          {/* Author + close row */}
+          <View style={viewerStyles.sheetHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={viewerStyles.authorLabel}>{authorName}</Text>
+              <Text style={viewerStyles.metaLabel}>
                 {typeof timestamp === 'string' ? timestamp : new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
-            ) : null}
+            </View>
+            <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
+              <X size={20} color="#999" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Caption */}
+          {caption ? (
+            <Text style={viewerStyles.captionText} numberOfLines={5}>
+              {caption}
+            </Text>
+          ) : null}
+
+          {/* Engagement row */}
+          <View style={viewerStyles.engagementRow}>
+            <Heart size={22} color={likes > 0 ? '#EF4444' : '#999'} fill={likes > 0 ? '#EF4444' : 'none'} />
+            <Text style={viewerStyles.likesText}>{likes} {likes === 1 ? 'like' : 'likes'}</Text>
           </View>
         </Animated.View>
-
-        {/* Tap background to dismiss */}
-        <TouchableOpacity
-          style={viewerStyles.dismissArea}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -1183,6 +1202,32 @@ const profileStyles = StyleSheet.create({
 
 // ── Instagram Post Viewer Styles ──
 const viewerStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
+  // Image post
+  igImage: { backgroundColor: '#111' },
+  igSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingTop: 12, paddingBottom: 40, paddingHorizontal: 16,
+  },
+  sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  authorLabel: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  metaLabel: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
+  xBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  captionText: { fontSize: 14, color: '#DDD', lineHeight: 20, marginTop: 4 },
+  engagementRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 },
+  likesText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
+  // Text-only post
+  textCard: {
+    marginHorizontal: 24, marginTop: 'auto', marginBottom: 'auto',
+    backgroundColor: '#1a1a1a', borderRadius: 20, padding: 24, alignItems: 'center',
+  },
+  textCardHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 },
+  dismissBtn: { marginTop: 16, paddingHorizontal: 32, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)' },
+  dismissBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
+  // Keep backward compat
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   dismissArea: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
   container: { width: '100%', alignItems: 'center', zIndex: 1 },
@@ -1193,7 +1238,5 @@ const viewerStyles = StyleSheet.create({
   authorAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#333' },
   authorName: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   caption: { fontSize: 14, color: '#FFF', paddingHorizontal: 16, paddingTop: 8, lineHeight: 20 },
-  engagementRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 10, gap: 8 },
-  likesText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
   timestamp: { fontSize: 11, color: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingTop: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
 });
