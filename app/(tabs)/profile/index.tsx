@@ -181,9 +181,9 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
 function EditProfileModal({
   visible, onClose, colors,
 }: { visible: boolean; onClose: () => void; colors: any }) {
-  const { user, updateAvatar } = useAuth();
-  const [name, setName] = useState(user?.fullName || 'Roniel Lewis');
-  const [bio, setBio] = useState('Building the future of compliance automation.');
+  const { user, updateAvatar, refreshProfile } = useAuth();
+  const [name, setName] = useState(user?.fullName || '');
+  const [bio, setBio] = useState(user?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
   const [saving, setSaving] = useState(false);
@@ -221,6 +221,17 @@ function EditProfileModal({
           Alert.alert('Error', result.error || 'Failed to update avatar.');
           setSaving(false);
           return;
+        }
+      }
+      // Save name and bio to Supabase
+      if (user?.id) {
+        const updates: any = {};
+        if (name.trim() && name !== user?.fullName) updates.full_name = name.trim();
+        if (bio.trim() !== (user?.bio || '')) updates.bio = bio.trim();
+        if (Object.keys(updates).length > 0) {
+          await supabase.from('profiles').upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
+          await supabase.from('users').upsert({ id: user.id, ...updates });
+          await refreshProfile();
         }
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -478,7 +489,7 @@ export default function ProfileScreen() {
 
   const userName = user?.fullName || user?.username || 'User';
   const userAvatar = user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
-  const userBio = 'Ready to grab opportunities!';
+  const userBio = user?.bio || '';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
