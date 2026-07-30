@@ -91,7 +91,10 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
         }));
 
         setSkills(liveSkills);
-        setMySkills(liveSkills.filter((s) => s.creatorId));
+        // Only show user's own skills on their profile
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const myId = authUser?.id || '';
+        setMySkills(liveSkills.filter((s) => s.creatorId === myId));
         try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveSkills)); } catch {}
       } catch (e) {
         logger.error('SkillContext', 'Failed to load skills', { e });

@@ -107,6 +107,10 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         }));
 
         setBundles(liveBundles);
+        // Only show user's own bundles on their profile
+        const { data: { user: authUser2 } } = await supabase.auth.getUser();
+        const myId2 = authUser2?.id || '';
+        setMyBundles(liveBundles.filter((b) => b.creatorId === myId2));
         // Cache to AsyncStorage for offline fallback
         try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveBundles)); } catch {}
       } catch (e) {
