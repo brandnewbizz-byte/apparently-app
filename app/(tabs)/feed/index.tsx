@@ -128,6 +128,24 @@ const FILTERS = [
   { key: 'plan', label: 'Plans', icon: Calendar },
 ];
 
+// ── Time helpers ──
+function timeAgo(dateStr: string): string {
+  if (!dateStr || dateStr === 'Just now') return 'Just now';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(diff)) return dateStr;
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return 'Just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1: Post Detail Modal
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,7 +249,7 @@ function PostDetailModal({
                     )}
                   </View>
                   <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
-                    {post.timestamp}{post.location ? ` · ${post.location}` : ''}
+                    {timeAgo(post.timestamp)}{post.location ? ` · ${post.location}` : ''}
                   </Text>
                 </View>
               </View>
@@ -661,7 +679,7 @@ function PostCard({
       {/* Timestamp */}
       <View style={igCardStyles.timestampRow}>
         <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
-          {post.timestamp}
+          {timeAgo(post.timestamp)}
         </Text>
         {/* Type-specific CTA pill */}
         {post.type === 'live' ? (
@@ -712,12 +730,16 @@ export default function FeedScreen() {
   const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts } = useSocial();
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchUsers, setSearchUsers] = useState<any[]>([]);
+  const [searchFollowingIds, setSearchFollowingIds] = useState<Set<string>>(new Set());
+  const [searchUserLoading, setSearchUserLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createPreloadMedia, setCreatePreloadMedia] = useState<string | null>(null);
   const [createPreloadMediaWidth, setCreatePreloadMediaWidth] = useState<number | undefined>(undefined);
   const [createPreloadMediaHeight, setCreatePreloadMediaHeight] = useState<number | undefined>(undefined);
+  const [createMediaType, setCreateMediaType] = useState<'photo' | 'video'>('photo');
   const [showCamera, setShowCamera] = useState(false);
   const [createCategory, setCreateCategory] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
@@ -773,6 +795,53 @@ export default function FeedScreen() {
     const timer = setTimeout(() => setIsInitialLoad(false), 400);
     return () => clearTimeout(timer);
   }, []);
+
+  // ── User search (debounced) ──
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) {
+      setSearchUsers([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchUserLoading(true);
+      const pattern = `%${searchQuery.trim()}%`;
+      const { data } = await supabase
+        .from('users')
+        .select('id, name, username, avatar, is_verified, followers_count')
+        .or(`name.ilike.${pattern},username.ilike.${pattern}`)
+        .limit(8);
+      if (data) {
+        setSearchUsers(data);
+        if (authUser?.id && data.length > 0) {
+          const ids = data.map((u: any) => u.id).filter((id: string) => id !== authUser.id);
+          if (ids.length > 0) {
+            const { data: followData } = await supabase
+              .from('follows')
+              .select('following_id')
+              .eq('follower_id', authUser.id)
+              .in('following_id', ids);
+            setSearchFollowingIds(new Set((followData || []).map((f: any) => f.following_id)));
+          }
+        }
+      }
+      setSearchUserLoading(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, authUser?.id]);
+
+  const handleToggleFollow = async (targetUserId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const isFollowing = searchFollowingIds.has(targetUserId);
+    try {
+      if (isFollowing) {
+        await supabase.from('follows').delete().eq('follower_id', authUser!.id).eq('following_id', targetUserId);
+        setSearchFollowingIds(prev => { const n = new Set(prev); n.delete(targetUserId); return n; });
+      } else {
+        await supabase.from('follows').insert({ follower_id: authUser!.id, following_id: targetUserId });
+        setSearchFollowingIds(prev => new Set(prev).add(targetUserId));
+      }
+    } catch (_) {}
+  };
 
   // ── Cross-tab data ──
   const { products } = useMarketplace();
@@ -959,6 +1028,13 @@ export default function FeedScreen() {
     }
   };
 
+  const importVideoRef = useRef<any>(null);
+  const Video = useRef<any>(null);
+  try {
+    const av = require('expo-av');
+    Video.current = av.Video;
+  } catch (_) {}
+
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
     const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const timestamp = new Date().toISOString();
@@ -1032,12 +1108,19 @@ export default function FeedScreen() {
     const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!libPerm.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.8,
       allowsEditing: false,
+      videoMaxDuration: 60,
     });
     if (!result.canceled && result.assets?.[0]) {
-      setCreatePreloadMedia(result.assets[0].uri);
+      const asset = result.assets[0];
+      setCreatePreloadMedia(asset.uri);
+      setCreateMediaType(asset.type === 'video' ? 'video' : 'photo');
+      if (asset.type === 'video' && asset.duration && asset.duration > 60000) {
+        Alert.alert('Video too long', 'Please select a video under 60 seconds.');
+        return;
+      }
       setShowCamera(false);
       showTabBar();
       setShowCreate(true);
@@ -1222,7 +1305,7 @@ export default function FeedScreen() {
                 <Search size={16} color={colors.textTertiary} />
                 <TextInput
                   style={{ flex: 1, marginLeft: 8, fontSize: 14, color: colors.text }}
-                  placeholder="Search posts, bundles, services..."
+                  placeholder="Search posts and users..."
                   placeholderTextColor={colors.textTertiary}
                   value={searchQuery}
                   onChangeText={setSearchQuery}
