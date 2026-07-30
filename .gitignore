@@ -40,6 +40,8 @@ yarn-error.*
 
 .rork
 .env
+.env.service_role
+backend/.env
 rork-eslint.config.js
 core*.db
 logs/

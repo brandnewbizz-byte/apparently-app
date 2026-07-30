@@ -14,18 +14,31 @@ pkill -f "bun.*backend/hono" 2>/dev/null || true
 pkill -f "localtunnel.*3000" 2>/dev/null || true
 sleep 1
 
-# 2. Start Hono backend (defaults to :3000)
+# 2. Load backend .env and start Hono backend
 echo "📦 Starting Hono/tRPC backend on :3000..."
 cd "$SCRIPT_DIR"
-nohup bun run --hot backend/hono.ts > "$LOG_DIR/backend.log" 2>&1 &
-echo "   PID: $!"
+nohup bun run --hot --env-file backend/.env backend/hono.ts > "$LOG_DIR/backend.log" 2>&1 &
+BACKEND_PID=$!
+echo "   PID: $BACKEND_PID"
 sleep 3
 
 # Check if running
-if curl -s http://localhost:3000/ > /dev/null 2>&1; then
-  echo "   ✅ Backend running"
+if kill -0 "$BACKEND_PID" 2>/dev/null; then
+  echo "   ✅ Backend process running"
 else
-  echo "   ⚠️  Still starting — check $LOG_DIR/backend.log"
+  echo "   ⚠️  Process died — check $LOG_DIR/backend.log"
+  cat "$LOG_DIR/backend.log" | tail -20
+  exit 1
+fi
+
+# Verify HTTP
+sleep 1
+if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+  echo "   ✅ Health check passed"
+  curl -s http://localhost:3000/ | python3 -m json.tool 2>/dev/null || curl -s http://localhost:3000/
+else
+  echo "   ⚠️  Health check failed — check $LOG_DIR/backend.log"
+  cat "$LOG_DIR/backend.log" | tail -20
 fi
 
 # 3. Start localtunnel
@@ -53,4 +66,6 @@ fi
 
 echo ""
 echo "✅ Backend ready — http://localhost:3000"
+echo "   Health: http://localhost:3000/health"
+echo "   tRPC:   http://localhost:3000/api/trpc"
 echo "   Tunnel: ${TUNNEL_URL:-check logs}"

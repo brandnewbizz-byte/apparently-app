@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Post } from '@/mocks/data';
 import { useSocial, SocialComment } from '@/contexts/SocialContext';
+import { useLiveAvatar } from '@/hooks/useLiveAvatar';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PhotoViewer from '@/components/PhotoViewer';
 
@@ -23,6 +24,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const insets = useSafeAreaInsets();
   const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
+  const authorAvatar = useLiveAvatar(post.user.id, post.user.avatar);
   const interaction = interactions[post.id] ?? {
     likeCount: post.likes,
     commentCount: post.comments,
@@ -449,7 +451,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             testID={`post-${post.id}-author`}
             onPress={handleProfilePress}
           >
-            <Image source={{ uri: post.user.avatar }} style={styles.avatar} />
+            <Image source={{ uri: authorAvatar }} style={styles.avatar} />
             {post.user.isLive && <View style={styles.liveBadge} />}
             <View style={styles.userText}>
               <View style={styles.nameRow}>

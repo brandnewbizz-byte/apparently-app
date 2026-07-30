@@ -34,6 +34,7 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useLiveAvatar } from '@/hooks/useLiveAvatar';
 import { useMarketplace } from '@/contexts/MarketplaceContext';
 import { useBookings } from '@/contexts/BookingsContext';
 import { useServiceRequests } from '@/contexts/ServiceRequestContext';
@@ -60,7 +61,7 @@ type PostType = 'text' | 'photo' | 'video' | 'live' | 'event' | 'plan' | 'achiev
 
 interface Comment {
   id: string;
-  user: { name: string; avatar: string };
+  user: { name: string; avatar: string; userId?: string };
   text: string;
   timestamp: string;
 }
@@ -86,6 +87,7 @@ interface FeedPost {
   viewerCount?: number;
   streamDuration?: string;
   videoUrl?: string;
+  authorId?: string;
   comments_list?: Comment[];
   price?: number | string;
   pricePerNight?: string;
@@ -158,6 +160,7 @@ function PostDetailModal({
   const [localComments, setLocalComments] = useState<Comment[]>(post.comments_list || []);
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
   const CatIcon = cat.icon;
+  const authorAvatar = useLiveAvatar(post.authorId, post.author.avatar);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardWillShow', (e) => setKbHeight(e.endCoordinates.height));
@@ -174,7 +177,7 @@ function PostDetailModal({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newComment: Comment = {
       id: `c-new-${Date.now()}`,
-      user: { name: 'You', avatar: commentAvatar },
+      user: { name: 'You', avatar: commentAvatar, userId: currentUser?.id },
       text: trimmed,
       timestamp: 'Just now',
     };
@@ -214,7 +217,7 @@ function PostDetailModal({
             <View style={styles.modalContent}>
               {/* Author header */}
               <View style={styles.modalAuthorRow}>
-                <RNImage source={{ uri: post.author.avatar }} style={styles.modalAvatar} />
+                <RNImage source={{ uri: authorAvatar }} style={styles.modalAvatar} />
                 <View style={{ flex: 1 }}>
                   <View style={styles.nameRow}>
                     <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
@@ -355,7 +358,7 @@ function PostDetailModal({
           )}
           renderItem={({ item: comment }) => (
             <View style={styles.commentItem}>
-              <RNImage source={{ uri: comment.user.avatar }} style={styles.commentAvatar} />
+              <RNImage source={{ uri: comment.user.name === 'You' ? commentAvatar : comment.user.avatar }} style={styles.commentAvatar} />
               <View style={{ flex: 1 }}>
                 <View style={styles.commentBubble}>
                   <Text style={[styles.commentName, { color: colors.text }]}>{comment.user.name}</Text>
@@ -429,6 +432,7 @@ function PostCard({
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
+  const authorAvatar = useLiveAvatar(post.authorId, post.author.avatar);
 
   const handleSave = () => {
     setSaved(!saved);
@@ -493,7 +497,7 @@ function PostCard({
       {/* Header — Instagram style: circle avatar + username + location */}
       <View style={igCardStyles.header}>
         <TouchableOpacity style={igCardStyles.headerLeft} onPress={onPress}>
-          <RNImage source={{ uri: post.author.avatar }} style={igCardStyles.avatar} />
+          <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
           <View style={igCardStyles.headerText}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
@@ -889,6 +893,7 @@ export default function FeedScreen() {
       author: {
         name: 'You',
         avatar: userAvatar,
+        authorId: authUser?.id,
       },
       category: data.category || createCategory || 'General',
       timestamp: 'Just now',

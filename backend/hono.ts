@@ -8,6 +8,7 @@ const app = new Hono();
 
 app.use("*", cors());
 
+// tRPC endpoint
 app.use(
   "/api/trpc/*",
   trpcServer({
@@ -17,8 +18,21 @@ app.use(
   })
 );
 
+// REST health
+app.get("/health", (c) => {
+  return c.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Root
 app.get("/", (c) => {
-  return c.json({ status: "ok", message: "API is running" });
+  return c.json({
+    app: "Apparently Backend",
+    version: "1.0.0",
+    endpoints: {
+      health: "/health",
+      trpc: "/api/trpc",
+    },
+  });
 });
 
 export default app;
