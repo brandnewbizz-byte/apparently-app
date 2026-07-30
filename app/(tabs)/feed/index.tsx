@@ -220,7 +220,6 @@ function PostDetailModal({
             <View style={styles.modalContent}>
               {/* Author header */}
               <View style={styles.modalAuthorRow}>
-                <RNImage source={{ uri: authorAvatar }} style={styles.modalAvatar} />
                 <View style={{ flex: 1 }}>
                   <View style={styles.nameRow}>
                     <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
@@ -500,7 +499,6 @@ function PostCard({
       {/* Header — Instagram style: circle avatar + username + location */}
       <View style={igCardStyles.header}>
         <TouchableOpacity style={igCardStyles.headerLeft} onPress={onPress}>
-          <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
           <View style={igCardStyles.headerText}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
