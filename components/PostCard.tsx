@@ -473,8 +473,6 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             testID={`post-${post.id}-author`}
             onPress={handleProfilePress}
           >
-            <Image source={{ uri: authorAvatar }} style={styles.avatar} />
-            {post.user.isLive && <View style={styles.liveBadge} />}
             <View style={styles.userText}>
               <View style={styles.nameRow}>
                 <Text style={[styles.userName, { color: colors.text }]}>{post.user.name}</Text>
