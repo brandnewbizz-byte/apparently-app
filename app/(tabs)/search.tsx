@@ -107,9 +107,7 @@ export default function SearchScreen() {
           user:user_id(name, username, avatar, is_verified)
         `)
         .or(`content.ilike.${postPattern}`)
-        .neq('post_kind', 'bundle')
-        .neq('post_kind', 'service')
-        .neq('post_kind', 'skill')
+        .or('post_kind.is.null,post_kind.not.in.(bundle,service,skill)')
         .order('created_at', { ascending: false })
         .limit(20);
 
