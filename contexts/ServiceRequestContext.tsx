@@ -51,6 +51,7 @@ export interface ServiceRequest {
   budgetMax: number;
   status: RequestStatus;
   tags: string[];
+  image?: string;
   createdAt: string;
   creatorId?: string;
   createdBy: { name: string; avatar: string };
@@ -117,6 +118,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
           creatorId: row.creator_id || '',
           createdBy: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '' },
           responders: row.responders || 0,
+          image: row.image_url || undefined,
         }));
 
         setRequests(liveRequests);
@@ -173,6 +175,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         created_by: newRequest.createdBy.name,
         created_at: newRequest.createdAt,
         responders: 0,
+        image_url: newRequest.image || null,
       }).then(({ error }) => {
         if (error) logger.error('ServiceRequestContext', 'Supabase insert failed', { error });
       });

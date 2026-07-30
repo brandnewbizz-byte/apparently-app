@@ -10,8 +10,10 @@ import {
   Alert,
   Modal,
   TextInput,
+  Image,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
@@ -47,6 +49,7 @@ import {
   ListFilter,
   MessageSquare,
   UserPlus,
+  Camera,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
@@ -128,7 +131,7 @@ const PLAN_CATEGORIES = [
 
 function CreateRequestModal({
   visible, onClose, onCreate, colors, selectedDate,
-}: { visible: boolean; onClose: () => void; onCreate: (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number }) => void; colors: any; selectedDate: string }) {
+}: { visible: boolean; onClose: () => void; onCreate: (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number; image?: string }) => void; colors: any; selectedDate: string }) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<ServiceCategory>('photography');
   const [location, setLocation] = useState('');
@@ -136,6 +139,21 @@ function CreateRequestModal({
   const [budgetMin, setBudgetMin] = useState('');
   const [budgetMax, setBudgetMax] = useState('');
   const [description, setDescription] = useState('');
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+
+  const pickThumbnail = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setThumbnail(result.assets[0].uri);
+    }
+  };
 
   const handleCreate = () => {
     if (!title.trim()) return;
@@ -151,9 +169,10 @@ function CreateRequestModal({
       time,
       budgetMin: parseInt(budgetMin, 10) || 0,
       budgetMax: parseInt(budgetMax, 10) || 0,
+      image: thumbnail || undefined,
     });
     setTitle(''); setDescription(''); setCategory('photography'); setLocation('');
-    setTime('12:00 PM'); setBudgetMin(''); setBudgetMax('');
+    setTime('12:00 PM'); setBudgetMin(''); setBudgetMax(''); setThumbnail(null);
     onClose();
   };
 
@@ -180,6 +199,28 @@ function CreateRequestModal({
               placeholder="e.g. DJ for Friday night party" placeholderTextColor={colors.textTertiary}
               value={title} onChangeText={setTitle}
             />
+          </View>
+          {/* Thumbnail */}
+          <View>
+            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Thumbnail (optional)</Text>
+            <TouchableOpacity
+              onPress={pickThumbnail}
+              style={[styles.thumbnailPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              {thumbnail ? (
+                <View style={styles.thumbnailPreviewWrap}>
+                  <Image source={{ uri: thumbnail }} style={styles.thumbnailPreview} />
+                  <View style={[styles.thumbnailOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+                    <Text style={styles.thumbnailOverlayText}>Change</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.thumbnailPlaceholder}>
+                  <Camera size={20} color={colors.textSecondary} />
+                  <Text style={[styles.thumbnailText, { color: colors.textSecondary }]}>Add Image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
           <View>
             <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Category</Text>
@@ -729,7 +770,7 @@ export default function PlannerScreen() {
     }
   }, [deletePlan]);
 
-  const handleCreateRequest = useCallback(async (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number }) => {
+  const handleCreateRequest = useCallback(async (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number; image?: string }) => {
     try {
       const cat = SERVICE_CATEGORIES.find((c) => c.key === req.category);
       createRequest({
@@ -742,6 +783,7 @@ export default function PlannerScreen() {
         budgetMin: req.budgetMin,
         budgetMax: req.budgetMax,
         tags: cat ? [cat.label] : [],
+        image: req.image,
         createdBy: { name: 'You', avatar: '' },
       });
       setMode('requests');
@@ -1396,6 +1438,13 @@ const styles = StyleSheet.create({
   qpLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   qpInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   qpNotes: { minHeight: 80 },
+  thumbnailPicker: { borderRadius: 12, borderWidth: 1, overflow: 'hidden', marginBottom: 4 },
+  thumbnailPreviewWrap: { position: 'relative' },
+  thumbnailPreview: { width: '100%', height: 120, resizeMode: 'cover' },
+  thumbnailOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, alignItems: 'center' },
+  thumbnailOverlayText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  thumbnailPlaceholder: { height: 80, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  thumbnailText: { fontSize: 14 },
   qpTimeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   qpTimeText: { fontSize: 13, fontWeight: '600' },
   qpCatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
