@@ -52,16 +52,85 @@ export default function UserProfileScreen() {
   const slideAnim = useRef(new Animated.Value(20)).current;
   const followButtonScale = useRef(new Animated.Value(1)).current;
 
-  const user = { id: userId || '', name: 'Unknown User', username: 'unknown', avatar: '', isVerified: false, followersCount: 0, isLive: false };
-  const userPosts: any[] = [];
-  const userMedia: any[] = [];
+  const [user, setUser] = useState({
+    id: userId || '',
+    name: 'Loading...',
+    username: '',
+    avatar: '',
+    isVerified: false,
+    followersCount: 0,
+    isLive: false,
+  });
+  const [userPosts, setUserPosts] = useState<any[]>([]);
+  const [userMedia, setUserMedia] = useState<any[]>([]);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
 
   const [avgRating, setAvgRating] = useState<number | null>(null);
   const [reviewsCount, setReviewsCount] = useState<number>(0);
-  
+
+  // Fetch user profile from Supabase
   useEffect(() => {
-    setFollowersCount(user.followersCount);
-  }, [user.followersCount]);
+    if (!userId) return;
+    let cancelled = false;
+
+    const loadUser = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, name, username, avatar_url, is_verified, followers_count')
+          .eq('id', userId)
+          .single();
+
+        if (!cancelled && !error && data) {
+          setUser({
+            id: data.id,
+            name: data.name || 'Unknown User',
+            username: data.username || '',
+            avatar: data.avatar_url || '',
+            isVerified: data.is_verified || false,
+            followersCount: data.followers_count || 0,
+            isLive: false,
+          });
+          setFollowersCount(data.followers_count || 0);
+        }
+      } catch (e) {
+        console.log('[UserProfile] loadUser error:', e);
+      } finally {
+        if (!cancelled) setIsLoadingUser(false);
+      }
+    };
+
+    loadUser();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Fetch user's posts from Supabase
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+
+    const loadPosts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('posts')
+          .select('*, profiles:user_id(id, name, username, avatar_url)')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (!cancelled && !error && data) {
+          setUserPosts(data || []);
+          // Separate media posts
+          setUserMedia((data || []).filter((p: any) => p.image_url || p.media_url));
+        }
+      } catch (e) {
+        console.log('[UserProfile] loadPosts error:', e);
+      }
+    };
+
+    loadPosts();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   useEffect(() => {
     let isMounted = true;
