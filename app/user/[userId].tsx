@@ -487,7 +487,7 @@ export default function UserProfileScreen() {
                   {userMedia.map((post) => (
                     <TouchableOpacity key={post.id} style={styles.mediaItem}>
                       <Image 
-                        source={{ uri: post.imageUrl }} 
+                        source={{ uri: post.image_url || post.imageUrl || '' }} 
                         style={styles.mediaImage} 
                         resizeMode="cover"
                       />

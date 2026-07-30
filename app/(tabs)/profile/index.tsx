@@ -94,13 +94,10 @@ interface StatItem {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any) => void }) {
-  const { getAllPosts } = useSocial();
   const { userPosts } = useUserPosts();
 
-  // Merge social posts with user-created posts (from camera/posting flow)
-  // Tag user posts so we can identify which ones are deletable
-  const socialPosts = (getAllPosts() || []).map((sp: any) => ({ ...sp, isOwnPost: false }));
-  const userContextPosts: any[] = userPosts.map(up => ({
+  // Only show this user's own posts — never mix in other users' content
+  const allPosts: any[] = userPosts.map(up => ({
     id: up.id,
     imageUrl: up.mediaUri,
     caption: up.caption,
@@ -109,17 +106,6 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
     type: 'photo',
     isOwnPost: true,
   }));
-  const allPosts = [...userContextPosts, ...socialPosts].filter((post, index, self) =>
-    index === self.findIndex((p) => {
-      // Match by id first
-      if (p.id && post.id && p.id === post.id) return true;
-      // Same image URL = same post (handles local vs Supabase ID mismatch)
-      const pUrl = p.imageUrl || p.mediaUri || '';
-      const postUrl = post.imageUrl || post.mediaUri || '';
-      if (pUrl && postUrl && pUrl === postUrl) return true;
-      return false;
-    })
-  );
 
   if (!allPosts || allPosts.length === 0) {
     return (

@@ -72,7 +72,7 @@ interface FeedPost {
   id: string;
   type: PostType;
   title?: string;
-  author: { name: string; avatar: string };
+  author: { name: string; avatar: string; userId?: string };
   category: string;
   timestamp: string;
   caption: string;
@@ -437,6 +437,8 @@ function PostCard({
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
   const authorAvatar = post.author.avatar || '';
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const routerFromCard = useRouter();
 
   const handleSave = () => {
     setSaved(!saved);
@@ -496,11 +498,17 @@ function PostCard({
     }
   })();
 
+  const handleProfileTap = () => {
+    if (post.author.userId) {
+      routerFromCard.push(`/user/${post.author.userId}` as any);
+    }
+  };
+
   return (
     <View style={[igCardStyles.card, { backgroundColor: colors.surface }]}>
       {/* Header — Instagram style: circle avatar + username + location */}
       <View style={igCardStyles.header}>
-        <TouchableOpacity style={igCardStyles.headerLeft} onPress={onPress}>
+        <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
           {authorAvatar ? (
             <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
           ) : null}
