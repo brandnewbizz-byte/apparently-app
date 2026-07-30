@@ -29,6 +29,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
+  ActivityIndicator,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -93,7 +94,7 @@ interface StatItem {
 // My Posts Grid — Instagram 3-column grid
 // ═══════════════════════════════════════════════════════════════════════════
 
-function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any) => void }) {
+function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any, posts: any[]) => void }) {
   const { user: authUser } = useAuth();
   const [allPosts, setAllPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
