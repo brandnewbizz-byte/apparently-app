@@ -41,7 +41,7 @@ import { useMarketplace } from '@/contexts/MarketplaceContext';
 import { useBookings } from '@/contexts/BookingsContext';
 import { useServiceRequests } from '@/contexts/ServiceRequestContext';
 import { useConnections } from '@/contexts/ConnectionsContext';
-import { productToFeedPost, listingToFeedPost, connectionToFeedPost, requestToFeedPost, bundleToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
+import { productToFeedPost, listingToFeedPost, connectionToFeedPost, requestToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
 import { useBundles } from '@/contexts/BundleContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
@@ -787,7 +787,7 @@ export default function FeedScreen() {
   const rentalPosts = useMemo(() => (listings || []).slice(0, 6).map(listingToFeedPost), [listings]);
   const connectionPosts = useMemo(() => (connections || []).slice(0, 4).map(connectionToFeedPost), [connections]);
   const requestPosts = useMemo(() => getOpenRequests().slice(0, 8).map(requestToFeedPost), [getOpenRequests]);
-  const bundlePosts = useMemo(() => bundles.slice(0, 6).map(bundleToFeedPost), [bundles]);
+  const bundlePosts = useMemo(() => [], []); // Bundles excluded from feed per user request
 
   const externalEvents = EXTERNAL_EVENTS;
 
@@ -862,10 +862,8 @@ export default function FeedScreen() {
     // Priority order: user-created posts first, then context data (preferred over hardcoded), then hardcoded last
     userPosts.forEach(addPost);
 
-    // Context data — preferred over hardcoded, but skip the current user's own
-    // bundles, marketplace listings, rentals, requests & connections.
-    // The feed is for discovering other users' content.
-    const contextPosts = [...marketplacePosts, ...rentalPosts, ...connectionPosts, ...requestPosts, ...bundlePosts];
+    // Only marketplace, rental, connection, and request posts — bundles excluded from feed
+    const contextPosts = [...marketplacePosts, ...rentalPosts, ...connectionPosts, ...requestPosts];
     contextPosts.filter(p => p.author.name !== 'You').forEach(addPost);
 
     // Hardcoded posts — lowest priority, skip if context data already covered the same content
