@@ -67,6 +67,7 @@ export default function SkillBuilderScreen() {
   const [icon, setIcon] = useState('🛠️');
   const [category, setCategory] = useState('');
   const [price, setPrice] = useState('');
+  const [availableCount, setAvailableCount] = useState('20');
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -118,7 +119,7 @@ export default function SkillBuilderScreen() {
       category: category || 'other',
       tags: tags.length ? tags : ['Skill'],
       creator: { name: 'You', avatar: '', rating: 5.0, reviews: 0 },
-      availableCount: 20,
+      availableCount: parseInt(availableCount, 10) || 20,
       providerLink: undefined,
       deliveryNotes: undefined,
       resourcesNeeded: undefined,
@@ -260,18 +261,36 @@ export default function SkillBuilderScreen() {
           textAlignVertical="top"
         />
 
-        {/* Price */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Price ($)</Text>
-        <View style={[styles.priceInput, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <DollarSign size={18} color={colors.textSecondary} />
-          <TextInput
-            style={[styles.priceField, { color: colors.text }]}
-            placeholder="Set your rate"
-            placeholderTextColor={colors.textTertiary}
-            value={price}
-            onChangeText={setPrice}
-            keyboardType="decimal-pad"
-          />
+        {/* Price + Available Grabs */}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Price ($)</Text>
+            <View style={[styles.priceInput, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <DollarSign size={18} color={colors.textSecondary} />
+              <TextInput
+                style={[styles.priceField, { color: colors.text }]}
+                placeholder="Set your rate"
+                placeholderTextColor={colors.textTertiary}
+                value={price}
+                onChangeText={setPrice}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Available Grabs</Text>
+            <View style={[styles.priceInput, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ color: colors.textSecondary, fontSize: 15, marginRight: 4 }}>×</Text>
+              <TextInput
+                style={[styles.priceField, { color: colors.text }]}
+                placeholder="20"
+                placeholderTextColor={colors.textTertiary}
+                value={availableCount}
+                onChangeText={setAvailableCount}
+                keyboardType="number-pad"
+              />
+            </View>
+          </View>
         </View>
 
         {/* Tags */}
