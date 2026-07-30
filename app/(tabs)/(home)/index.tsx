@@ -1244,7 +1244,7 @@ export default function HomeScreen() {
   const { plans } = usePlanner();
   const { sendMessage } = useMessaging();
   const { bundles: contextBundles, grabBundle } = useBundles();
-  const { skills: contextSkills } = useSkills();
+  const { skills: contextSkills, grabSkill } = useSkills();
   const { requests: serviceRequests } = useServiceRequests();
 
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -1411,7 +1411,8 @@ export default function HomeScreen() {
     setConfettiAmount(skill.price);
     setShowConfetti(true);
     sendMessage(skill.creatorId || 'u-3', `💪 Interested in your "${skill.title}" skill offer for $${skill.price}. Let's connect!`);
-  }, [sendMessage]);
+    grabSkill(skill.id);
+  }, [sendMessage, grabSkill]);
 
   const handleSkipSkill = useCallback((skill: SkillDeal) => {
     console.log('Card action:', 'skip_skill', skill.id);
