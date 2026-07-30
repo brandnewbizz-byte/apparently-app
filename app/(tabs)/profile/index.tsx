@@ -940,60 +940,6 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
     }
   };
 
-  if (!imageUrl) {
-    // No image — text post with comments
-    return (
-      <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
-        <View style={viewerStyles.backdrop}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
-          <Animated.View style={[viewerStyles.textCard, { transform: [{ translateY }] }]}>
-            <View style={viewerStyles.textCardHandle} />
-            <Text style={viewerStyles.authorLabel}>{authorName}</Text>
-            <Text style={viewerStyles.captionText}>{caption || 'No caption'}</Text>
-            
-            {/* Engagement */}
-            <View style={viewerStyles.engagementRow}>
-              <TouchableOpacity onPress={toggleLikeLocal} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Heart size={20} color={liked ? '#EF4444' : '#999'} fill={liked ? '#EF4444' : 'none'} />
-                <Text style={viewerStyles.likesText}>{likeCount}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Comments */}
-            <ScrollView style={{ maxHeight: 200, marginTop: 12 }}>
-              {comments.map((c, i) => (
-                <View key={c.id || i} style={{ marginBottom: 8, flexDirection: 'row', gap: 8 }}>
-                  <Text style={viewerStyles.commentAuthor}>@{c.author_id === 'me' ? 'you' : 'user'}:</Text>
-                  <Text style={viewerStyles.commentText}>{c.content}</Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            {/* Comment input */}
-            <View style={viewerStyles.commentInputRow}>
-              <TextInput
-                style={viewerStyles.commentInput}
-                placeholder="Add a comment..."
-                placeholderTextColor="#666"
-                value={commentText}
-                onChangeText={setCommentText}
-                onSubmitEditing={handleAddComment}
-                returnKeyType="send"
-              />
-              <TouchableOpacity onPress={handleAddComment} disabled={!commentText.trim() || commenting}>
-                <Send size={18} color={commentText.trim() ? '#3B82F6' : '#555'} />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={viewerStyles.dismissBtn} onPress={handleClose}>
-              <Text style={viewerStyles.dismissBtnText}>Close</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      </Modal>
-    );
-  }
-
   // ── Swipeable image pager ──
   const renderSwipeItem = ({ item }: { item: any }) => {
     const imgUrl = item?.imageUrl || item?.image_url || item?.mediaUri || '';
