@@ -4,7 +4,6 @@
  */
 
 import type { Product } from '@/contexts/MarketplaceContext';
-import type { SwapPost } from '@/contexts/SwapContext';
 import type { ConnectionRequest, Connection } from '@/contexts/ConnectionsContext';
 import type { ServiceRequest } from '@/contexts/ServiceRequestContext';
 
@@ -123,32 +122,6 @@ export function listingToFeedPost(listing: any): AggregatedFeedPost {
     stats: { saves: listing.favorites?.length || 0, comments: 0 },
     price: listing.price,
     pricePerNight: listing.price ? `$${listing.price}/night` : undefined,
-  };
-}
-
-/**
- * Convert a Swap Post into a feed card.
- */
-export function swapPostToFeedPost(post: SwapPost): AggregatedFeedPost {
-  const msAgo = Math.round((Date.now() - new Date(post.createdAt).getTime()) / 1000 / 60);
-  const timeAgo = msAgo < 60 ? `${msAgo}m ago` : msAgo < 1440 ? `${Math.round(msAgo / 60)}h ago` : `${Math.round(msAgo / 1440)}d ago`;
-
-  return {
-    id: `swap-${post.id}`,
-    type: 'swap',
-    author: {
-      name: post.author?.name || 'User',
-      avatar: post.author?.avatar || '',
-    },
-    authorId: post.authorId,
-    category: 'Swaps',
-    timestamp: timeAgo,
-    caption: post.title,
-    location: post.location,
-    tags: [post.category, post.offering ? `Offering: ${post.offering}` : '', post.needing ? `Needs: ${post.needing}` : ''].filter(Boolean),
-    likes: 0,
-    stats: { saves: 0, comments: 0 },
-    price: post.price,
   };
 }
 

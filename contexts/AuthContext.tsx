@@ -12,6 +12,8 @@ interface UserProfile {
   id: string;
   fullName: string | null;
   username: string | null;
+  bio: string | null;
+  location: string | null;
   phone: string | null;
   email: string | null;
   avatar: string;
@@ -55,6 +57,8 @@ type ProfilesRow = {
   username?: string | null;
   phone?: string | null;
   email?: string | null;
+  bio?: string | null;
+  location?: string | null;
   avatar?: string | null;
 };
 
@@ -95,7 +99,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, phone, email, avatar')
+        .select('id, full_name, username, phone, email, avatar, bio, location')
         .eq('id', userId)
         .maybeSingle();
 
@@ -119,6 +123,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const dbName = dbProfile?.full_name ?? null;
       const phone = dbProfile?.phone ?? cached?.phone ?? null;
       const username = dbProfile?.username ?? cached?.username ?? null;
+      const bio = dbProfile?.bio ?? cached?.bio ?? null;
+      const location = dbProfile?.location ?? cached?.location ?? null;
 
       // Use DB avatar if set, then cached avatar, fallback to DiceBear
       const dbAvatar = dbProfile?.avatar || null;
@@ -133,6 +139,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           id: userId,
           fullName: fullName && fullName.trim().length > 0 ? fullName.trim() : null,
           username,
+          bio,
+          location,
           phone,
           email: session.user.email ?? null,
           avatar,

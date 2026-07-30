@@ -28,7 +28,6 @@ import { BundleProvider } from '@/contexts/BundleContext';
 import { SkillProvider } from '@/contexts/SkillContext';
 import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
 import { MarketplaceProvider } from '@/contexts/MarketplaceContext';
-import { SwapProvider } from '@/contexts/SwapContext';
 import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
@@ -122,30 +121,6 @@ function RootLayoutNav() {
         headerShown: false,
         animation: 'fade',
       }}
-    />
-    <Stack.Screen
-      name="create-content"
-      options={{
-        headerShown: false,
-        presentation: 'fullScreenModal',
-        animation: 'slide_from_bottom',
-      }}
-    />
-    <Stack.Screen
-      name="manage"
-      options={{
-        headerShown: false,
-        presentation: 'fullScreenModal',
-        animation: 'slide_from_right',
-      }}
-    />
-    <Stack.Screen
-      name="book"
-      options={{ headerShown: false }}
-    />
-    <Stack.Screen
-      name="swap"
-      options={{ headerShown: false }}
     />
     <Stack.Screen
       name="inbox"
@@ -245,7 +220,6 @@ export default function RootLayout() {
                           <ServiceRequestProvider>
                                 <MessagingProvider>
                                   <MarketplaceProvider>
-                                  <SwapProvider>
                                     <BookingsProvider>
                                       <PlannerProvider>
                                         <TabBarProvider>
@@ -255,7 +229,6 @@ export default function RootLayout() {
                                         </TabBarProvider>
                                       </PlannerProvider>
                                     </BookingsProvider>
-                                  </SwapProvider>
                                   </MarketplaceProvider>
                                 </MessagingProvider>
                           </ServiceRequestProvider>

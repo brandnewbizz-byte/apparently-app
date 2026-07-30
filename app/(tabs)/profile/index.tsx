@@ -94,18 +94,45 @@ interface StatItem {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any) => void }) {
-  const { userPosts } = useUserPosts();
+  const { user: authUser } = useAuth();
+  const [allPosts, setAllPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Only show this user's own posts — never mix in other users' content
-  const allPosts: any[] = userPosts.map(up => ({
-    id: up.id,
-    imageUrl: up.mediaUri,
-    caption: up.caption,
-    likes: 0,
-    timestamp: up.timestamp,
-    type: 'photo',
-    isOwnPost: true,
-  }));
+  // Load user's posts from Supabase — ensures persistence across sessions
+  useEffect(() => {
+    if (!authUser?.id) { setLoading(false); return; }
+    supabase
+      .from('posts')
+      .select('id, content, image_url, created_at, likes')
+      .eq('user_id', authUser.id)
+      .neq('post_kind', 'bundle')
+      .neq('post_kind', 'service')
+      .neq('post_kind', 'skill')
+      .order('created_at', { ascending: false })
+      .limit(100)
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setAllPosts(data.map(p => ({
+            id: p.id,
+            imageUrl: p.image_url,
+            caption: p.content,
+            likes: p.likes || 0,
+            timestamp: p.created_at,
+            type: 'photo',
+            isOwnPost: true,
+          })));
+        }
+        setLoading(false);
+      });
+  }, [authUser?.id]);
+
+  if (loading) {
+    return (
+      <View style={profileStyles.gridEmpty}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
 
   if (!allPosts || allPosts.length === 0) {
     return (
@@ -133,7 +160,7 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
           activeOpacity={0.8}
           style={{ width: IMG_SIZE, height: IMG_SIZE, marginRight: (idx % COL_COUNT) < COL_COUNT - 1 ? GAP : 0, marginBottom: GAP }}
           onPress={() => {
-            if (onPostPress) onPostPress(post);
+            if (onPostPress) onPostPress({ ...post, index: idx }, allPosts);
           }}
         >
           <Image
@@ -276,6 +303,7 @@ export default function ProfileScreen() {
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [viewerPosts, setViewerPosts] = useState<any[]>([]);
 
   // Helper: get deduplicated post count matching the grid display
   const { getAllPosts } = useSocial();
@@ -551,7 +579,7 @@ export default function ProfileScreen() {
 
           {/* Tab Content */}
           <View style={{ paddingBottom: 100 }}>
-            {activeTab === 'posts' && <UserPostsGrid colors={colors} onPostPress={(post: any) => setSelectedPost(post)} />}
+            {activeTab === 'posts' && <UserPostsGrid colors={colors} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
 
             {activeTab === 'bundles' && (
               <View style={{ paddingTop: 8 }}>
@@ -689,7 +717,9 @@ export default function ProfileScreen() {
       <InstagramPostViewer
         visible={!!selectedPost}
         post={selectedPost}
-        onClose={() => setSelectedPost(null)}
+        allPosts={viewerPosts}
+        onClose={() => { setSelectedPost(null); setViewerPosts([]); }}
+        onNavigate={(p: any) => setSelectedPost(p)}
         colors={colors}
       />
 
@@ -710,40 +740,54 @@ export default function ProfileScreen() {
 // ═══════════════════════════════════════════════════════════════════════════
 // Instagram-Style Fullscreen Post Viewer (profile)
 // ═══════════════════════════════════════════════════════════════════════════
-function InstagramPostViewer({ visible, post, onClose, colors }: {
+function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, colors }: {
   visible: boolean;
   post: any;
+  allPosts?: any[];
   onClose: () => void;
+  onNavigate?: (post: any) => void;
   colors: any;
 }) {
   const translateY = useRef(new Animated.Value(300)).current;
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const { toggleLike: socialLike, addComment: socialComment } = useSocial();
+  const flatListRef = useRef<FlatList>(null);
 
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [comments, setComments] = useState<any[]>([]);
   const [commentText, setCommentText] = useState('');
   const [commenting, setCommenting] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
 
-  const postId = post?.id || '';
-  const imageUrl = post?.imageUrl || post?.image_url || post?.mediaUri || '';
-  const authorName = post?.user?.name || post?.author_name || post?.author?.name || '@user';
-  const caption = post?.caption || post?.content || '';
-  const timestamp = post?.timestamp || post?.created_at || '';
+  const postsList = allPosts && allPosts.length > 0 ? allPosts : (post ? [post] : []);
+  const currentPost = postsList[activeIndex] || post;
+  const postId = currentPost?.id || '';
+  const imageUrl = currentPost?.imageUrl || currentPost?.image_url || currentPost?.mediaUri || '';
+  const authorName = currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || '@user';
+  const caption = currentPost?.caption || currentPost?.content || '';
+  const timestamp = currentPost?.timestamp || currentPost?.created_at || '';
 
   const screenHeight = Dimensions.get('window').height;
   const screenWidth = Dimensions.get('window').width;
 
-  // Load comments when post opens
+  // Scroll to selected post on open
+  useEffect(() => {
+    if (visible && post && postsList.length > 1) {
+      const idx = postsList.findIndex(p => p.id === post.id);
+      if (idx >= 0 && flatListRef.current) {
+        setActiveIndex(idx);
+        setTimeout(() => flatListRef.current?.scrollToIndex({ index: idx, animated: false }), 50);
+      }
+    }
+  }, [visible, post?.id]);
+
+  // Load comments when post changes
   useEffect(() => {
     if (!visible || !postId) return;
-    
-    // Reset like state — could be improved by checking DB
     setLiked(false);
-    setLikeCount(post?.likes ?? 0);
-
-    // Fetch comments
+    setLikeCount(currentPost?.likes ?? 0);
+    setCommentText('');
     supabase
       .from('post_comments')
       .select('id, content, created_at, author_id')
@@ -767,7 +811,7 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
     }
   }, [visible]);
 
-  if (!post) return null;
+  if (!currentPost) return null;
 
   const handleClose = () => {
     Animated.parallel([
@@ -867,21 +911,67 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
     );
   }
 
+  // ── Swipeable image pager ──
+  const renderSwipeItem = ({ item }: { item: any }) => {
+    const imgUrl = item?.imageUrl || item?.image_url || item?.mediaUri || '';
+    return (
+      <View style={{ width: screenWidth, height: screenHeight * 0.55 }}>
+        <Image
+          source={{ uri: imgUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800' }}
+          style={{ width: '100%', height: '100%' }}
+          resizeMode="cover"
+        />
+      </View>
+    );
+  };
+
+  const onViewableChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      const idx = viewableItems[0].index;
+      setActiveIndex(idx);
+      if (onNavigate && postsList[idx]) {
+        onNavigate(postsList[idx]);
+      }
+    }
+  }).current;
+
+  const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
+
   return (
     <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
       <Animated.View style={[viewerStyles.backdrop, { opacity: bgOpacity }]}>
         {/* Tap-to-dismiss background */}
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
 
-        {/* Image — full-width, Instagram-style */}
-        <Animated.Image
-          source={{ uri: imageUrl }}
-          style={[
-            viewerStyles.igImage,
-            { width: screenWidth, height: screenHeight * 0.55, transform: [{ translateY }] },
-          ]}
-          resizeMode="cover"
-        />
+        {/* Dot indicators */}
+        {postsList.length > 1 && (
+          <View style={viewerStyles.dotRow}>
+            {postsList.map((_, i) => (
+              <View key={i} style={[viewerStyles.dot, { backgroundColor: i === activeIndex ? '#FFF' : 'rgba(255,255,255,0.4)' }]} />
+            ))}
+          </View>
+        )}
+
+        {/* Swipeable image pager */}
+        <Animated.View style={{ transform: [{ translateY }] }}>
+          <FlatList
+            ref={flatListRef}
+            data={postsList}
+            renderItem={renderSwipeItem}
+            keyExtractor={(item: any) => item.id || String(Math.random())}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onViewableItemsChanged={onViewableChanged}
+            viewabilityConfig={viewConfigRef.current}
+            initialNumToRender={3}
+            getItemLayout={(_, index) => ({
+              length: screenWidth,
+              offset: screenWidth * index,
+              index,
+            })}
+          />
+        </Animated.View>
 
           {/* Engagement + comments sheet */}
         <Animated.View style={[viewerStyles.igSheet, { transform: [{ translateY }] }]}>
@@ -1338,6 +1428,9 @@ const viewerStyles = StyleSheet.create({
   container: { width: '100%', alignItems: 'center', zIndex: 1 },
   closeButton: { position: 'absolute', top: 56, right: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   image: { width: Dimensions.get('window').width, height: Dimensions.get('window').width, backgroundColor: '#0a0a0a' },
+  // Dot indicators for swipe
+  dotRow: { position: 'absolute', top: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6, zIndex: 5 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
   infoSheet: { width: '100%', paddingTop: 12 },
   authorRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 10 },
   authorAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#333' },

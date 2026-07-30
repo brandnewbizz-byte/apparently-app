@@ -40,9 +40,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMarketplace } from '@/contexts/MarketplaceContext';
 import { useBookings } from '@/contexts/BookingsContext';
 import { useServiceRequests } from '@/contexts/ServiceRequestContext';
-import { useSwap } from '@/contexts/SwapContext';
 import { useConnections } from '@/contexts/ConnectionsContext';
-import { productToFeedPost, listingToFeedPost, swapPostToFeedPost, connectionToFeedPost, requestToFeedPost, bundleToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
+import { productToFeedPost, listingToFeedPost, connectionToFeedPost, requestToFeedPost, bundleToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
 import { useBundles } from '@/contexts/BundleContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
@@ -737,25 +736,31 @@ export default function FeedScreen() {
 
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
-  // Load user's own posts from SocialContext on mount so they persist across sessions
+  // Load user's own posts from SocialContext when data is available
+  const postsLoadedRef = useRef(false);
   useEffect(() => {
     const posts = getAllPosts();
-    if (posts && posts.length > 0) {
-      const myPosts: FeedPost[] = posts.map((p: any) => ({
+    if (!posts || posts.length === 0) return;
+    if (postsLoadedRef.current) return; // Only load once when data becomes available
+    const myPosts: FeedPost[] = posts
+      .filter((p: any) => p.user?.id === authUser?.id || p.user_id === authUser?.id)
+      .map((p: any) => ({
         id: p.id,
         type: p.type || 'photo',
         author: { name: 'You', avatar: userAvatar, userId: authUser?.id },
         category: p.category || 'General',
-        timestamp: p.timestamp || p.createdAt || '',
-        caption: p.text || p.caption || '',
-        media: p.imageUrl || p.mediaUri || '',
+        timestamp: p.timestamp || p.created_at || '',
+        caption: p.content || p.caption || '',
+        media: p.imageUrl || p.image_url || p.mediaUri || '',
         likes: p.likes || 0,
         tags: p.tags || [],
         stats: { saves: p.saves || 0, comments: (p.comments || []).length },
       }));
+    if (myPosts.length > 0) {
       setUserPosts(myPosts);
+      postsLoadedRef.current = true;
     }
-  }, []);
+  }, [getAllPosts, authUser?.id, userAvatar]);
 
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
@@ -773,7 +778,6 @@ export default function FeedScreen() {
   // ── Cross-tab data ──
   const { products } = useMarketplace();
   const { listings } = useBookings();
-  const { posts: swapPosts } = useSwap();
   const { connections } = useConnections();
   const { getOpenRequests } = useServiceRequests();
   const { bundles } = useBundles();
@@ -781,7 +785,6 @@ export default function FeedScreen() {
   // Convert cross-tab data into feed posts
   const marketplacePosts = useMemo(() => (products || []).filter((p: any) => p.status === 'active').slice(0, 8).map(productToFeedPost), [products]);
   const rentalPosts = useMemo(() => (listings || []).slice(0, 6).map(listingToFeedPost), [listings]);
-  const swapFeedPosts = useMemo(() => (swapPosts || []).filter((p: any) => p.status === 'open').slice(0, 6).map(swapPostToFeedPost), [swapPosts]);
   const connectionPosts = useMemo(() => (connections || []).slice(0, 4).map(connectionToFeedPost), [connections]);
   const requestPosts = useMemo(() => getOpenRequests().slice(0, 8).map(requestToFeedPost), [getOpenRequests]);
   const bundlePosts = useMemo(() => bundles.slice(0, 6).map(bundleToFeedPost), [bundles]);
@@ -860,9 +863,9 @@ export default function FeedScreen() {
     userPosts.forEach(addPost);
 
     // Context data — preferred over hardcoded, but skip the current user's own
-    // bundles, marketplace listings, rentals, swaps, requests & connections.
+    // bundles, marketplace listings, rentals, requests & connections.
     // The feed is for discovering other users' content.
-    const contextPosts = [...marketplacePosts, ...rentalPosts, ...swapFeedPosts, ...connectionPosts, ...requestPosts, ...bundlePosts];
+    const contextPosts = [...marketplacePosts, ...rentalPosts, ...connectionPosts, ...requestPosts, ...bundlePosts];
     contextPosts.filter(p => p.author.name !== 'You').forEach(addPost);
 
     // Hardcoded posts — lowest priority, skip if context data already covered the same content
@@ -880,7 +883,7 @@ export default function FeedScreen() {
       all = [...all].sort(() => Math.random() - 0.5);
     }
     return all;
-  }, [activeFilter, userPosts, tagFilter, searchQuery, refreshKey, marketplacePosts, rentalPosts, swapFeedPosts, connectionPosts, requestPosts, bundlePosts]);
+  }, [activeFilter, userPosts, tagFilter, searchQuery, refreshKey, marketplacePosts, rentalPosts, connectionPosts, requestPosts, bundlePosts]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -957,7 +960,10 @@ export default function FeedScreen() {
 
   const handleEventCardPress = (event: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/event/${event.id}`);
+    // Event detail page removed — navigate to external URL if available
+    if (event.externalUrl) {
+      router.push(event.externalUrl as any);
+    }
   };
 
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {

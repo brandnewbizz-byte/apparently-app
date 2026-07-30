@@ -1,15 +1,16 @@
 import {
-  Search as SearchIcon, X, UserPlus, AtSign, Hash, Clock, Zap,
+  Search as SearchIcon, X, UserPlus, UserCheck, AtSign, Hash, Clock, Zap,
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity,
-  Image, ActivityIndicator, Dimensions, Platform,
+  Image, ActivityIndicator, Dimensions, Platform, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/supabaseClient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -59,6 +60,7 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
+  const { user: currentUser } = useAuth();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -67,6 +69,8 @@ export default function SearchScreen() {
   const [posts, setPosts] = useState<PostResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [followLoading, setFollowLoading] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -81,27 +85,53 @@ export default function SearchScreen() {
     setLoading(true);
     setHasSearched(true);
 
-    const pattern = `%${q.trim()}%`;
+    const trimmed = q.trim();
+    const pattern = `%${trimmed}%`;
+    const isHashtag = trimmed.startsWith('#');
 
     try {
-      const [userRes, postRes] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, name, username, avatar, is_verified, bio, followers_count')
-          .or(`name.ilike.${pattern},username.ilike.${pattern}`)
-          .limit(20),
-        supabase
-          .from('posts')
-          .select(`
-            id, content, image_url, user_id, created_at, likes, comments, post_kind,
-            user:user_id(name, username, avatar, is_verified)
-          `)
-          .or(`content.ilike.${pattern}`)
-          .order('created_at', { ascending: false })
-          .limit(20),
-      ]);
+      // For hashtag searches, only search posts (hashtags aren't users)
+      const userPromise = isHashtag
+        ? Promise.resolve({ data: [], error: null })
+        : supabase
+            .from('users')
+            .select('id, name, username, avatar, is_verified, bio, followers_count')
+            .or(`name.ilike.${pattern},username.ilike.${pattern}`)
+            .limit(20);
 
-      if (!userRes.error) setUsers((userRes.data as UserResult[]) || []);
+      const postPattern = isHashtag ? `%${trimmed}%` : pattern;
+      const postPromise = supabase
+        .from('posts')
+        .select(`
+          id, content, image_url, user_id, created_at, likes, comments, post_kind,
+          user:user_id(name, username, avatar, is_verified)
+        `)
+        .or(`content.ilike.${postPattern}`)
+        .neq('post_kind', 'bundle')
+        .neq('post_kind', 'service')
+        .neq('post_kind', 'skill')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      const [userRes, postRes] = await Promise.all([userPromise, postPromise]);
+
+      if (!userRes.error) {
+        setUsers((userRes.data as UserResult[]) || []);
+        // Load following status for found users
+        if (userRes.data && currentUser?.id) {
+          const userIds = (userRes.data as UserResult[]).map(u => u.id);
+          supabase
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', currentUser.id)
+            .in('following_id', userIds)
+            .then(({ data: followData }) => {
+              if (followData) {
+                setFollowingIds(new Set(followData.map((f: any) => f.following_id)));
+              }
+            });
+        }
+      }
       if (!postRes.error) setPosts((postRes.data as unknown as PostResult[]) || []);
     } catch (err) {
       console.error('[Search] Error:', err);
@@ -135,6 +165,33 @@ export default function SearchScreen() {
     router.push(`/post/${postId}` as any);
   };
 
+  const handleToggleFollow = async (targetUserId: string) => {
+    if (!currentUser?.id || followLoading) return;
+    setFollowLoading(targetUserId);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const isFollowing = followingIds.has(targetUserId);
+    try {
+      if (isFollowing) {
+        await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', currentUser.id)
+          .eq('following_id', targetUserId);
+        setFollowingIds(prev => { const next = new Set(prev); next.delete(targetUserId); return next; });
+      } else {
+        await supabase
+          .from('follows')
+          .insert({ follower_id: currentUser.id, following_id: targetUserId });
+        setFollowingIds(prev => new Set(prev).add(targetUserId));
+      }
+    } catch (err) {
+      console.error('[Search] Follow error:', err);
+    } finally {
+      setFollowLoading(null);
+    }
+  };
+
   const tabs: { key: TabKey; label: string }[] = [
     { key: 'top', label: 'Top' },
     { key: 'users', label: 'Users' },
@@ -147,9 +204,12 @@ export default function SearchScreen() {
     posts: posts.length,
   }), [users, posts]);
 
-  const renderUserRow = ({ item }: { item: UserResult }) => (
+  const renderUserRow = ({ item }: { item: UserResult }) => {
+    const isFollowing = followingIds.has(item.id);
+    const isMe = currentUser?.id === item.id;
+    return (
     <TouchableOpacity style={styles.resultRow} onPress={() => handleUserPress(item.id)} activeOpacity={0.6}>
-      <Image source={{ uri: item.avatar }} style={styles.avatar} />
+      <Image source={{ uri: item.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200' }} style={styles.avatar} />
       <View style={styles.resultText}>
         <View style={styles.nameRow}>
           <Text style={[styles.name, { color: colors.text }]}>{item.name}</Text>
@@ -162,9 +222,24 @@ export default function SearchScreen() {
           <Text style={[styles.bio, { color: colors.textSecondary }]} numberOfLines={1}>{item.bio}</Text>
         ) : null}
       </View>
-      <UserPlus size={20} color={colors.textTertiary} />
+      {!isMe && (
+        <TouchableOpacity
+          style={[styles.followBtn, isFollowing ? styles.followingBtn : { backgroundColor: colors.accent }]}
+          onPress={(e) => { e.stopPropagation(); handleToggleFollow(item.id); }}
+          disabled={followLoading === item.id}
+        >
+          {followLoading === item.id ? (
+            <ActivityIndicator size="small" color={isFollowing ? colors.text : '#FFF'} />
+          ) : isFollowing ? (
+            <UserCheck size={18} color={colors.text} />
+          ) : (
+            <UserPlus size={18} color="#FFF" />
+          )}
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
+  };
 
   const renderPostRow = ({ item }: { item: PostResult }) => {
     const avatar = item.user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100';
@@ -233,7 +308,7 @@ export default function SearchScreen() {
           <TextInput
             ref={inputRef}
             style={[styles.input, { color: colors.text }]}
-            placeholder="Search users & posts..."
+            placeholder="Search users, posts, #hashtags..."
             placeholderTextColor={colors.textTertiary}
             value={query}
             onChangeText={handleQueryChange}
@@ -347,4 +422,12 @@ const styles = StyleSheet.create({
   postMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   metaText: { fontSize: 12 },
   metaTextDot: { fontSize: 12 },
+  followBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  followingBtn: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
 });

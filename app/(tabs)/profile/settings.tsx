@@ -1,6 +1,6 @@
-import { ArrowLeft, Moon, Sun, LogOut, Camera, Mail, User } from 'lucide-react-native';
+import { ArrowLeft, Moon, Sun, LogOut, Camera, Mail, User, MapPin, FileText, Save, AlertCircle } from 'lucide-react-native';
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, Alert, Switch, TextInput, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -8,6 +8,9 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/supabaseClient';
+
+const MAX_BIO = 160;
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -16,6 +19,14 @@ export default function SettingsScreen() {
   const { user, signOut, updateAvatar } = useAuth();
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
+
+  // Editable profile fields
+  const [name, setName] = useState(user?.fullName || '');
+  const [username, setUsername] = useState(user?.username || '');
+  const [bio, setBio] = useState(user?.bio || '');
+  const [location, setLocation] = useState(user?.location || '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const handleToggleTheme = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -50,6 +61,49 @@ export default function SettingsScreen() {
       }
     } catch {
       Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError('');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      const updates: any = {};
+      if (name.trim() && name !== user?.fullName) updates.full_name = name.trim();
+      if (username.trim() && username !== user?.username) updates.username = username.trim();
+      if (bio.trim() !== (user?.bio || '')) updates.bio = bio.trim();
+      if (location.trim() !== (user?.location || '')) updates.location = location.trim();
+
+      if (Object.keys(updates).length === 0) {
+        setSaving(false);
+        return;
+      }
+
+      // Update profiles table
+      if (user?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
+        if (error) throw new Error(error.message);
+      }
+
+      // Also update users table if username changed
+      if (updates.username && user?.id) {
+        await supabase
+          .from('users')
+          .update({ username: updates.username })
+          .eq('id', user.id);
+      }
+
+      Alert.alert('Saved', 'Your profile has been updated.');
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to save. Please try again.');
+      Alert.alert('Error', err?.message || 'Failed to save profile.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -111,6 +165,14 @@ export default function SettingsScreen() {
       borderColor: 'rgba(255, 82, 82, 0.2)',
     },
     logoutLabel: { color: '#FF5252' },
+    // Editable fields
+    fieldInput: { fontSize: 15, paddingVertical: 0 },
+    bioInput: { minHeight: 60, textAlignVertical: 'top', lineHeight: 20 },
+    charCount: { fontSize: 12, marginTop: 4, textAlign: 'right' },
+    errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
+    errorText: { fontSize: 13, flex: 1 },
+    saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 14, marginBottom: 14 },
+    saveBtnText: { fontSize: 15, fontWeight: '600', color: '#FFF' },
     versionText: { fontSize: 12, color: colors.textTertiary, textAlign: 'center', marginTop: 24 },
   });
 
@@ -153,7 +215,7 @@ export default function SettingsScreen() {
         {/* Managed Account */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-          <Text style={styles.sectionSubtitle}>Manage your account</Text>
+          <Text style={styles.sectionSubtitle}>Manage your profile</Text>
 
           <TouchableOpacity style={styles.settingItem} onPress={handleChangeAvatar}>
             <Image
@@ -167,16 +229,80 @@ export default function SettingsScreen() {
             <Camera size={18} color={colors.textTertiary} />
           </TouchableOpacity>
 
-          <View style={[styles.settingItem, { opacity: 0.8 }]}>
+          {/* Editable Name */}
+          <View style={styles.settingItem}>
             <View style={styles.settingIcon}>
               <User size={20} color={colors.accent} />
             </View>
             <View style={styles.settingContent}>
-              <Text style={styles.settingLabel}>Name</Text>
-              <Text style={styles.settingValue}>{user?.fullName || 'Not set'}</Text>
+              <TextInput
+                style={[styles.fieldInput, { color: colors.text }]}
+                placeholder="Your name"
+                placeholderTextColor={colors.textTertiary}
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+              />
             </View>
           </View>
 
+          {/* Editable Username */}
+          <View style={styles.settingItem}>
+            <View style={styles.settingIcon}>
+              <Text style={{ color: colors.textTertiary, fontSize: 18, fontWeight: '700' }}>@</Text>
+            </View>
+            <View style={styles.settingContent}>
+              <TextInput
+                style={[styles.fieldInput, { color: colors.text }]}
+                placeholder="username"
+                placeholderTextColor={colors.textTertiary}
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
+          {/* Editable Bio */}
+          <View style={[styles.settingItem, { alignItems: 'flex-start' }]}>
+            <View style={[styles.settingIcon, { marginTop: 2 }]}>
+              <FileText size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <TextInput
+                style={[styles.fieldInput, styles.bioInput, { color: colors.text }]}
+                placeholder="Tell people about yourself..."
+                placeholderTextColor={colors.textTertiary}
+                value={bio}
+                onChangeText={(t) => setBio(t.slice(0, MAX_BIO))}
+                multiline
+                numberOfLines={3}
+                maxLength={MAX_BIO}
+              />
+              <Text style={[styles.charCount, { color: colors.textTertiary }]}>
+                {bio.length}/{MAX_BIO}
+              </Text>
+            </View>
+          </View>
+
+          {/* Editable Location */}
+          <View style={styles.settingItem}>
+            <View style={styles.settingIcon}>
+              <MapPin size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <TextInput
+                style={[styles.fieldInput, { color: colors.text }]}
+                placeholder="Location"
+                placeholderTextColor={colors.textTertiary}
+                value={location}
+                onChangeText={setLocation}
+              />
+            </View>
+          </View>
+
+          {/* Email (read-only) */}
           <View style={[styles.settingItem, { opacity: 0.8 }]}>
             <View style={styles.settingIcon}>
               <Mail size={20} color={colors.accent} />
@@ -186,6 +312,26 @@ export default function SettingsScreen() {
               <Text style={styles.settingValue}>{user?.email || 'Not signed in'}</Text>
             </View>
           </View>
+
+          {/* Save Button */}
+          {saveError ? (
+            <View style={[styles.errorBox, { backgroundColor: 'rgba(255,82,82,0.1)', borderColor: 'rgba(255,82,82,0.3)' }]}>
+              <AlertCircle size={16} color="#FF5252" />
+              <Text style={[styles.errorText, { color: '#FF5252' }]}>{saveError}</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: saving ? 0.6 : 1 }]}
+            onPress={handleSaveProfile}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Save size={18} color="#FFF" />
+            )}
+            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Profile'}</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, styles.logoutItem]} onPress={handleSignOut}>
             <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 82, 82, 0.15)' }]}>
