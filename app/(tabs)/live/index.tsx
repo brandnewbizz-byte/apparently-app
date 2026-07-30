@@ -1,6 +1,6 @@
 import {
   Play, Radio, Clock, Eye, Flame, Zap, Calendar,
-  Sparkles, Send, X, Heart, MoreHorizontal,
+  Sparkles, Send, X, Heart, MoreHorizontal, StopCircle,
 } from 'lucide-react-native';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -14,8 +14,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { SkeletonStreamCard } from '@/components/SkeletonCard';
-import { getSpotFeed, type SpotCard, type SpotFeedResponse } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -301,51 +302,126 @@ function GoLiveModal({
 export default function LiveScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user } = useAuth();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStream, setSelectedStream] = useState<Stream | null>(null);
   const [showGoLive, setShowGoLive] = useState(false);
-  const [myStreams, setMyStreams] = useState<Stream[]>([]);
+  const [myStream, setMyStream] = useState<Stream | null>(null);
   const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Real data from Supabase via the spot feed API
+  // Real data from Supabase live_streams table
   const [featuredStream, setFeaturedStream] = useState<Stream | null>(null);
   const [liveStreams, setLiveStreams] = useState<Stream[]>([]);
   const [upcomingShows, setUpcomingShows] = useState<Stream[]>([]);
   const [pastBroadcasts, setPastBroadcasts] = useState<Stream[]>([]);
 
-  const fetchSpotFeed = useCallback(async () => {
-    try {
-      const data = await getSpotFeed(20);
-      const featured = data.cards.filter((c) => c.type === 'featured');
-      const live = data.cards.filter((c) => c.type === 'live');
-      const upcoming = data.cards.filter((c) => c.type === 'upcoming');
-      const past = data.cards.filter((c) => c.type === 'past');
+  const mapRow = (row: any): Stream => ({
+    id: String(row.id),
+    title: row.title || '',
+    streamerName: row.streamer_name || '',
+    streamerAvatar: row.streamer_avatar || '',
+    thumbnail: row.thumbnail || '',
+    viewers: row.viewers || 0,
+    category: row.category || '',
+    tags: row.tags ? (typeof row.tags === 'string' ? row.tags.split(',').map((s: string) => s.trim()) : row.tags) : [],
+    isLive: row.is_live ?? true,
+    scheduledFor: row.scheduled_for || undefined,
+    duration: row.duration || undefined,
+    description: row.description || undefined,
+  });
 
-      setFeaturedStream(featured[0] || null);
-      setLiveStreams(live);
+  const fetchLiveStreams = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('live_streams')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (error) { console.error('[LiveScreen] fetch error:', error.message); return; }
+
+      const streams = (data || []).map(mapRow);
+      const live = streams.filter((s) => s.isLive);
+      const upcoming = streams.filter((s) => !s.isLive && s.scheduledFor);
+      const past = streams.filter((s) => !s.isLive && !s.scheduledFor);
+
+      setFeaturedStream(live[0] || past[0] || null);
+      setLiveStreams(live.filter((_, i) => i > 0));
       setUpcomingShows(upcoming);
       setPastBroadcasts(past);
+
+      // Check if current user has a live stream
+      if (user) {
+        const myLive = live.find((s) => s.id.startsWith('mystream-') && s.streamerAvatar === (user.avatar || ''));
+        if (myLive) setMyStream(myLive);
+      }
     } catch (err) {
-      console.error('[LiveScreen] Failed to fetch spot feed:', err);
+      console.error('[LiveScreen] fetch exception:', err);
     }
-  }, []);
+  }, [user]);
+
+  const handleStartStream = useCallback(async (stream: Stream) => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('live_streams')
+        .insert({
+          streamer_id: user.id,
+          streamer_name: user.fullName || user.username || 'You',
+          streamer_avatar: user.avatar || '',
+          title: stream.title,
+          thumbnail: stream.thumbnail,
+          category: stream.category,
+          tags: stream.tags,
+          description: stream.description,
+          is_live: true,
+          viewers: 1,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      const mapped = mapRow(data);
+      setMyStream(mapped);
+      setLiveStreams((prev) => [mapped, ...prev]);
+    } catch (err: any) {
+      console.error('[LiveScreen] start stream error:', err.message);
+      // Fallback: still show locally even if DB fails
+      setMyStream(stream);
+      setLiveStreams((prev) => [stream, ...prev]);
+    }
+  }, [user]);
+
+  const handleEndStream = useCallback(async () => {
+    if (!myStream) return;
+    try {
+      await supabase
+        .from('live_streams')
+        .update({ is_live: false, duration: 'ended' })
+        .eq('id', parseInt(myStream.id, 10) || 0);
+    } catch (err: any) {
+      console.error('[LiveScreen] end stream error:', err.message);
+    }
+    setMyStream(null);
+    fetchLiveStreams();
+  }, [myStream, fetchLiveStreams]);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    fetchSpotFeed();
+    fetchLiveStreams();
     const timer = setTimeout(() => setIsInitialLoad(false), 400);
     return () => clearTimeout(timer);
-  }, [fetchSpotFeed]);
+  }, [fetchLiveStreams]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchSpotFeed().finally(() => setRefreshing(false));
-  }, [fetchSpotFeed]);
+    fetchLiveStreams().finally(() => setRefreshing(false));
+  }, [fetchLiveStreams]);
 
-  const allLive = [...myStreams, ...liveStreams];
+  const allLive = [...(myStream ? [myStream] : []), ...liveStreams];
 
   const renderLiveBadge = () => (
     <View style={styles.liveBadge}>
@@ -401,30 +477,32 @@ export default function LiveScreen() {
             <>
 
           {/* My Streams (if any) */}
-          {myStreams.length > 0 && (
+          {myStream && (
             <View style={styles.featuredSection}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionLabel}>
                   <Sparkles size={16} color="#10B981" />
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Stream</Text>
                 </View>
+                <TouchableOpacity style={styles.endStreamBtn} onPress={handleEndStream}>
+                  <StopCircle size={16} color="#EF4444" />
+                  <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700', marginLeft: 4 }}>End</Text>
+                </TouchableOpacity>
               </View>
-              {myStreams.map((s) => (
-                <TouchableOpacity key={s.id} activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(s); }}>
-                  <ImageBackground source={{ uri: s.thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
+                <TouchableOpacity key={myStream.id} activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(myStream); }}>
+                  <ImageBackground source={{ uri: myStream.thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
                     <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.featuredOverlay}>
-                      <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(s.viewers)}</View>
+                      <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(myStream.viewers)}</View>
                       <View style={styles.featuredBottom}>
-                        <Text style={styles.featuredTitle}>{s.title}</Text>
+                        <Text style={styles.featuredTitle}>{myStream.title}</Text>
                         <View style={styles.featuredMeta}>
-                          <Image source={{ uri: s.streamerAvatar }} style={styles.streamerAvatar} />
-                          <Text style={styles.streamerName}>{s.streamerName}</Text>
+                          <Image source={{ uri: myStream.streamerAvatar }} style={styles.streamerAvatar} />
+                          <Text style={styles.streamerName}>{myStream.streamerName}</Text>
                         </View>
                       </View>
                     </LinearGradient>
                   </ImageBackground>
                 </TouchableOpacity>
-              ))}
             </View>
           )}
 
@@ -586,7 +664,7 @@ export default function LiveScreen() {
       <GoLiveModal
         visible={showGoLive}
         onClose={() => setShowGoLive(false)}
-        onStart={(s) => setMyStreams((prev) => [s, ...prev])}
+        onStart={(s) => { handleStartStream(s); setShowGoLive(false); }}
         colors={colors}
         insets={insets}
       />
@@ -607,6 +685,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '700' },
   headerSub: { fontSize: 12, marginTop: 1 },
   goLiveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
+  endStreamBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)' },
   goLiveText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   scroll: { flex: 1 },
   featuredSection: { paddingHorizontal: 16, paddingTop: 16 },
