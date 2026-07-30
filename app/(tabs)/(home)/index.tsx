@@ -1612,13 +1612,6 @@ export default function HomeScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setShowCreateModal(true)}
-              activeOpacity={0.8}
-            >
-              <Plus size={20} color={colors.accent} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => handleNavigate('/inbox')}
               activeOpacity={0.8}
             >

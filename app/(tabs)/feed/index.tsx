@@ -37,7 +37,6 @@ import StoryRing from '@/components/StoryRing';
 import CreateStory from '@/components/CreateStory';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useLiveAvatar } from '@/hooks/useLiveAvatar';
 import { useMarketplace } from '@/contexts/MarketplaceContext';
 import { useBookings } from '@/contexts/BookingsContext';
 import { useServiceRequests } from '@/contexts/ServiceRequestContext';
@@ -163,7 +162,7 @@ function PostDetailModal({
   const [localComments, setLocalComments] = useState<Comment[]>(post.comments_list || []);
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
   const CatIcon = cat.icon;
-  const authorAvatar = useLiveAvatar(post.authorId, post.author.avatar);
+  const authorAvatar = post.author.avatar || '';
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardWillShow', (e) => setKbHeight(e.endCoordinates.height));
@@ -220,6 +219,9 @@ function PostDetailModal({
             <View style={styles.modalContent}>
               {/* Author header */}
               <View style={styles.modalAuthorRow}>
+                {authorAvatar ? (
+                  <RNImage source={{ uri: authorAvatar }} style={styles.modalAvatar} />
+                ) : null}
                 <View style={{ flex: 1 }}>
                   <View style={styles.nameRow}>
                     <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
@@ -434,7 +436,7 @@ function PostCard({
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
-  const authorAvatar = useLiveAvatar(post.authorId, post.author.avatar);
+  const authorAvatar = post.author.avatar || '';
 
   const handleSave = () => {
     setSaved(!saved);
@@ -499,6 +501,9 @@ function PostCard({
       {/* Header — Instagram style: circle avatar + username + location */}
       <View style={igCardStyles.header}>
         <TouchableOpacity style={igCardStyles.headerLeft} onPress={onPress}>
+          {authorAvatar ? (
+            <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
+          ) : null}
           <View style={igCardStyles.headerText}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>

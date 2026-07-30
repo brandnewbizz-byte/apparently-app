@@ -10,7 +10,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Post } from '@/mocks/data';
 import { useSocial, SocialComment } from '@/contexts/SocialContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useLiveAvatar } from '@/hooks/useLiveAvatar';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PhotoViewer from '@/components/PhotoViewer';
 import { supabase } from '@/supabaseClient';
@@ -27,7 +26,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
   const { user: currentUser } = useAuth();
-  const authorAvatar = useLiveAvatar(post.user.id, post.user.avatar);
+const authorAvatar = post.user.avatar || post.user.avatar_url || '';
   const interaction = interactions[post.id] ?? {
     likeCount: post.likes,
     commentCount: post.comments,
@@ -473,6 +472,13 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
             testID={`post-${post.id}-author`}
             onPress={handleProfilePress}
           >
+            {authorAvatar ? (
+              <Image
+                source={{ uri: authorAvatar }}
+                style={styles.userAvatarSmall}
+                defaultSource={require('@/assets/images/icon.png')}
+              />
+            ) : null}
             <View style={styles.userText}>
               <View style={styles.nameRow}>
                 <Text style={[styles.userName, { color: colors.text }]}>{post.user.name}</Text>
@@ -1190,6 +1196,13 @@ const styles = StyleSheet.create({
   },
   replyIcon: {
     marginRight: -8,
+  },
+  userAvatarSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    marginRight: 10,
   },
   commentAvatar: {
     width: 36,
