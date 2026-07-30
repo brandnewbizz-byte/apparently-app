@@ -9,9 +9,11 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Post } from '@/mocks/data';
 import { useSocial, SocialComment } from '@/contexts/SocialContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useLiveAvatar } from '@/hooks/useLiveAvatar';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PhotoViewer from '@/components/PhotoViewer';
+import { supabase } from '@/supabaseClient';
 
 interface Props {
   post: Post;
@@ -24,6 +26,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const insets = useSafeAreaInsets();
   const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
+  const { user: currentUser } = useAuth();
   const authorAvatar = useLiveAvatar(post.user.id, post.user.avatar);
   const interaction = interactions[post.id] ?? {
     likeCount: post.likes,
@@ -242,6 +245,15 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
 
   const handleHidePost = () => {
     setShowOptionsModal(false);
+    // Persist to backend
+    if (currentUser?.id) {
+      supabase.from('hidden_posts').insert({
+        post_id: post.id,
+        user_id: currentUser.id,
+      }).then(({ error }) => {
+        if (error) console.log('[hide] DB not ready:', error.message);
+      });
+    }
     Alert.alert(
       'Post Hidden',
       'You won\'t see this post anymore. You can undo this in your settings.',
@@ -268,6 +280,16 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   };
 
   const confirmReport = (reason: string) => {
+    // Persist to backend
+    if (currentUser?.id) {
+      supabase.from('reports').insert({
+        post_id: post.id,
+        reason,
+        reported_by: currentUser.id,
+      }).then(({ error }) => {
+        if (error) console.log('[report] DB not ready:', error.message);
+      });
+    }
     Alert.alert(
       'Report Submitted',
       `Thank you for your report. We'll review this post for ${reason.toLowerCase()}.`

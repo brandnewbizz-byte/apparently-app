@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { SkeletonStreamCard } from '@/components/SkeletonCard';
+import { getSpotFeed, type SpotCard, type SpotFeedResponse } from '@/lib/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -39,27 +40,10 @@ const CHAT_SEED: ChatMessage[] = [
   { id: 'c8', user: 'soulful_', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=50', text: '💜💜💜' },
 ];
 
-const LIVE_STREAMS: Stream[] = [
-  { id: 'live-1', title: 'Sunday Jazz & Lo-Fi Session 🎷', streamerName: 'Marcus Beats', streamerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600', viewers: 1247, category: 'Music', tags: ['Jazz', 'Lo-Fi', 'Live'], isLive: true },
-  { id: 'live-2', title: 'Morning Yoga Flow — All Levels 🧘', streamerName: 'Lena Wellness', streamerAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100', thumbnail: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=600', viewers: 892, category: 'Wellness', tags: ['Yoga', 'Morning', 'Wellness'], isLive: true },
-  { id: 'live-3', title: 'Cooking Pasta From Scratch 🍝', streamerName: 'Chef Tony', streamerAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100', thumbnail: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=600', viewers: 2103, category: 'Food', tags: ['Cooking', 'Italian', 'Live'], isLive: true },
-  { id: 'live-4', title: 'NYC Night Photography Walk 📸', streamerName: 'Lisa Captures', streamerAvatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100', thumbnail: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=600', viewers: 456, category: 'Creative', tags: ['Photography', 'NYC', 'Night'], isLive: true },
-];
-
-const UPCOMING_SHOWS: Stream[] = [
-  { id: 'up-1', title: 'DJ Set: Deep House Sundown 🌅', streamerName: 'DJ Aria', streamerAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100', thumbnail: 'https://images.unsplash.com/photo-1571266028243-e4733b0f0bb0?w=400', viewers: 0, category: 'Music', tags: ['DJ', 'House', 'Sunset'], isLive: false, scheduledFor: '8:00 PM EST', description: '2-hour deep house set as the sun goes down.' },
-  { id: 'up-2', title: 'Monday Motivation & Goal Setting 🎯', streamerName: 'Coach Ray', streamerAvatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100', thumbnail: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400', viewers: 0, category: 'Wellness', tags: ['Motivation', 'Goals', 'Coaching'], isLive: false, scheduledFor: 'Tomorrow 7:00 AM', description: 'Start your week right with goal setting and accountability.' },
-  { id: 'up-3', title: 'DIY Home Decor Workshop 🏠', streamerName: 'Crafty Kate', streamerAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100', thumbnail: 'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=400', viewers: 0, category: 'Creative', tags: ['DIY', 'Home', 'Crafts'], isLive: false, scheduledFor: 'Wed 6:00 PM' },
-];
-
-const PAST_BROADCASTS: Stream[] = [
-  { id: 'past-1', title: 'Saturday Comedy Open Mic Night 🎤', streamerName: 'Laugh Factory', streamerAvatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=100', thumbnail: 'https://images.unsplash.com/photo-1527224857830-43a7acc85260?w=400', viewers: 4300, category: 'Entertainment', tags: ['Comedy', 'Stand-up'], isLive: false, duration: '1h 24m' },
-  { id: 'past-2', title: 'HIIT Cardio Blast — 30 Min 🔥', streamerName: 'Fit With Zoe', streamerAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100', thumbnail: 'https://images.unsplash.com/photo-1534258936925-c58bed479fcb?w=400', viewers: 8200, category: 'Fitness', tags: ['HIIT', 'Cardio', 'Workout'], isLive: false, duration: '32m' },
-  { id: 'past-3', title: 'Tokyo Food Tour — Hidden Gems 🍜', streamerName: 'Eat With Kenji', streamerAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1e?w=100', thumbnail: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400', viewers: 12000, category: 'Food', tags: ['Tokyo', 'Food Tour', 'Travel'], isLive: false, duration: '52m' },
-  { id: 'past-4', title: 'Guitar Masterclass: Blues Basics 🎸', streamerName: 'Marcus Beats', streamerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100', thumbnail: 'https://images.unsplash.com/photo-1525201548942-d8732f6617a0?w=400', viewers: 6100, category: 'Music', tags: ['Guitar', 'Blues', 'Tutorial'], isLive: false, duration: '1h 5m' },
-  { id: 'past-5', title: 'Meditation & Breathwork Session 🌿', streamerName: 'Lena Wellness', streamerAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100', thumbnail: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=400', viewers: 3700, category: 'Wellness', tags: ['Meditation', 'Breathwork'], isLive: false, duration: '24m' },
-  { id: 'past-6', title: 'Startup Pitch Review — Live Feedback 💼', streamerName: 'Venture Voice', streamerAvatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=100', thumbnail: 'https://images.unsplash.com/photo-1559136555-9303baea8ebd?w=400', viewers: 2800, category: 'Business', tags: ['Startups', 'Pitch', 'Business'], isLive: false, duration: '1h 12m' },
-];
+// Real data fetched from the spot feed API — initialized empty
+const LIVE_STREAMS: Stream[] = [];
+const UPCOMING_SHOWS: Stream[] = [];
+const PAST_BROADCASTS: Stream[] = [];
 
 function formatViewers(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -326,18 +310,42 @@ export default function LiveScreen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  // Real data from Supabase via the spot feed API
+  const [featuredStream, setFeaturedStream] = useState<Stream | null>(null);
+  const [liveStreams, setLiveStreams] = useState<Stream[]>([]);
+  const [upcomingShows, setUpcomingShows] = useState<Stream[]>([]);
+  const [pastBroadcasts, setPastBroadcasts] = useState<Stream[]>([]);
+
+  const fetchSpotFeed = useCallback(async () => {
+    try {
+      const data = await getSpotFeed(20);
+      const featured = data.cards.filter((c) => c.type === 'featured');
+      const live = data.cards.filter((c) => c.type === 'live');
+      const upcoming = data.cards.filter((c) => c.type === 'upcoming');
+      const past = data.cards.filter((c) => c.type === 'past');
+
+      setFeaturedStream(featured[0] || null);
+      setLiveStreams(live);
+      setUpcomingShows(upcoming);
+      setPastBroadcasts(past);
+    } catch (err) {
+      console.error('[LiveScreen] Failed to fetch spot feed:', err);
+    }
+  }, []);
+
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    fetchSpotFeed();
     const timer = setTimeout(() => setIsInitialLoad(false), 400);
     return () => clearTimeout(timer);
-  }, []);
+  }, [fetchSpotFeed]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1200);
-  }, []);
+    fetchSpotFeed().finally(() => setRefreshing(false));
+  }, [fetchSpotFeed]);
 
-  const allLive = [...myStreams, ...LIVE_STREAMS];
+  const allLive = [...myStreams, ...liveStreams];
 
   const renderLiveBadge = () => (
     <View style={styles.liveBadge}>
@@ -428,20 +436,22 @@ export default function LiveScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Featured</Text>
               </View>
             </View>
-            <TouchableOpacity activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(LIVE_STREAMS[0]); }}>
-              <ImageBackground source={{ uri: LIVE_STREAMS[0].thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
+            {featuredStream && (
+            <TouchableOpacity activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(featuredStream); }}>
+              <ImageBackground source={{ uri: featuredStream.thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.featuredOverlay}>
-                  <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(LIVE_STREAMS[0].viewers)}</View>
+                  <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(featuredStream.viewers)}</View>
                   <View style={styles.featuredBottom}>
-                    <Text style={styles.featuredTitle}>{LIVE_STREAMS[0].title}</Text>
+                    <Text style={styles.featuredTitle}>{featuredStream.title}</Text>
                     <View style={styles.featuredMeta}>
-                      <Image source={{ uri: LIVE_STREAMS[0].streamerAvatar }} style={styles.streamerAvatar} />
-                      <Text style={styles.streamerName}>{LIVE_STREAMS[0].streamerName}</Text>
+                      <Image source={{ uri: featuredStream.streamerAvatar }} style={styles.streamerAvatar} />
+                      <Text style={styles.streamerName}>{featuredStream.streamerName}</Text>
                     </View>
                   </View>
                 </LinearGradient>
               </ImageBackground>
             </TouchableOpacity>
+            )}
           </View>
 
           {/* Live Now */}
@@ -453,7 +463,7 @@ export default function LiveScreen() {
               </View>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveScroll}>
-              {allLive.slice(1).map((stream) => (
+              {allLive.map((stream) => (
                 <TouchableOpacity key={stream.id} style={[styles.liveCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(stream)}>
                   <ImageBackground source={{ uri: stream.thumbnail }} style={styles.liveThumb} imageStyle={styles.liveThumbImg}>
                     <View style={styles.liveCardTop}>{renderLiveBadge()}</View>
@@ -488,7 +498,7 @@ export default function LiveScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Upcoming</Text>
               </View>
             </View>
-            {UPCOMING_SHOWS.map((show) => {
+            {upcomingShows.map((show) => {
               const reminded = remindedIds.has(show.id);
               return (
                 <TouchableOpacity key={show.id} style={[styles.upcomingCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(show)}>
@@ -532,7 +542,7 @@ export default function LiveScreen() {
               </View>
             </View>
             <View style={styles.pastGrid}>
-              {PAST_BROADCASTS.map((vod) => (
+              {pastBroadcasts.map((vod) => (
                 <TouchableOpacity key={vod.id} style={[styles.pastCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(vod)}>
                   <ImageBackground source={{ uri: vod.thumbnail }} style={styles.pastThumb} imageStyle={styles.pastThumbImg}>
                     <View style={styles.pastDuration}>

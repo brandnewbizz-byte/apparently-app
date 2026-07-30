@@ -526,4 +526,249 @@ export async function createBundle(bundle: {
   return data;
 }
 
+// ─── Spot Feed (Live/Discovery) ───
+export interface SpotCard {
+  id: string;
+  type: 'live' | 'featured' | 'upcoming' | 'past';
+  title: string;
+  streamerName: string;
+  streamerAvatar: string;
+  streamerId: string;
+  thumbnail: string;
+  viewers: number;
+  category: string;
+  tags: string[];
+  isLive: boolean;
+  scheduledFor?: string;
+  duration?: string;
+  description?: string;
+  sourceType: 'post' | 'bundle' | 'user';
+  sourceId: string;
+  price?: number;
+  likes?: number;
+  commentsCount?: number;
+  createdAt: string;
+}
+
+export interface SpotFeedResponse {
+  cards: SpotCard[];
+  summary: {
+    total: number;
+    liveCount: number;
+    featuredCount: number;
+    upcomingCount: number;
+    pastCount: number;
+  };
+}
+
+function spotDefaultAvatar(): string {
+  return 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100';
+}
+
+function spotDefaultThumbnail(): string {
+  return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600';
+}
+
+function spotSafeImage(url: string | null | undefined): string {
+  if (!url) return spotDefaultThumbnail();
+  if (url.startsWith('file://')) return spotDefaultThumbnail();
+  return url;
+}
+
+function spotTimeAgo(dateStr: string): string {
+  const now = new Date();
+  const then = new Date(dateStr);
+  const diffMs = now.getTime() - then.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHrs = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return `${Math.floor(diffDays / 7)}w ago`;
+}
+
+/**
+ * Fetch the Spot (Live/Discovery) feed.
+ * Aggregates posts, bundles into a unified card feed.
+ */
+export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse> {
+  const cards: SpotCard[] = [];
+
+  // Fetch posts with user info
+  const { data: posts, error: postsErr } = await supabase
+    .from('posts')
+    .select(`
+      *,
+      user:user_id (
+        id,
+        name,
+        username,
+        avatar,
+        is_verified
+      )
+    `)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (postsErr) {
+    console.error('[getSpotFeed] Error fetching posts:', postsErr.message);
+  }
+
+  // Fetch active bundles
+  const { data: bundles, error: bundlesErr } = await supabase
+    .from('bundles')
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (bundlesErr) {
+    console.error('[getSpotFeed] Error fetching bundles:', bundlesErr.message);
+  }
+
+  // ── Build feed ──
+
+  // Featured: newest active bundle (or first post)
+  const featuredBundle = bundles?.[0];
+  const featuredPost = posts?.[0];
+
+  if (featuredBundle) {
+    cards.push({
+      id: `featured-${featuredBundle.id}`,
+      type: 'featured',
+      title: featuredBundle.title,
+      streamerName: featuredBundle.provider_name || 'Bundle Deal',
+      streamerAvatar: featuredBundle.provider_avatar || spotDefaultAvatar(),
+      streamerId: featuredBundle.user_id || '',
+      thumbnail: spotSafeImage(featuredBundle.image),
+      viewers: (featuredBundle.views || 0) + (featuredBundle.grabs || 0) * 10,
+      category: featuredBundle.category || 'Lifestyle',
+      tags: featuredBundle.items?.map((i: any) => i.title || '').filter(Boolean).slice(0, 3) || [featuredBundle.category || 'deal'],
+      isLive: true,
+      description: featuredBundle.description || undefined,
+      sourceType: 'bundle',
+      sourceId: featuredBundle.id,
+      price: featuredBundle.bundle_price || featuredBundle.price || undefined,
+      createdAt: featuredBundle.created_at,
+    });
+  } else if (featuredPost) {
+    const user = (featuredPost as any).user;
+    cards.push({
+      id: `featured-${featuredPost.id}`,
+      type: 'featured',
+      title: featuredPost.content || 'New Post',
+      streamerName: user?.name || user?.username || 'User',
+      streamerAvatar: user?.avatar || spotDefaultAvatar(),
+      streamerId: featuredPost.user_id,
+      thumbnail: spotSafeImage(featuredPost.image_url),
+      viewers: featuredPost.likes || 0,
+      category: (featuredPost as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      tags: (featuredPost as any).post_kind ? [(featuredPost as any).post_kind] : ['post'],
+      isLive: true,
+      description: featuredPost.content || undefined,
+      sourceType: 'post',
+      sourceId: featuredPost.id,
+      likes: featuredPost.likes || 0,
+      commentsCount: featuredPost.comments || 0,
+      createdAt: featuredPost.created_at,
+    });
+  }
+
+  // Live Now: recent posts (skip featured)
+  const livePosts = featuredPost
+    ? (posts || []).filter((p) => p.id !== featuredPost.id).slice(0, 6)
+    : (posts || []).slice(1, 7);
+
+  for (const post of livePosts) {
+    const user = (post as any).user;
+    cards.push({
+      id: `live-${post.id}`,
+      type: 'live',
+      title: post.content || 'Photo Update',
+      streamerName: user?.name || user?.username || 'User',
+      streamerAvatar: user?.avatar || spotDefaultAvatar(),
+      streamerId: post.user_id,
+      thumbnail: spotSafeImage(post.image_url),
+      viewers: post.likes || 0,
+      category: (post as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      tags: (post as any).post_kind ? [(post as any).post_kind] : ['post'],
+      isLive: true,
+      description: post.content || undefined,
+      sourceType: 'post',
+      sourceId: post.id,
+      likes: post.likes || 0,
+      commentsCount: post.comments || 0,
+      createdAt: post.created_at,
+    });
+  }
+
+  // Upcoming: remaining bundles (skip featured)
+  const upcomingBundles = featuredBundle
+    ? (bundles || []).filter((b) => b.id !== featuredBundle.id).slice(0, 4)
+    : (bundles || []).slice(1, 5);
+
+  for (const bundle of upcomingBundles) {
+    cards.push({
+      id: `upcoming-${bundle.id}`,
+      type: 'upcoming',
+      title: bundle.title,
+      streamerName: bundle.provider_name || 'Available Soon',
+      streamerAvatar: bundle.provider_avatar || spotDefaultAvatar(),
+      streamerId: bundle.user_id || '',
+      thumbnail: spotSafeImage(bundle.image),
+      viewers: 0,
+      category: bundle.category || 'Lifestyle',
+      tags: bundle.items?.map((i: any) => i.title || '').filter(Boolean).slice(0, 2) || [],
+      isLive: false,
+      scheduledFor: 'Available now',
+      description: bundle.description || undefined,
+      sourceType: 'bundle',
+      sourceId: bundle.id,
+      price: bundle.bundle_price || bundle.price || undefined,
+      createdAt: bundle.created_at,
+    });
+  }
+
+  // Past Broadcasts: older posts beyond live/featured
+  const pastStartIndex = (featuredPost ? 1 : 0) + livePosts.length;
+  const pastPosts = (posts || []).slice(pastStartIndex, pastStartIndex + 8);
+
+  for (const post of pastPosts) {
+    const user = (post as any).user;
+    const age = spotTimeAgo(post.created_at);
+    cards.push({
+      id: `past-${post.id}`,
+      type: 'past',
+      title: post.content || 'Memory',
+      streamerName: user?.name || user?.username || 'User',
+      streamerAvatar: user?.avatar || spotDefaultAvatar(),
+      streamerId: post.user_id,
+      thumbnail: spotSafeImage(post.image_url),
+      viewers: post.likes || 0,
+      category: (post as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      tags: (post as any).post_kind ? [(post as any).post_kind] : ['memory'],
+      isLive: false,
+      duration: age,
+      sourceType: 'post',
+      sourceId: post.id,
+      likes: post.likes || 0,
+      commentsCount: post.comments || 0,
+      createdAt: post.created_at,
+    });
+  }
+
+  return {
+    cards,
+    summary: {
+      total: cards.length,
+      liveCount: cards.filter((c) => c.type === 'live').length,
+      featuredCount: cards.filter((c) => c.type === 'featured').length,
+      upcomingCount: cards.filter((c) => c.type === 'upcoming').length,
+      pastCount: cards.filter((c) => c.type === 'past').length,
+    },
+  };
+}
+
 export { API_BASE };

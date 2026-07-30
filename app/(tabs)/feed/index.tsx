@@ -32,6 +32,9 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { useTabBar } from '@/contexts/TabBarContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
+import StoriesViewer, { type StoryUser, type StoryMedia } from '@/components/StoriesViewer';
+import StoryRing from '@/components/StoryRing';
+import CreateStory from '@/components/CreateStory';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLiveAvatar } from '@/hooks/useLiveAvatar';
@@ -708,6 +711,10 @@ export default function FeedScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [createCategory, setCreateCategory] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  // ── Stories UI state ──
+  const [showStoriesViewer, setShowStoriesViewer] = useState(false);
+  const [storyViewerStartIndex, setStoryViewerStartIndex] = useState(0);
+  const [showCreateStory, setShowCreateStory] = useState(false);
 
   // Load saved post IDs from Supabase
   useEffect(() => {
@@ -749,6 +756,53 @@ export default function FeedScreen() {
   const bundlePosts = useMemo(() => bundles.slice(0, 6).map(bundleToFeedPost), [bundles]);
 
   const externalEvents = EXTERNAL_EVENTS;
+
+  // ── Transform stories into StoryUser[] format for StoriesViewer ──
+  const storyUsers = useMemo((): StoryUser[] => {
+    // Combine user stories and feed stories, group by user
+    const userMap = new Map<string, { name: string; avatar: string; stories: StoryMedia[] }>();
+
+    const addStory = (
+      id: string,
+      userId: string,
+      name: string,
+      avatar: string,
+      imageUrl: string,
+      timestamp: string,
+    ) => {
+      if (!userMap.has(userId)) {
+        userMap.set(userId, { name, avatar, stories: [] });
+      }
+      const entry = userMap.get(userId)!;
+      // Avoid duplicates
+      if (!entry.stories.find(s => s.id === id)) {
+        entry.stories.push({
+          id,
+          mediaUrl: imageUrl,
+          createdAt: timestamp,
+        });
+      }
+    };
+
+    // Add user's own stories first (so they appear first)
+    userStories.forEach(s => {
+      addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
+    });
+
+    // Add feed stories
+    feedStories.forEach(s => {
+      addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
+    });
+
+    return Array.from(userMap.entries()).map(([userId, data]) => ({
+      userId,
+      name: data.name,
+      avatar: data.avatar,
+      stories: data.stories.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    }));
+  }, [userStories, feedStories]);
 
   const filteredPosts = useMemo(() => {
     // ── Deduplication: prefer context data over hardcoded ──
@@ -1097,35 +1151,38 @@ export default function FeedScreen() {
             <View style={{ height: 6 }} />
 
             {/* ── Stories Row ── */}
-            {(feedStories.length > 0 || userStories.length > 0) && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 12, gap: 12, paddingVertical: 4, marginBottom: 12 }}>
-                {/* Your Story */}
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: '/create-content', params: { type: 'story' } })}
-                  style={{ alignItems: 'center', gap: 4, width: 68 }}>
-                  <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' }}>
-                    <Plus size={22} color={colors.accent} />
-                  </View>
-                  <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>Your Story</Text>
-                </TouchableOpacity>
-                {/* Other stories */}
-                {[...userStories, ...feedStories].slice(0, 10).map(story => {
-                  const isMine = userStories.some(s => s.id === story.id);
-                  return (
-                    <TouchableOpacity key={story.id}
-                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                      style={{ alignItems: 'center', gap: 4, width: 68 }}>
-                      <View style={{ width: 68, height: 68, borderRadius: 34, padding: 2.5, borderWidth: 2, borderColor: story.viewed ? colors.border : '#E04040' }}>
-                        <RNImage source={{ uri: (story.user?.avatar || story.imageUrl) }}
-                          style={{ width: '100%', height: '100%', borderRadius: 32 }} />
-                      </View>
-                      <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>
-                        {isMine ? 'You' : (story.user?.name || story.user?.username || 'User')}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+            {storyUsers.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 4,
+                  marginBottom: 12,
+                  gap: 8,
+                }}
+              >
+                {/* Your Story / Add Story */}
+                <StoryRing
+                  avatar={userAvatar}
+                  name="Your Story"
+                  hasUnviewed={false}
+                  isAddStory
+                  onPress={() => setShowCreateStory(true)}
+                />
+                {/* Other users' stories */}
+                {storyUsers.map((storyUser, idx) => (
+                  <StoryRing
+                    key={storyUser.userId}
+                    avatar={storyUser.avatar}
+                    name={storyUser.name === 'You' ? 'Your Story' : storyUser.name}
+                    hasUnviewed
+                    onPress={() => {
+                      setStoryViewerStartIndex(idx);
+                      setShowStoriesViewer(true);
+                    }}
+                  />
+                ))}
               </ScrollView>
             )}
 
@@ -1296,6 +1353,27 @@ export default function FeedScreen() {
         backgroundColor={colors.background}
         textColor={colors.text}
         accentColor={colors.accent}
+      />
+
+      {/* ── Stories Viewer ── */}
+      <StoriesViewer
+        visible={showStoriesViewer}
+        onClose={() => setShowStoriesViewer(false)}
+        allStoryUsers={storyUsers}
+        initialUserIndex={storyViewerStartIndex}
+      />
+
+      {/* ── Create Story ── */}
+      <CreateStory
+        visible={showCreateStory}
+        onClose={() => setShowCreateStory(false)}
+        onStoryCreated={() => setShowCreateStory(false)}
+        colors={{
+          background: colors.background,
+          text: colors.text,
+          accent: colors.accent,
+          surface: colors.surface,
+        }}
       />
 
       {/* Media Viewer Modal — full‑screen like Instagram */}
