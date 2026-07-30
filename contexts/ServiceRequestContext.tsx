@@ -121,6 +121,13 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
           image: row.image_url || undefined,
         }));
 
+        // If Supabase returns empty (schema mismatch), fall back to AsyncStorage
+        if (liveRequests.length === 0) {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setRequests(JSON.parse(stored));
+          setIsLoaded(true);
+          return;
+        }
         setRequests(liveRequests);
         try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveRequests)); } catch {}
       } catch (e) {

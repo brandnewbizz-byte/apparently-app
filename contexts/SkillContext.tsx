@@ -93,6 +93,19 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           availableCount: 1,
         }));
 
+        // If Supabase returns empty (table schema mismatch), fall back to AsyncStorage
+        if (liveSkills.length === 0) {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const cached = JSON.parse(stored);
+            setSkills(cached);
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            const myId = authUser?.id || '';
+            setMySkills(cached.filter((s: UserSkill) => s.creatorId === myId));
+          }
+          setIsLoaded(true);
+          return;
+        }
         setSkills(liveSkills);
         // Only show user's own skills on their profile
         const { data: { user: authUser } } = await supabase.auth.getUser();

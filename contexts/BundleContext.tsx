@@ -107,6 +107,20 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           availableCount: row.available_count || 1,
         }));
 
+        // If Supabase returns empty (table schema mismatch or no rows),
+        // fall back to AsyncStorage — don't wipe local data with empty array
+        if (liveBundles.length === 0) {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const cached = JSON.parse(stored);
+            setBundles(cached);
+            const { data: { user: authUser2 } } = await supabase.auth.getUser();
+            const myId2 = authUser2?.id || '';
+            setMyBundles(cached.filter((b: UserBundle) => b.creatorId === myId2));
+          }
+          setIsLoaded(true);
+          return;
+        }
         setBundles(liveBundles);
         // Only show user's own bundles on their profile
         const { data: { user: authUser2 } } = await supabase.auth.getUser();
