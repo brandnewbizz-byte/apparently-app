@@ -115,10 +115,17 @@ const REQUEST_STATUS_COLORS: Record<RequestStatus, string> = {
 };
 
 const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
-  open: 'Open',
-  in_progress: 'In Progress',
-  fulfilled: 'Fulfilled',
-  cancelled: 'Cancelled',
+  open: "Open",
+  in_progress: "In Progress",
+  fulfilled: "Fulfilled",
+  cancelled: "Cancelled",
+};
+
+const ACCENT_COLORS = {
+  coral: "#FF6B6B",
+  teal: "#4ECDC4",
+  gold: "#FFD93D",
+  purple: "#6C5CE7",
 };
 
 const PLAN_CATEGORIES = [
@@ -1125,6 +1132,9 @@ export default function PlannerScreen() {
                           {req.description}
                         </Text>
                       ) : null}
+                      {req.image && (
+                        <Image source={{ uri: req.image }} style={styles.requestThumb} resizeMode="cover" />
+                      )}
                       {req.tags.length > 0 && (
                         <View style={styles.assistanceTags}>
                           {req.tags.map((tag) => (
@@ -1135,6 +1145,24 @@ export default function PlannerScreen() {
                           ))}
                         </View>
                       )}
+                      <View style={styles.requestCardActions}>
+                        <TouchableOpacity
+                          style={[styles.requestDeleteBtn, { borderColor: colors.border }]}
+                          onPress={() => {
+                            Alert.alert(
+                              'Delete Request?',
+                              `Are you sure you want to delete \"${req.title}\"?`,
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Delete', style: 'destructive', onPress: () => deleteRequest(req.id) },
+                              ]
+                            );
+                          }}
+                        >
+                          <X size={14} color={ACCENT_COLORS.coral} />
+                          <Text style={[styles.requestDeleteText, { color: ACCENT_COLORS.coral }]}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -1535,5 +1563,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 8,
+  },
+
+  requestThumb: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  requestCardActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+    paddingTop: 8,
+  },
+  requestDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  requestDeleteText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

@@ -445,13 +445,38 @@ export default function ProfileScreen() {
     ]).start();
   }, [fadeAnim, scaleAnim]);
 
-  const handleViewBundleDetails = useCallback((bundle: GrabbedBundle) => {
-    console.log('View bundle details:', bundle.id);
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    router.push(`/(tabs)/planner/${bundle.id}` as any);
-  }, [router]);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
+
+  const handleViewBundleDetails = useCallback((bundle: any) => {
+    setDetailItem({
+      title: bundle.title || 'Bundle',
+      description: bundle.description || 'No description',
+      price: typeof bundle.price === 'number' ? bundle.price : parseInt(bundle.price || '0', 10) || 0,
+      category: bundle.category || 'Other',
+      imageUrl: bundle.imageUrl || bundle.image_url,
+      icon: bundle.icon,
+      grabCount: bundle.grabCount || bundle.grab_count || 0,
+      created_at: bundle.created_at || bundle.createdAt,
+      creatorName: bundle.creatorName || bundle.creator_name || 'User',
+    });
+    setDetailModalVisible(true);
+  }, []);
+
+  const handleViewSkillDetails = useCallback((skill: any) => {
+    setDetailItem({
+      title: skill.title || 'Skill',
+      description: skill.description || 'No description',
+      price: typeof skill.price === 'number' ? skill.price : parseInt(skill.price || '0', 10) || 0,
+      category: skill.category || 'Other',
+      imageUrl: skill.imageUrl || skill.image_url,
+      icon: skill.icon,
+      grabCount: skill.grabCount || skill.grab_count || 0,
+      created_at: skill.created_at || skill.createdAt,
+      creatorName: skill.creatorName || skill.creator_name || 'User',
+    });
+    setDetailModalVisible(true);
+  }, []);
 
   const handleChatPlanner = useCallback((bundle: GrabbedBundle) => {
     console.log('Chat planner for bundle:', bundle.id);
@@ -625,7 +650,7 @@ export default function ProfileScreen() {
                       </View>
                       <View style={styles.bundleCardRight}>
                         <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${bundle.price}</Text>
-                        <TouchableOpacity onPress={() => deleteBundle(bundle.id)}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { Alert.alert('Delete Bundle?', `Are you sure you want to delete "${bundle.title}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteBundle(bundle.id) }]); }}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
                       </View>
                     </TouchableOpacity>
                   ))
@@ -656,7 +681,7 @@ export default function ProfileScreen() {
                   </View>
                 ) : (
                   mySkills.map((skill) => (
-                    <TouchableOpacity key={skill.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7}>
+                    <TouchableOpacity key={skill.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7} onPress={() => handleViewSkillDetails(skill)}>
                       <View style={styles.bundleCardLeft}>
                         <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.coralDim }]}>
                           {skill.imageUrl ? (
@@ -672,7 +697,7 @@ export default function ProfileScreen() {
                       </View>
                       <View style={styles.bundleCardRight}>
                         <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${skill.price}</Text>
-                        <TouchableOpacity onPress={() => deleteSkill(skill.id)}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
+                        <TouchableOpacity onPress={() => { Alert.alert('Delete Skill?', `Are you sure you want to delete "${skill.title}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteSkill(skill.id) }]); }}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
                       </View>
                     </TouchableOpacity>
                   ))
@@ -738,6 +763,56 @@ export default function ProfileScreen() {
         onClose={() => setShowEditProfile(false)}
         colors={colors}
       />
+
+      {/* Detail Modal — for bundles, skills, service requests */}
+      <Modal visible={detailModalVisible} animationType="slide" transparent onRequestClose={() => setDetailModalVisible(false)}>
+        <View style={[styles.detailOverlay]}>
+          <View style={[styles.detailSheet, { backgroundColor: colors.surface }]}>
+            {/* Handle bar */}
+            <View style={[styles.detailHandle, { backgroundColor: colors.border }]} />
+            {/* Header */}
+            <View style={styles.detailHeader}>
+              <Text style={[styles.detailTitle, { color: colors.text }]}>{detailItem?.title || ''}</Text>
+              <TouchableOpacity onPress={() => setDetailModalVisible(false)} style={styles.detailCloseBtn}>
+                <X size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.detailBody} showsVerticalScrollIndicator={false}>
+              {detailItem?.imageUrl ? (
+                <Image source={{ uri: detailItem.imageUrl }} style={styles.detailImage} resizeMode="cover" />
+              ) : detailItem?.icon ? (
+                <View style={[styles.detailIconPlaceholder, { backgroundColor: colors.border }]}>
+                  <Text style={{ fontSize: 48 }}>{detailItem.icon}</Text>
+                </View>
+              ) : null}
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Price</Text>
+                <Text style={[styles.detailValue, { color: ACCENT_COLORS.neonGreen }]}>${detailItem?.price ?? 0}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Category</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{detailItem?.category || '-'}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Grabs</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{detailItem?.grabCount ?? 0}</Text>
+              </View>
+              {detailItem?.created_at && (
+                <View style={styles.detailRow}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Posted</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{new Date(detailItem.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                </View>
+              )}
+              {detailItem?.description ? (
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary, marginBottom: 6 }]}>Description</Text>
+                  <Text style={[styles.detailDesc, { color: colors.text }]}>{detailItem.description}</Text>
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1364,6 +1439,21 @@ const styles = StyleSheet.create({
   editLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   editInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   editBio: { minHeight: 80 },
+  // ── Detail Modal ──
+  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  detailSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%', paddingBottom: 40 },
+  detailHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 10 },
+  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  detailTitle: { fontSize: 20, fontWeight: '700', flex: 1 },
+  detailCloseBtn: { padding: 4 },
+  detailBody: { paddingHorizontal: 20 },
+  detailImage: { width: '100%', height: 200, borderRadius: 12, marginTop: 8 },
+  detailIconPlaceholder: { width: '100%', height: 120, borderRadius: 12, marginTop: 8, alignItems: 'center', justifyContent: 'center' },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  detailLabel: { fontSize: 14, fontWeight: '600' },
+  detailValue: { fontSize: 15, fontWeight: '500' },
+  detailSection: { paddingVertical: 12 },
+  detailDesc: { fontSize: 15, lineHeight: 22 },
 });
 
 // ── Instagram Post Styles ──

@@ -65,6 +65,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   const [bundles, setBundles] = useState<UserBundle[]>(SEED_BUNDLES);
   const [myBundles, setMyBundles] = useState<UserBundle[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const { user } = useAuth();
 
   // Load bundles from Supabase on mount (live backend)
   useEffect(() => {
@@ -173,6 +174,11 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveBundles, myBundles.length]);
 
   const grabBundle = useCallback((id: string) => {
+    const bundle = bundles.find((b) => b.id === id);
+    if (bundle && user?.id && bundle.creatorId === user.id) {
+      logger.warn('BundleContext', 'Cannot grab own bundle');
+      return;
+    }
     setBundles((prev) => {
       const updated = prev.map((b) =>
         b.id === id ? { ...b, status: 'grabbed' as const, grabCount: b.grabCount + 1 } : b
@@ -188,7 +194,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         });
       }
     });
-  }, [isLoaded, saveBundles]);
+  }, [isLoaded, saveBundles, user?.id, bundles]);
 
   const deleteBundle = useCallback((id: string) => {
     setBundles((prev) => {

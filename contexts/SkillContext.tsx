@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useMemo, useEf
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
+import { useAuth } from '@/contexts/AuthContext';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   const [skills, setSkills] = useState<UserSkill[]>(SEED_SKILLS);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +157,11 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveSkills, mySkills.length]);
 
   const grabSkill = useCallback((id: string) => {
+    const skill = skills.find((s) => s.id === id);
+    if (skill && user?.id && skill.creatorId === user.id) {
+      logger.warn('SkillContext', 'Cannot grab own skill');
+      return;
+    }
     setSkills((prev) => {
       const updated = prev.map((s) =>
         s.id === id ? { ...s, status: 'grabbed' as const, grabCount: s.grabCount + 1 } : s
