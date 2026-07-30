@@ -66,28 +66,62 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   const [myBundles, setMyBundles] = useState<UserBundle[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load persisted bundles from AsyncStorage on mount, merge with seed data
+  // Load bundles from Supabase on mount (live backend)
   useEffect(() => {
+    let cancelled = false;
     const loadBundles = async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed: UserBundle[] = JSON.parse(stored);
-          // Merge: stored bundles take precedence over seed for matching IDs
-          const storedIds = new Set(parsed.map((b) => b.id));
-          const merged = [
-            ...parsed,
-            ...SEED_BUNDLES.filter((b) => !storedIds.has(b.id)),
-          ];
-          setBundles(merged);
+        const { data, error } = await supabase
+          .from('bundles')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (cancelled) return;
+
+        if (error) {
+          logger.error('BundleContext', 'Failed to fetch bundles from Supabase', { error });
+          // Fall back to local cache if Supabase is down
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setBundles(JSON.parse(stored));
+          return;
         }
+
+        const liveBundles: UserBundle[] = (data || []).map((row: any) => ({
+          id: row.id,
+          title: row.title || '',
+          description: row.description || '',
+          price: row.price || 0,
+          items: row.items || [],
+          imageUrl: row.cover_image || '',
+          category: row.category || '',
+          location: row.location || '',
+          dateRange: row.date_range || '',
+          tags: row.tags || [],
+          creatorId: row.creator_id || '',
+          creator: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '', rating: 0, reviews: 0 },
+          status: row.status || 'available',
+          grabCount: row.grab_count || 0,
+          createdAt: row.created_at || new Date().toISOString(),
+          availableCount: row.available_count || 1,
+        }));
+
+        setBundles(liveBundles);
+        // Cache to AsyncStorage for offline fallback
+        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveBundles)); } catch {}
       } catch (e) {
         logger.error('BundleContext', 'Failed to load bundles', { e });
+        // Fall back to local cache
+        try {
+          const stored = await AsyncStorage.getItem(STORAGE_KEY);
+          if (stored) setBundles(JSON.parse(stored));
+        } catch {}
       } finally {
-        setIsLoaded(true);
+        if (!cancelled) setIsLoaded(true);
       }
     };
     loadBundles();
+    return () => { cancelled = true; };
   }, []);
 
   // Save bundles to AsyncStorage whenever they change (after initial load)
