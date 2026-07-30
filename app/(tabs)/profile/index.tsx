@@ -47,7 +47,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/supabaseClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
@@ -718,6 +718,42 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
 }) {
   const translateY = useRef(new Animated.Value(300)).current;
   const bgOpacity = useRef(new Animated.Value(0)).current;
+  const { toggleLike: socialLike, addComment: socialComment } = useSocial();
+
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [commenting, setCommenting] = useState(false);
+
+  const postId = post?.id || '';
+  const imageUrl = post?.imageUrl || post?.image_url || post?.mediaUri || '';
+  const authorName = post?.user?.name || post?.author_name || post?.author?.name || '@user';
+  const caption = post?.caption || post?.content || '';
+  const timestamp = post?.timestamp || post?.created_at || '';
+
+  const screenHeight = Dimensions.get('window').height;
+  const screenWidth = Dimensions.get('window').width;
+
+  // Load comments when post opens
+  useEffect(() => {
+    if (!visible || !postId) return;
+    
+    // Reset like state — could be improved by checking DB
+    setLiked(false);
+    setLikeCount(post?.likes ?? 0);
+
+    // Fetch comments
+    supabase
+      .from('post_comments')
+      .select('id, content, created_at, author_id')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .limit(50)
+      .then(({ data, error }) => {
+        if (!error && data) setComments(data || []);
+      });
+  }, [visible, postId]);
 
   useEffect(() => {
     if (visible) {
@@ -733,16 +769,6 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
 
   if (!post) return null;
 
-  // Use ONLY post data — never fall back to current user
-  const authorName = post.user?.name || post.author_name || post.author?.name || '@user';
-  const caption = post.caption || post.content || '';
-  const likes = post.likes ?? 0;
-  const timestamp = post.timestamp || post.created_at || '';
-  const imageUrl = post.imageUrl || post.image_url || '';
-
-  const screenHeight = Dimensions.get('window').height;
-  const screenWidth = Dimensions.get('window').width;
-
   const handleClose = () => {
     Animated.parallel([
       Animated.timing(translateY, { toValue: 300, duration: 250, useNativeDriver: true }),
@@ -750,19 +776,88 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
     ]).start(() => onClose());
   };
 
+  const toggleLikeLocal = async () => {
+    if (!postId || liked) return; // Don't unlike your own post in this view
+    setLiked(true);
+    setLikeCount(prev => prev + 1);
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Persist to DB and context
+    try {
+      await socialLike(postId);
+    } catch (e) {
+      console.log('[Viewer] Like error:', e);
+    }
+  };
+
+  const handleAddComment = async () => {
+    const text = commentText.trim();
+    if (!text || !postId || commenting) return;
+    setCommenting(true);
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      await socialComment(postId, text);
+      // Optimistic add
+      setComments(prev => [...prev, {
+        id: `temp-${Date.now()}`,
+        content: text,
+        created_at: new Date().toISOString(),
+        author_id: 'me',
+      }]);
+      setCommentText('');
+    } catch (e) {
+      console.log('[Viewer] Comment error:', e);
+    } finally {
+      setCommenting(false);
+    }
+  };
+
   if (!imageUrl) {
-    // No image — just show text post
+    // No image — text post with comments
     return (
       <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
         <View style={viewerStyles.backdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
           <Animated.View style={[viewerStyles.textCard, { transform: [{ translateY }] }]}>
             <View style={viewerStyles.textCardHandle} />
             <Text style={viewerStyles.authorLabel}>{authorName}</Text>
             <Text style={viewerStyles.captionText}>{caption || 'No caption'}</Text>
+            
+            {/* Engagement */}
             <View style={viewerStyles.engagementRow}>
-              <Heart size={20} color={likes > 0 ? '#EF4444' : '#999'} fill={likes > 0 ? '#EF4444' : 'none'} />
-              <Text style={viewerStyles.likesText}>{likes}</Text>
+              <TouchableOpacity onPress={toggleLikeLocal} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Heart size={20} color={liked ? '#EF4444' : '#999'} fill={liked ? '#EF4444' : 'none'} />
+                <Text style={viewerStyles.likesText}>{likeCount}</Text>
+              </TouchableOpacity>
             </View>
+
+            {/* Comments */}
+            <ScrollView style={{ maxHeight: 200, marginTop: 12 }}>
+              {comments.map((c, i) => (
+                <View key={c.id || i} style={{ marginBottom: 8, flexDirection: 'row', gap: 8 }}>
+                  <Text style={viewerStyles.commentAuthor}>@{c.author_id === 'me' ? 'you' : 'user'}:</Text>
+                  <Text style={viewerStyles.commentText}>{c.content}</Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Comment input */}
+            <View style={viewerStyles.commentInputRow}>
+              <TextInput
+                style={viewerStyles.commentInput}
+                placeholder="Add a comment..."
+                placeholderTextColor="#666"
+                value={commentText}
+                onChangeText={setCommentText}
+                onSubmitEditing={handleAddComment}
+                returnKeyType="send"
+              />
+              <TouchableOpacity onPress={handleAddComment} disabled={!commentText.trim() || commenting}>
+                <Send size={18} color={commentText.trim() ? '#3B82F6' : '#555'} />
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity style={viewerStyles.dismissBtn} onPress={handleClose}>
               <Text style={viewerStyles.dismissBtnText}>Close</Text>
             </TouchableOpacity>
@@ -788,7 +883,7 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
           resizeMode="cover"
         />
 
-        {/* Bottom sheet */}
+          {/* Engagement + comments sheet */}
         <Animated.View style={[viewerStyles.igSheet, { transform: [{ translateY }] }]}>
           {/* Drag handle */}
           <View style={viewerStyles.sheetHandle} />
@@ -813,10 +908,42 @@ function InstagramPostViewer({ visible, post, onClose, colors }: {
             </Text>
           ) : null}
 
-          {/* Engagement row */}
+          {/* Like button */}
           <View style={viewerStyles.engagementRow}>
-            <Heart size={22} color={likes > 0 ? '#EF4444' : '#999'} fill={likes > 0 ? '#EF4444' : 'none'} />
-            <Text style={viewerStyles.likesText}>{likes} {likes === 1 ? 'like' : 'likes'}</Text>
+            <TouchableOpacity onPress={toggleLikeLocal} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Heart size={22} color={liked ? '#EF4444' : '#999'} fill={liked ? '#EF4444' : 'none'} />
+              <Text style={viewerStyles.likesText}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Comments list */}
+          <ScrollView style={{ maxHeight: 140 }} showsVerticalScrollIndicator={false}>
+            {comments.length === 0 ? (
+              <Text style={viewerStyles.noComments}>No comments yet. Be the first!</Text>
+            ) : (
+              comments.map((c, i) => (
+                <View key={c.id || i} style={viewerStyles.commentRow}>
+                  <Text style={viewerStyles.commentUser}>@{c.author_id === 'me' ? 'you' : 'user'}</Text>
+                  <Text style={viewerStyles.commentBody}>{c.content}</Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+
+          {/* Comment input */}
+          <View style={viewerStyles.commentInputRow}>
+            <TextInput
+              style={viewerStyles.commentInput}
+              placeholder="Add a comment..."
+              placeholderTextColor="#666"
+              value={commentText}
+              onChangeText={setCommentText}
+              onSubmitEditing={handleAddComment}
+              returnKeyType="send"
+            />
+            <TouchableOpacity onPress={handleAddComment} disabled={!commentText.trim() || commenting}>
+              <Send size={18} color={commentText.trim() ? colors.accent : '#555'} />
+            </TouchableOpacity>
           </View>
         </Animated.View>
       </Animated.View>
@@ -1217,4 +1344,13 @@ const viewerStyles = StyleSheet.create({
   authorName: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   caption: { fontSize: 14, color: '#FFF', paddingHorizontal: 16, paddingTop: 8, lineHeight: 20 },
   timestamp: { fontSize: 11, color: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingTop: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
+  // Comments
+  noComments: { fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'center', paddingVertical: 16 },
+  commentRow: { flexDirection: 'row', gap: 6, paddingVertical: 6 },
+  commentUser: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
+  commentBody: { fontSize: 13, color: '#DDD', flex: 1 },
+  commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  commentInput: { flex: 1, fontSize: 14, color: '#FFF', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20 },
+  commentAuthor: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
+  commentText: { fontSize: 13, color: '#DDD' },
 });

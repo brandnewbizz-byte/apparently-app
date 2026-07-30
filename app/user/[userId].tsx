@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -45,6 +45,9 @@ export default function UserProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [isNotificationsOn, setIsNotificationsOn] = useState(false);
+  const [userBio, setUserBio] = useState('');
+  const [userLocation, setUserLocation] = useState('');
+  const [followLoading, setFollowLoading] = useState(false);
   
   const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes'>('posts');
   
@@ -75,9 +78,10 @@ export default function UserProfileScreen() {
 
     const loadUser = async () => {
       try {
+        // Fetch from `users` table (has display names, usernames, avatars)
         const { data, error } = await supabase
-          .from('profiles')
-          .select('id, name, username, avatar_url, is_verified, followers_count')
+          .from('users')
+          .select('id, name, username, avatar, is_verified, followers_count, is_live, bio, location')
           .eq('id', userId)
           .single();
 
@@ -86,15 +90,51 @@ export default function UserProfileScreen() {
             id: data.id,
             name: data.name || 'Unknown User',
             username: data.username || '',
-            avatar: data.avatar_url || '',
+            avatar: data.avatar || '',
             isVerified: data.is_verified || false,
             followersCount: data.followers_count || 0,
-            isLive: false,
+            isLive: data.is_live || false,
           });
           setFollowersCount(data.followers_count || 0);
+          setUserBio(data.bio || '');
+          setUserLocation(data.location || '');
+
+          // Check if current user follows this user
+          const { data: authData } = await supabase.auth.getUser();
+          if (authData?.user?.id) {
+            const { data: followData } = await supabase
+              .from('follows')
+              .select('id')
+              .eq('follower_id', authData.user.id)
+              .eq('following_id', userId)
+              .maybeSingle();
+            if (!cancelled) setIsFollowing(!!followData);
+          }
         }
       } catch (e) {
         console.log('[UserProfile] loadUser error:', e);
+        // Fallback: try profiles table
+        try {
+          const { data: pfData, error: pfErr } = await supabase
+            .from('profiles')
+            .select('id, full_name, username, avatar_url, bio, location')
+            .eq('id', userId)
+            .single();
+          if (!cancelled && !pfErr && pfData) {
+            setUser({
+              id: pfData.id,
+              name: pfData.full_name || 'Unknown User',
+              username: pfData.username || '',
+              avatar: pfData.avatar_url || '',
+              isVerified: false,
+              followersCount: 0,
+              isLive: false,
+            });
+            setFollowersCount(0);
+            setUserBio(pfData.bio || '');
+            setUserLocation(pfData.location || '');
+          }
+        } catch {}
       } finally {
         if (!cancelled) setIsLoadingUser(false);
       }
@@ -113,7 +153,7 @@ export default function UserProfileScreen() {
       try {
         const { data, error } = await supabase
           .from('posts')
-          .select('*, profiles:user_id(id, name, username, avatar_url)')
+          .select('*, user:user_id(id, name, username, avatar)')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -198,28 +238,40 @@ export default function UserProfileScreen() {
     ]).start();
   }, [fadeAnim, slideAnim]);
 
-  const handleFollow = () => {
+  const handleFollow = useCallback(async () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    
+    if (followLoading) return;
+    setFollowLoading(true);
+
     Animated.sequence([
-      Animated.timing(followButtonScale, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(followButtonScale, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
+      Animated.timing(followButtonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
+      Animated.timing(followButtonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start();
-    
-    setIsFollowing(!isFollowing);
-    setFollowersCount(prev => isFollowing ? prev - 1 : prev + 1);
-    console.log('[UserProfile] Toggle follow user:', userId, !isFollowing);
-  };
+
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const followerId = authData?.user?.id;
+      if (!followerId) { setFollowLoading(false); return; }
+
+      if (isFollowing) {
+        // Unfollow
+        await supabase.from('follows').delete().eq('follower_id', followerId).eq('following_id', userId);
+        setIsFollowing(false);
+        setFollowersCount(prev => Math.max(0, prev - 1));
+      } else {
+        // Follow
+        await supabase.from('follows').insert({ follower_id: followerId, following_id: userId });
+        setIsFollowing(true);
+        setFollowersCount(prev => prev + 1);
+      }
+    } catch (e) {
+      console.log('[UserProfile] Follow error:', e);
+    } finally {
+      setFollowLoading(false);
+    }
+  }, [isFollowing, userId, followLoading]);
 
   const handleMessage = () => {
     if (Platform.OS !== 'web') {
@@ -367,15 +419,17 @@ export default function UserProfileScreen() {
 
             <Text style={styles.username}>@{user.username}</Text>
 
-            <Text style={styles.bio}>
-              Creating content that matters. Life is about connections and growth.
-            </Text>
+            {userBio ? (
+              <Text style={styles.bio}>{userBio}</Text>
+            ) : null}
 
             <View style={styles.metaRow}>
-              <View style={styles.metaItem}>
-                <MapPin size={14} color={Colors.dark.textTertiary} />
-                <Text style={styles.metaText}>New York, NY</Text>
-              </View>
+              {userLocation ? (
+                <View style={styles.metaItem}>
+                  <MapPin size={14} color={Colors.dark.textTertiary} />
+                  <Text style={styles.metaText}>{userLocation}</Text>
+                </View>
+              ) : null}
               <View style={styles.metaItem}>
                 <LinkIcon size={14} color={Colors.dark.textTertiary} />
                 <Text style={[styles.metaText, styles.linkText]}>{user.username}.com</Text>
