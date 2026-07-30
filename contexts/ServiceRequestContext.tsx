@@ -173,6 +173,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         budget_max: newRequest.budgetMax,
         status: newRequest.status,
         created_by: newRequest.createdBy.name,
+        creator_id: newRequest.creatorId || '',
         created_at: newRequest.createdAt,
         responders: 0,
         image_url: newRequest.image || null,

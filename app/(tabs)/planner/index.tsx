@@ -53,6 +53,7 @@ import {
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { usePlanner, type Plan } from '@/contexts/PlannerContext';
 import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type ServiceRequest, type RequestStatus } from '@/contexts/ServiceRequestContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -731,6 +732,7 @@ export default function PlannerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user } = useAuth();
   const { plans, deletePlan, createPlan, getPlansByDate, refetch } = usePlanner();
 
   const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
@@ -784,6 +786,7 @@ export default function PlannerScreen() {
         budgetMax: req.budgetMax,
         tags: cat ? [cat.label] : [],
         image: req.image,
+        creatorId: user?.id || '',
         createdBy: { name: 'You', avatar: '' },
       });
       setMode('requests');

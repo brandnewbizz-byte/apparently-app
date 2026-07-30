@@ -25,6 +25,7 @@ import {
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useSkills } from '@/contexts/SkillContext';
 
 // ── Categories ───────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export default function SkillBuilderScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { createSkill } = useSkills();
+  const { user } = useAuth();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -119,6 +121,7 @@ export default function SkillBuilderScreen() {
       category: category || 'other',
       tags: tags.length ? tags : ['Skill'],
       creator: { name: 'You', avatar: '', rating: 5.0, reviews: 0 },
+      creatorId: user?.id || '',
       availableCount: parseInt(availableCount, 10) || 20,
       providerLink: undefined,
       deliveryNotes: undefined,

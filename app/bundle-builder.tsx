@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   View,
   Text,
@@ -54,6 +55,7 @@ export default function BundleBuilderScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { createBundle } = useBundles();
+  const { user } = useAuth();
 
   const [step, setStep] = useState<Step>('services');
 
@@ -185,6 +187,7 @@ export default function BundleBuilderScreen() {
         rating: 5.0,
         reviews: 0,
       },
+      creatorId: user?.id || '',
       availableCount: parseInt(availableCount, 10) || 10,
       plannerNotes: plannerNotes.trim() || undefined,
     });
