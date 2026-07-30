@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Post, Story } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { supabase } from '@/supabaseClient';
 import { logger } from '@/lib/logger';
 
 function timeAgo(date: Date): string {
@@ -117,6 +118,17 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [userStories, setUserStories] = useState<UserStory[]>([]);
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [feedStories, setFeedStories] = useState<Story[]>([]);
+  const [authUserId, setAuthUserId] = useState<string>('u-dev');
+
+  // Get real auth user ID on mount
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.id) {
+        setAuthUserId(data.user.id);
+        logger.info('SocialContext', 'Got auth user ID', { userId: data.user.id });
+      }
+    }).catch(() => {});
+  }, []);
 
   const postsQuery = useQuery({
     queryKey: ['supabasePosts'],
@@ -414,8 +426,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
     // Persist to local API
-    localApi.toggleLike(postId, 'u-dev').catch(() => {});
-  }, [ensureInteraction, interactions, persistState]);
+    localApi.toggleLike(postId, authUserId).catch(() => {});
+  }, [ensureInteraction, interactions, persistState, authUserId]);
 
   const addComment = useCallback((postId: string, text: string, parentId?: string) => {
     if (!text.trim()) {
@@ -424,7 +436,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const current = ensureInteraction(postId);
     const newComment: SocialComment = {
       id: Date.now().toString(),
-      authorId: 'current-user',
+      authorId: authUserId,
       authorName: 'You',
       authorAvatar: '',
       text,
@@ -459,8 +471,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
     // Persist to local API
-    localApi.addComment(postId, 'u-dev', text, parentId).catch(() => {});
-  }, [ensureInteraction, interactions, persistState]);
+    localApi.addComment(postId, authUserId, text, parentId).catch(() => {});
+  }, [ensureInteraction, interactions, persistState, authUserId]);
 
   const toggleCommentLike = useCallback((postId: string, commentId: string) => {
     const current = ensureInteraction(postId);
@@ -611,7 +623,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const current = ensureStoryInteraction(storyId);
     const newComment: SocialComment = {
       id: Date.now().toString(),
-      authorId: 'current-user',
+      authorId: authUserId,
       authorName: 'You',
       authorAvatar: '',
       text,

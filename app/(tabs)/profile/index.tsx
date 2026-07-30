@@ -341,76 +341,70 @@ export default function ProfileScreen() {
     },
   ];
 
-  useEffect(() => {
-    const fetchProfileStats = async () => {
-      if (!user?.id) return;
-      try {
-        const { data: jobs } = await supabase
-          .from('job_requests')
-          .select('proposed_budget, status')
-          .eq('seller_id', user.id);
-        if (jobs) {
-          const completed = jobs.filter((j: any) => j.status === 'completed');
-          setCompletedCount(completed.length);
-          const earnings = jobs.reduce((sum: number, j: any) => sum + Number(j.proposed_budget || 0), 0);
-          setTotalEarnings(earnings);
-        }
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const { data: recentPosts } = await supabase
-          .from('social_posts')
-          .select('created_at')
-          .eq('user_id', user.id)
-          .gte('created_at', sevenDaysAgo.toISOString());
-        if (recentPosts && recentPosts.length > 0) {
-          const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
-          setStreak(activeDays.size);
-        }
-        const { data: reviews } = await supabase
-          .from('user_reviews')
-          .select('rating')
-          .eq('reviewed_user_id', user.id);
-        if (reviews && reviews.length > 0) {
-          const avg = reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length;
-          setAvgRating(Math.round(avg * 10) / 10);
-        }
-      } catch (err) {
-        console.log('[Profile] Error fetching stats:', err);
+  const fetchProfileStats = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const { data: jobs } = await supabase
+        .from('job_requests')
+        .select('proposed_budget, status')
+        .eq('seller_id', user.id);
+      if (jobs) {
+        const completed = jobs.filter((j: any) => j.status === 'completed');
+        setCompletedCount(completed.length);
+        const earnings = jobs.reduce((sum: number, j: any) => sum + Number(j.proposed_budget || 0), 0);
+        setTotalEarnings(earnings);
       }
-    };
-    fetchProfileStats();
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const { data: recentPosts } = await supabase
+        .from('social_posts')
+        .select('created_at')
+        .eq('user_id', user.id)
+        .gte('created_at', sevenDaysAgo.toISOString());
+      if (recentPosts && recentPosts.length > 0) {
+        const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
+        setStreak(activeDays.size);
+      }
+      const { data: reviews } = await supabase
+        .from('user_reviews')
+        .select('rating')
+        .eq('reviewed_user_id', user.id);
+      if (reviews && reviews.length > 0) {
+        const avg = reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length;
+        setAvgRating(Math.round(avg * 10) / 10);
+      }
+    } catch (err) {
+      console.log('[Profile] Error fetching stats:', err);
+    }
   }, [user?.id]);
 
-  useEffect(() => {
-    const fetchGrabbedBundles = async () => {
-      if (!user?.id) {
-        setLoadingBundles(false);
-        return;
+  const fetchGrabbedBundles = useCallback(async () => {
+    if (!user?.id) {
+      setLoadingBundles(false);
+      return;
+    }
+    try {
+      setLoadingBundles(true);
+      const { data, error } = await supabase
+        .from('job_requests')
+        .select('id, title, proposed_budget, pickup_time, status, booked_at, plan_details')
+        .eq('user_id', user.id)
+        .eq('type', 'plan_for_hire')
+        .order('booked_at', { ascending: false });
+      if (error) {
+        console.log('[Profile] Error fetching grabbed bundles:', error.message);
+      } else {
+        setGrabbedBundles(data || []);
       }
-
-      try {
-        const { data, error } = await supabase
-          .from('job_requests')
-          .select('id, title, proposed_budget, pickup_time, status, booked_at, plan_details')
-          .eq('user_id', user.id)
-          .eq('type', 'plan_for_hire')
-          .order('booked_at', { ascending: false });
-
-        if (error) {
-          console.log('[Profile] Error fetching grabbed bundles:', error.message);
-        } else {
-          setGrabbedBundles(data || []);
-          console.log('Grabbed bundles loaded:', (data || []).length);
-        }
-      } catch (err) {
-        console.log('[Profile] Exception fetching grabbed bundles:', err);
-      } finally {
-        setLoadingBundles(false);
-      }
-    };
-
-    fetchGrabbedBundles();
+    } catch (err) {
+      console.log('[Profile] Exception fetching grabbed bundles:', err);
+    } finally {
+      setLoadingBundles(false);
+    }
   }, [user?.id]);
+
+  useEffect(() => { fetchProfileStats(); }, [fetchProfileStats]);
+  useEffect(() => { fetchGrabbedBundles(); }, [fetchGrabbedBundles]);
 
   useEffect(() => {
     Animated.parallel([
@@ -464,13 +458,11 @@ export default function ProfileScreen() {
     }
   };
 
-  const onRefresh = useCallback(() => {
-    console.log('[Profile] Refreshing...');
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1500);
-  }, []);
+    await Promise.all([fetchProfileStats(), fetchGrabbedBundles()]);
+    setRefreshing(false);
+  }, [fetchProfileStats, fetchGrabbedBundles]);
 
   const userName = user?.fullName || user?.username || 'User';
   const userAvatar = user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
