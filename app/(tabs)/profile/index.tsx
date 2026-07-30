@@ -746,8 +746,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
   onNavigate?: (post: any) => void;
   colors: any;
 }) {
-  const translateY = useRef(new Animated.Value(300)).current;
-  const bgOpacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const bgOpacity = useRef(new Animated.Value(1)).current;
   const { toggleLike: socialLike, addComment: socialComment } = useSocial();
   const flatListRef = useRef<FlatList>(null);
 
@@ -798,14 +798,9 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
   }, [visible, postId]);
 
   useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 8, tension: 80 }),
-        Animated.timing(bgOpacity, { toValue: 1, duration: 280, useNativeDriver: true }),
-      ]).start();
-    } else {
-      translateY.setValue(300);
-      bgOpacity.setValue(0);
+    if (!visible) {
+      translateY.setValue(0);
+      bgOpacity.setValue(1);
     }
   }, [visible]);
 
@@ -813,9 +808,13 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
 
   const handleClose = () => {
     Animated.parallel([
-      Animated.timing(translateY, { toValue: 300, duration: 250, useNativeDriver: true }),
-      Animated.timing(bgOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
-    ]).start(() => onClose());
+      Animated.timing(translateY, { toValue: 300, duration: 250, useNativeDriver: false }),
+      Animated.timing(bgOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
+    ]).start(() => {
+      translateY.setValue(0);
+      bgOpacity.setValue(1);
+      onClose();
+    });
   };
 
   const toggleLikeLocal = async () => {
