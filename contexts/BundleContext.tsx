@@ -163,7 +163,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       price: newBundle.price,
       items: newBundle.items,
       creator_id: newBundle.creatorId,
-      cover_image: newBundle.coverImage,
+      cover_image: newBundle.imageUrl,
       status: newBundle.status,
       grab_count: 0,
       created_at: newBundle.createdAt,
@@ -187,12 +187,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     // Sync to Supabase
-    supabase.rpc('increment_grab_count', { bundle_id: id }).then(({ error }) => {
-      if (error) {
-        supabase.from('bundles').update({ grab_count: supabase.sql`grab_count + 1` }).eq('id', id).then(({ error: e2 }) => {
-          if (e2) logger.error('BundleContext', 'Supabase grab update failed', { error: e2 });
-        });
-      }
+    supabase.from('bundles').update({ grab_count: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
+      if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
     });
   }, [isLoaded, saveBundles, user?.id, bundles]);
 
