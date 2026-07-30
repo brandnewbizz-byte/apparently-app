@@ -34,6 +34,8 @@ const dummyUser: UserProfile = {
   id: 'dev-user',
   fullName: 'Developer',
   username: 'dev',
+  bio: null,
+  location: null,
   phone: null,
   email: 'dev@localhost',
   avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=dev-user',
@@ -113,6 +115,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return null;
     }
   }, []);
+
+  const refreshProfile = useCallback(async () => {
+    if (!state.session?.user) return;
+    const userId = state.session.user.id;
+    const dbProfile = await fetchProfileFromDb(userId);
+    if (!dbProfile || !state.user) return;
+    const updated: UserProfile = {
+      ...state.user,
+      fullName: dbProfile.full_name ?? state.user.fullName,
+      username: dbProfile.username ?? state.user.username,
+      bio: dbProfile.bio ?? state.user.bio,
+      location: dbProfile.location ?? state.user.location,
+      avatar: dbProfile.avatar || state.user.avatar,
+      phone: dbProfile.phone ?? state.user.phone,
+    };
+    setState((prev) => ({ ...prev, user: updated }));
+    await saveProfileCache(updated);
+  }, [state.session?.user?.id, state.user, fetchProfileFromDb, saveProfileCache]);
 
   const buildProfile = useCallback(
     async (session: Session): Promise<{ profile: UserProfile; needsName: boolean }> => {
@@ -721,6 +741,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     displayName,
     saveFullNameOnce,
     updateAvatar,
+    refreshProfile,
     signUp,
     signIn,
     signOut,

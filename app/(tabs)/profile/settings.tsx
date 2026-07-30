@@ -16,7 +16,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark, toggleTheme } = useTheme();
-  const { user, signOut, updateAvatar } = useAuth();
+  const { user, signOut, updateAvatar, refreshProfile } = useAuth();
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
 
@@ -88,15 +88,12 @@ export default function SettingsScreen() {
           .from('profiles')
           .upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
         if (error) throw new Error(error.message);
+        // Also update users table so search/follow/social see changes
+        await supabase.from('users').upsert({ id: user.id, ...updates });
       }
 
-      // Also update users table if username changed
-      if (updates.username && user?.id) {
-        await supabase
-          .from('users')
-          .update({ username: updates.username })
-          .eq('id', user.id);
-      }
+      // Refresh AuthContext so UI reflects changes immediately
+      await refreshProfile();
 
       Alert.alert('Saved', 'Your profile has been updated.');
     } catch (err: any) {
