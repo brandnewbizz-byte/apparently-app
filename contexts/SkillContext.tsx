@@ -57,8 +57,9 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     const loadSkills = async () => {
       try {
+        // Use skill_deals table (the actual DB table – not 'skills' which doesn't exist)
         const { data, error } = await supabase
-          .from('skills')
+          .from('skill_deals')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(50);
@@ -66,7 +67,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         if (error) {
-          logger.error('SkillContext', 'Failed to fetch skills from Supabase', { error });
+          logger.error('SkillContext', 'Failed to fetch skill_deals from Supabase', { error });
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) setSkills(JSON.parse(stored));
           return;
@@ -74,20 +75,20 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
 
         const liveSkills: UserSkill[] = (data || []).map((row: any) => ({
           id: row.id,
-          title: row.title || '',
+          title: row.service || '',
           description: row.description || '',
           icon: row.icon || '🛠️',
-          price: row.price || 0,
-          originalPrice: row.original_price || row.price || 0,
-          imageUrl: row.image_url || '',
+          price: Number(row.price) || 0,
+          originalPrice: Number(row.price) || 0,
+          imageUrl: row.featured_image || '',
           category: row.category || '',
           tags: row.tags || [],
-          creatorId: row.creator_id || '',
-          creator: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '', rating: 0, reviews: 0 },
+          creatorId: row.user_id || '',
+          creator: { name: 'Unknown', avatar: '', rating: 0, reviews: 0 },
           status: row.status || 'available',
-          grabCount: row.grab_count || 0,
+          grabCount: row.grabs || 0,
           createdAt: row.created_at || new Date().toISOString(),
-          availableCount: row.available_count || 1,
+          availableCount: 1,
         }));
 
         setSkills(liveSkills);
@@ -135,30 +136,20 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     setMySkills((prev) => [newSkill, ...prev]);
-    // Sync to Supabase
-    supabase.from('skills').insert({
+    // Sync to Supabase (skill_deals table – the real DB table)
+    supabase.from('skill_deals').insert({
       id: newSkill.id,
-      title: newSkill.title,
+      user_id: newSkill.creatorId || '',
+      service: newSkill.title,
       description: newSkill.description,
-      icon: newSkill.icon,
-      price: newSkill.price,
-      original_price: newSkill.originalPrice,
-      image_url: newSkill.imageUrl,
+      featured_image: newSkill.imageUrl,
       category: newSkill.category,
-      tags: newSkill.tags,
-      creator_id: newSkill.creatorId || '',
-      creator_name: newSkill.creator.name,
-      creator_avatar: newSkill.creator.avatar,
+      price: newSkill.price,
       status: newSkill.status,
-      grab_count: 0,
+      grabs: 0,
       created_at: newSkill.createdAt,
-      available_count: newSkill.availableCount,
-      provider_link: newSkill.providerLink,
-      delivery_notes: newSkill.deliveryNotes,
-      resources_needed: newSkill.resourcesNeeded,
-      expires_in: newSkill.expiresIn,
     }).then(({ error }) => {
-      if (error) logger.error('SkillContext', 'Supabase insert failed', { error });
+      if (error) logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error });
     });
     return { success: true };
   }, [isLoaded, saveSkills, mySkills.length]);
@@ -172,7 +163,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     // Sync to Supabase
-    supabase.from('skills').update({ status: 'grabbed' }).eq('id', id).then(({ error }) => {
+    supabase.from('skill_deals').update({ status: 'grabbed' }).eq('id', id).then(({ error }) => {
       if (error) logger.error('SkillContext', 'Supabase grab update failed', { error });
     });
   }, [isLoaded, saveSkills]);
@@ -185,7 +176,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     });
     setMySkills((prev) => prev.filter((s) => s.id !== id));
     // Sync to Supabase
-    supabase.from('skills').delete().eq('id', id).then(({ error }) => {
+    supabase.from('skill_deals').delete().eq('id', id).then(({ error }) => {
       if (error) logger.error('SkillContext', 'Supabase delete failed', { error });
     });
   }, [isLoaded, saveSkills]);
