@@ -736,18 +736,17 @@ export default function FeedScreen() {
 
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
-  // Load user's own posts from SocialContext when data is available
+  // Load ALL posts from SocialContext for the feed — all users, not just current
   const postsLoadedRef = useRef(false);
   useEffect(() => {
     const posts = getAllPosts();
     if (!posts || posts.length === 0) return;
-    if (postsLoadedRef.current) return; // Only load once when data becomes available
-    const myPosts: FeedPost[] = posts
-      .filter((p: any) => p.user?.id === authUser?.id || p.user_id === authUser?.id)
+    if (postsLoadedRef.current) return;
+    const allPosts: FeedPost[] = posts
       .map((p: any) => ({
         id: p.id,
         type: p.type || 'photo',
-        author: { name: 'You', avatar: userAvatar, userId: authUser?.id },
+        author: { name: p.user?.name || p.author_name || 'Unknown', avatar: p.user?.avatar || '', userId: p.user?.id || p.user_id },
         category: p.category || 'General',
         timestamp: p.timestamp || p.created_at || '',
         caption: p.content || p.caption || '',
@@ -756,11 +755,11 @@ export default function FeedScreen() {
         tags: p.tags || [],
         stats: { saves: p.saves || 0, comments: (p.comments || []).length },
       }));
-    if (myPosts.length > 0) {
-      setUserPosts(myPosts);
+    if (allPosts.length > 0) {
+      setUserPosts(allPosts);
       postsLoadedRef.current = true;
     }
-  }, [getAllPosts, authUser?.id, userAvatar]);
+  }, [getAllPosts]);
 
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
@@ -859,12 +858,8 @@ export default function FeedScreen() {
       deduped.push(post);
     };
 
-    // Priority order: user-created posts first, then context data (preferred over hardcoded), then hardcoded last
+    // Only social posts in feed — no commercial/listing content
     userPosts.forEach(addPost);
-
-    // Only marketplace, rental, connection, and request posts — bundles excluded from feed
-    const contextPosts = [...marketplacePosts, ...rentalPosts, ...connectionPosts, ...requestPosts];
-    contextPosts.filter(p => p.author.name !== 'You').forEach(addPost);
 
     // Hardcoded posts — lowest priority, skip if context data already covered the same content
     FEED_POSTS.forEach(addPost);

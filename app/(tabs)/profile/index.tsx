@@ -106,9 +106,7 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
       .from('posts')
       .select('id, content, image_url, created_at, likes')
       .eq('user_id', authUser.id)
-      .neq('post_kind', 'bundle')
-      .neq('post_kind', 'service')
-      .neq('post_kind', 'skill')
+      .is('post_kind', null)
       .order('created_at', { ascending: false })
       .limit(100)
       .then(({ data, error }) => {
