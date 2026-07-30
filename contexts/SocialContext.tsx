@@ -677,12 +677,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
     createPostMutate({ content, imageUrl: finalImageUrl });
     queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-    localApi.createPost('u-dev', content, imageUrl, options).then((saved) => {
+    localApi.createPost(authUserId, content, imageUrl, options).then((saved) => {
       logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
       // When it's a sell post, also create a marketplace product
       if (options?.postKind === 'sell') {
         localApi.createProduct({
-          seller_id: 'u-dev',
+          seller_id: authUserId,
           seller_name: 'You',
           seller_avatar: '',
           seller_username: 'you',
@@ -734,7 +734,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }).catch(err => {
       logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
     });
-  }, [createPostMutate, queryClient]);
+  }, [createPostMutate, queryClient, authUserId]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
     logger.info('SocialContext', 'Creating story in Supabase...');

@@ -710,7 +710,7 @@ export default function FeedScreen() {
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory } = useSocial();
+  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts } = useSocial();
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -737,6 +737,26 @@ export default function FeedScreen() {
 
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
+  // Load user's own posts from SocialContext on mount so they persist across sessions
+  useEffect(() => {
+    const posts = getAllPosts();
+    if (posts && posts.length > 0) {
+      const myPosts: FeedPost[] = posts.map((p: any) => ({
+        id: p.id,
+        type: p.type || 'photo',
+        author: { name: 'You', avatar: userAvatar, userId: authUser?.id },
+        category: p.category || 'General',
+        timestamp: p.timestamp || p.createdAt || '',
+        caption: p.text || p.caption || '',
+        media: p.imageUrl || p.mediaUri || '',
+        likes: p.likes || 0,
+        tags: p.tags || [],
+        stats: { saves: p.saves || 0, comments: (p.comments || []).length },
+      }));
+      setUserPosts(myPosts);
+    }
+  }, []);
+
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -958,7 +978,7 @@ export default function FeedScreen() {
       author: {
         name: 'You',
         avatar: userAvatar,
-        authorId: authUser?.id,
+        userId: authUser?.id,
       },
       category: data.category || createCategory || 'General',
       timestamp: 'Just now',
