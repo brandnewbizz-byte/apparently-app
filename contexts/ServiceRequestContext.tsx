@@ -115,9 +115,9 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
           status: row.status || 'open',
           tags: row.tags || [],
           createdAt: row.created_at || new Date().toISOString(),
-          creatorId: row.creator_id || '',
-          createdBy: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '' },
-          responders: row.responders || 0,
+          creatorId: row.requester_id || row.creator_id || '',
+          createdBy: { name: 'Unknown', avatar: '' },
+          responders: 0,
           image: row.image_url || undefined,
         }));
 
@@ -167,22 +167,18 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         if (isLoaded) saveRequests(updated);
         return updated;
       });
-      // Sync to Supabase
+      // Sync to Supabase — use actual DB column names
       supabase.from('service_requests').insert({
         id: newRequest.id,
+        requester_id: newRequest.creatorId || '',
+        creator_id: newRequest.creatorId || '',
         title: newRequest.title,
         description: newRequest.description,
         category: newRequest.category,
         location: newRequest.location,
-        date: newRequest.date,
-        time: newRequest.time,
-        budget_min: newRequest.budgetMin,
-        budget_max: newRequest.budgetMax,
+        budget: newRequest.budgetMin || newRequest.budgetMax || 0,
         status: newRequest.status,
-        created_by: newRequest.createdBy.name,
-        creator_id: newRequest.creatorId || '',
         created_at: newRequest.createdAt,
-        responders: 0,
         image_url: newRequest.image || null,
       }).then(({ error }) => {
         if (error) logger.error('ServiceRequestContext', 'Supabase insert failed', { error });

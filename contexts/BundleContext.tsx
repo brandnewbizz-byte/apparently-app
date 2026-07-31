@@ -92,17 +92,17 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           id: row.id,
           title: row.title || '',
           description: row.description || '',
-          price: row.price || 0,
-          items: row.items || [],
-          imageUrl: row.cover_image || '',
+          price: row.bundle_price ?? row.price ?? 0,
+          items: row.items || row.services || [],
+          imageUrl: row.image || row.cover_image || '',
           category: row.category || '',
           location: row.location || '',
-          dateRange: row.date_range || '',
+          dateRange: row.expires_at || '',
           tags: row.tags || [],
-          creatorId: row.creator_id || '',
-          creator: { name: row.creator_name || 'Unknown', avatar: row.creator_avatar || '', rating: 0, reviews: 0 },
+          creatorId: row.user_id || row.creator_id || '',
+          creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
           status: row.status || 'available',
-          grabCount: row.grab_count || 0,
+          grabCount: row.grabs ?? row.grab_count ?? 0,
           createdAt: row.created_at || new Date().toISOString(),
           availableCount: row.available_count || 1,
         }));
@@ -169,17 +169,24 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     setMyBundles((prev) => [newBundle, ...prev]);
-    // Sync to Supabase
+    // Sync to Supabase — use actual DB column names
     supabase.from('bundles').insert({
       id: newBundle.id,
+      user_id: newBundle.creatorId,
+      type: 'bundle',
       title: newBundle.title,
       description: newBundle.description || '',
-      price: newBundle.price,
+      bundle_price: newBundle.price,
       items: newBundle.items,
       creator_id: newBundle.creatorId,
+      image: newBundle.imageUrl,
       cover_image: newBundle.imageUrl,
-      status: newBundle.status,
-      grab_count: 0,
+      category: newBundle.category || 'lifestyle',
+      location: newBundle.location || '',
+      provider_name: newBundle.creator?.name || '',
+      provider_avatar: newBundle.creator?.avatar || '',
+      status: 'draft',
+      grabs: 0,
       created_at: newBundle.createdAt,
     }).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase insert failed', { error });
@@ -200,8 +207,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       if (isLoaded) saveBundles(updated);
       return updated;
     });
-    // Sync to Supabase
-    supabase.from('bundles').update({ grab_count: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
+    // Sync to Supabase — use actual column names
+    supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
     });
   }, [isLoaded, saveBundles, user?.id, bundles]);
