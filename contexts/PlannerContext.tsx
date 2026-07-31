@@ -60,6 +60,12 @@ export interface PlanDetails {
   payment: PaymentType;
   custom_block?: CustomBlock;
   imported_job?: ImportedJob;
+  notes?: string;
+  selected_jobs?: string[];
+  custom_blocks?: CustomBlock[];
+  errands_details?: { description: string; location: string };
+  delivery_details?: { pickupAddress: string; dropoffAddress: string; items: string };
+  other_details?: { description: string };
 }
 
 export interface Plan {
@@ -95,6 +101,7 @@ export interface CreatePlanInput {
   dropoff_city?: string;
   dropoff_state?: string;
   plan_details: PlanDetails;
+  status?: 'pending' | 'active' | 'completed' | 'cancelled';
 }
 
 interface PlannerState {

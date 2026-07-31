@@ -60,12 +60,17 @@ export default function SettingsScreen() {
           finalAvatar = urlData?.publicUrl || editingAvatar;
         }
       }
-      const updates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar_url: finalAvatar, updated_at: new Date().toISOString() };
-      const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...updates });
+      const profileUpdates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar_url: finalAvatar, updated_at: new Date().toISOString() };
+      const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates });
       if (saveErr) {
         Alert.alert('Error', saveErr.message);
         setSaving(false);
         return;
+      }
+      // Sync to users table for feed, inbox, PostCard consistency
+      const { error: userErr } = await supabase.from('users').upsert({ id: user.id, name: editingName, username: editingUsername, avatar: finalAvatar }, { onConflict: 'id' });
+      if (userErr) {
+        console.log('[Settings] Warning: users table sync failed:', userErr.message);
       }
       await refreshProfile();
       Alert.alert('Saved', 'Profile updated.');

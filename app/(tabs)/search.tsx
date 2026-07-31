@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -73,6 +73,14 @@ export default function SearchScreen() {
   const [followLoading, setFollowLoading] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestSeqRef = useRef(0);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const doSearch = useCallback(async (q: string) => {
     if (q.trim().length < 2) {
@@ -88,6 +96,7 @@ export default function SearchScreen() {
     const trimmed = q.trim();
     const pattern = `%${trimmed}%`;
     const isHashtag = trimmed.startsWith('#');
+    const seq = ++requestSeqRef.current;
 
     try {
       // For hashtag searches, only search posts (hashtags aren't users)
@@ -99,19 +108,22 @@ export default function SearchScreen() {
             .or(`name.ilike.${pattern},username.ilike.${pattern}`)
             .limit(20);
 
-      const postPattern = isHashtag ? `%${trimmed}%` : pattern;
+      const postPattern = `%${trimmed}%`;
       const postPromise = supabase
         .from('posts')
         .select(`
           id, content, image_url, user_id, created_at, likes, comments, post_kind,
           user:user_id(name, username, avatar, is_verified)
         `)
-        .or(`content.ilike.${postPattern}`)
+        .ilike('content', postPattern)
         .or('post_kind.is.null,post_kind.not.in.(bundle,service,skill)')
         .order('created_at', { ascending: false })
         .limit(20);
 
       const [userRes, postRes] = await Promise.all([userPromise, postPromise]);
+
+      // Reject stale results — newer request already in flight
+      if (seq !== requestSeqRef.current) return;
 
       if (!userRes.error) {
         setUsers((userRes.data as UserResult[]) || []);
@@ -127,6 +139,8 @@ export default function SearchScreen() {
               if (followData) {
                 setFollowingIds(new Set(followData.map((f: any) => f.following_id)));
               }
+            }, (err: any) => {
+              console.error('[Search] Follow status fetch error:', err);
             });
         }
       }
@@ -134,7 +148,9 @@ export default function SearchScreen() {
     } catch (err) {
       console.error('[Search] Error:', err);
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -169,22 +185,36 @@ export default function SearchScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     const isFollowing = followingIds.has(targetUserId);
+    // Snapshot for rollback
+    const previousIds = new Set(followingIds);
+
+    const newIds = new Set(previousIds);
+    if (isFollowing) {
+      newIds.delete(targetUserId);
+    } else {
+      newIds.add(targetUserId);
+    }
+    setFollowingIds(newIds);
+
     try {
       if (isFollowing) {
-        await supabase
+        const { error } = await supabase
           .from('follows')
           .delete()
           .eq('follower_id', currentUser.id)
           .eq('following_id', targetUserId);
-        setFollowingIds(prev => { const next = new Set(prev); next.delete(targetUserId); return next; });
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from('follows')
           .insert({ follower_id: currentUser.id, following_id: targetUserId });
-        setFollowingIds(prev => new Set(prev).add(targetUserId));
+        if (error) throw error;
       }
     } catch (err) {
       console.error('[Search] Follow error:', err);
+      // Rollback to previous state on failure
+      setFollowingIds(previousIds);
+      Alert.alert('Error', 'Failed to update follow status. Please try again.');
     } finally {
       setFollowLoading(null);
     }

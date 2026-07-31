@@ -365,6 +365,22 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (profileError) {
           logger.error('Auth', 'Profile save error', { message: profileError.message });
         }
+
+        // Sync to users table (used by SocialContext, feed, PostCard, etc.)
+        const { error: userError } = await supabase
+          .from('users')
+          .upsert(
+            {
+              id: authData.user.id,
+              name: cleanedFullName,
+              username: trimmedUsername,
+            },
+            { onConflict: 'id' }
+          );
+
+        if (userError) {
+          logger.error('Auth', 'User save error', { message: userError.message });
+        }
       }
 
       const needsEmailVerification = !authData.session && !authData.user?.email_confirmed_at;
@@ -526,20 +542,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       let dbSaved = false;
       try {
         const abortController = new AbortController();
-        const attempt1 = await withAbortSignal(
+        // Save to profiles table (used by AuthContext)
+        const profileResult = await withAbortSignal(
           supabase.from('profiles').upsert({ ...base, full_name: trimmed }, { onConflict: 'id' }),
           abortController.signal
         );
-        if (!attempt1.error) {
+        // Also sync to users table (used by SocialContext, feed, PostCard, etc.)
+        const userResult = await withAbortSignal(
+          supabase.from('users').upsert({ id: userId, name: trimmed }, { onConflict: 'id' }),
+          abortController.signal
+        );
+        if (!profileResult.error && !userResult.error) {
           dbSaved = true;
         } else {
-          logger.error('Auth', 'profiles upsert(full_name) error', { message: attempt1.error.message });
+          const errs = [profileResult.error?.message, userResult.error?.message]
+            .filter(Boolean)
+            .join('; ');
+          logger.error('Auth', 'profiles/users upsert(full_name) errors', { errors: errs });
         }
       } catch (e: any) {
         if (isAbortError(e)) {
           logger.info('Auth', 'Query aborted — normal on navigation');
         } else {
-          logger.error('Auth', 'profiles upsert exception', { e });
+          logger.error('Auth', 'profiles/users upsert exception', { e });
         }
       }
 

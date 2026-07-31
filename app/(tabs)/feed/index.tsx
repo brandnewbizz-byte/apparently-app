@@ -3,7 +3,7 @@ import {
   Plane, Heart, Music, Zap, Play, Plus, Eye,
   MessageCircle, CheckCircle2, Wrench, Bookmark,
   Radio, Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft, Camera,
-  ShoppingBag, Home, Repeat, DollarSign, UserPlus, Search, Package,
+  ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
@@ -37,18 +37,14 @@ import StoryRing from '@/components/StoryRing';
 import CreateStory from '@/components/CreateStory';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useMarketplace } from '@/contexts/MarketplaceContext';
-import { useBookings } from '@/contexts/BookingsContext';
-import { useServiceRequests } from '@/contexts/ServiceRequestContext';
-import { useConnections } from '@/contexts/ConnectionsContext';
-import { productToFeedPost, listingToFeedPost, connectionToFeedPost, requestToFeedPost, type AggregatedFeedPost } from '@/lib/feedAggregator';
-import { useBundles } from '@/contexts/BundleContext';
+
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
 import { EXTERNAL_EVENTS } from '@/lib/externalEvents';
 import SkeletonCard from '@/components/SkeletonCard';
 import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
 import { supabase } from '@/lib/supabase';
+import { useQueryClient } from '@tanstack/react-query';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -117,7 +113,6 @@ function formatViewers(n: number): string {
 
 // All mock data removed — feed is live-only from Supabase + user posts
 const MOCK_COMMENTS: Comment[] = [];
-const FEED_POSTS: FeedPost[] = [];
 
 const FILTERS = [
   { key: 'all', label: 'All', icon: FileText },
@@ -176,7 +171,23 @@ function PostDetailModal({
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const [kbHeight, setKbHeight] = useState(0);
-  const [localComments, setLocalComments] = useState<Comment[]>(post.comments_list || []);
+  const [localComments, setLocalComments] = useState<Comment[]>([]);
+
+  // Sync local comments with SocialContext interactions on mount and when interaction changes
+  useEffect(() => {
+    const synced: Comment[] = (interaction?.comments || []).map((c: any) => ({
+      id: c.id,
+      user: { name: c.userName || c.user?.name || 'User', avatar: c.userAvatar || c.user?.avatar || '', userId: c.userId },
+      text: c.text,
+      timestamp: c.timestamp || c.createdAt || '',
+    }));
+    if (synced.length > 0) {
+      setLocalComments(synced);
+    } else if (post.comments_list && post.comments_list.length > 0) {
+      // Fallback to post-level comments if no interactions exist
+      setLocalComments(post.comments_list);
+    }
+  }, [interaction, post.comments_list]);
   const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
   const CatIcon = cat.icon;
   const authorAvatar = post.author.avatar || '';
@@ -434,6 +445,7 @@ function PostCard({
   onMediaTap,
   onShare,
   onDelete,
+  isSaved: isSavedProp,
 }: {
   post: FeedPost;
   colors: any;
@@ -447,8 +459,11 @@ function PostCard({
   onMediaTap: (uri: string) => void;
   onShare: (post: FeedPost) => void;
   onDelete?: (postId: string) => void;
+  isSaved?: boolean;
 }) {
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(isSavedProp ?? false);
+  // Sync with parent if savedIds changes externally
+  useEffect(() => { setSaved(isSavedProp ?? false); }, [isSavedProp]);
   const { interactions, toggleLike } = useSocial();
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
@@ -623,8 +638,11 @@ function PostCard({
       {/* Likes count */}
       <View style={igCardStyles.likesRow}>
         <Text style={[igCardStyles.likesText, { color: colors.text }]}>
-          Liked by <Text style={{ fontWeight: '700' }}>you</Text> and{' '}
-          <Text style={{ fontWeight: '700' }}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
+          {liked ? (
+            <>Liked by <Text style={{ fontWeight: '700' }}>you</Text>{likeCount > 1 ? <> and{' '}<Text style={{ fontWeight: '700' }}>{likeCount - 1} {likeCount - 1 === 1 ? 'other' : 'others'}</Text></> : null}</>
+          ) : (
+            <><Text style={{ fontWeight: '700' }}>{likeCount}</Text> {likeCount === 1 ? 'like' : 'likes'}</>
+          )}
         </Text>
       </View>
 
@@ -758,12 +776,14 @@ export default function FeedScreen() {
 
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
-  // Load ALL posts from SocialContext for the feed — all users, not just current
-  const postsLoadedRef = useRef(false);
+  // Load ALL posts from SocialContext for the feed — all users, not just current.
+  // Re-runs whenever getAllPosts changes (query refetch, new posts, etc.)
+  const lastPostCountRef = useRef(0);
   useEffect(() => {
     const posts = getAllPosts();
     if (!posts || posts.length === 0) return;
-    if (postsLoadedRef.current) return;
+    // Only update if post list actually changed (avoids unnecessary re-renders)
+    if (posts.length === lastPostCountRef.current) return;
     const allPosts: FeedPost[] = posts
       .map((p: any) => ({
         id: p.id,
@@ -779,10 +799,11 @@ export default function FeedScreen() {
       }));
     if (allPosts.length > 0) {
       setUserPosts(allPosts);
-      postsLoadedRef.current = true;
+      lastPostCountRef.current = posts.length;
     }
   }, [getAllPosts]);
 
+  const queryClient = useQueryClient();
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -796,12 +817,14 @@ export default function FeedScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  // ── User search (debounced) ──
+  // ── User search (debounced with request ordering) ──
+  const searchRequestIdRef = useRef(0);
   useEffect(() => {
     if (!searchQuery || searchQuery.trim().length < 2) {
       setSearchUsers([]);
       return;
     }
+    const requestId = ++searchRequestIdRef.current;
     const timer = setTimeout(async () => {
       setSearchUserLoading(true);
       const pattern = `%${searchQuery.trim()}%`;
@@ -810,6 +833,8 @@ export default function FeedScreen() {
         .select('id, name, username, avatar, is_verified, followers_count')
         .or(`name.ilike.${pattern},username.ilike.${pattern}`)
         .limit(8);
+      // Discard stale results if a newer request was already fired
+      if (requestId !== searchRequestIdRef.current) return;
       if (data) {
         setSearchUsers(data);
         if (authUser?.id && data.length > 0) {
@@ -820,11 +845,14 @@ export default function FeedScreen() {
               .select('following_id')
               .eq('follower_id', authUser.id)
               .in('following_id', ids);
-            setSearchFollowingIds(new Set((followData || []).map((f: any) => f.following_id)));
+            // Also check request ordering for the follow-data sub-query
+            if (requestId === searchRequestIdRef.current) {
+              setSearchFollowingIds(new Set((followData || []).map((f: any) => f.following_id)));
+            }
           }
         }
       }
-      setSearchUserLoading(false);
+      if (requestId === searchRequestIdRef.current) setSearchUserLoading(false);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery, authUser?.id]);
@@ -843,21 +871,18 @@ export default function FeedScreen() {
     } catch (_) {}
   };
 
-  // ── Cross-tab data ──
-  const { products } = useMarketplace();
-  const { listings } = useBookings();
-  const { connections } = useConnections();
-  const { getOpenRequests } = useServiceRequests();
-  const { bundles } = useBundles();
-
-  // Convert cross-tab data into feed posts
-  const marketplacePosts = useMemo(() => (products || []).filter((p: any) => p.status === 'active').slice(0, 8).map(productToFeedPost), [products]);
-  const rentalPosts = useMemo(() => (listings || []).slice(0, 6).map(listingToFeedPost), [listings]);
-  const connectionPosts = useMemo(() => (connections || []).slice(0, 4).map(connectionToFeedPost), [connections]);
-  const requestPosts = useMemo(() => getOpenRequests().slice(0, 8).map(requestToFeedPost), [getOpenRequests]);
-  const bundlePosts = useMemo(() => [], []); // Bundles excluded from feed per user request
-
-  const externalEvents = EXTERNAL_EVENTS;
+  // ── Promoted external events (admin-managed) ──
+  const externalEvents = useMemo(() => EXTERNAL_EVENTS.map((ev) => ({
+    ...ev,
+    // Compute correct day-of-week dynamically instead of hardcoded 2025 labels
+    displayDate: (() => {
+      try {
+        const d = new Date(ev.date);
+        if (isNaN(d.getTime())) return ev.date;
+        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      } catch { return ev.date; }
+    })(),
+  })), []);
 
   // ── Transform stories into StoryUser[] format for StoriesViewer ──
   const storyUsers = useMemo((): StoryUser[] => {
@@ -930,9 +955,6 @@ export default function FeedScreen() {
     // Only social posts in feed — no commercial/listing content
     userPosts.forEach(addPost);
 
-    // Hardcoded posts — lowest priority, skip if context data already covered the same content
-    FEED_POSTS.forEach(addPost);
-
     let all = deduped;
     if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
@@ -945,14 +967,16 @@ export default function FeedScreen() {
       all = [...all].sort(() => Math.random() - 0.5);
     }
     return all;
-  }, [activeFilter, userPosts, tagFilter, searchQuery, refreshKey, marketplacePosts, rentalPosts, connectionPosts, requestPosts, bundlePosts]);
+  }, [activeFilter, userPosts, tagFilter, searchQuery, refreshKey]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setTagFilter(null);
+    // Invalidate Supabase query cache so fresh data is fetched from the server
+    queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
     setRefreshKey((k) => k + 1);
     setTimeout(() => setRefreshing(false), 800);
-  }, []);
+  }, [queryClient]);
 
   const handleSavePost = (postId: string) => {
     setSavedIds((prev) => {
@@ -1030,10 +1054,14 @@ export default function FeedScreen() {
 
   const importVideoRef = useRef<any>(null);
   const Video = useRef<any>(null);
-  try {
-    const av = require('expo-av');
-    Video.current = av.Video;
-  } catch (_) {}
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const av = require('expo-av');
+      if (!cancelled) { Video.current = av.Video; importVideoRef.current = av; }
+    } catch (_) {}
+    return () => { cancelled = true; };
+  }, []);
 
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
     const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -1069,8 +1097,11 @@ export default function FeedScreen() {
     // Add to feed
     setUserPosts((prev) => [newPost, ...prev]);
 
-    // Persist to SocialContext so posts appear in getAllPosts() and profile grid
-    createPost(data.caption, data.mediaUri, undefined);
+    // Persist to SocialContext so posts appear in getAllPosts() and profile grid.
+    // Fire-and-forget: if the DB write fails, the post still shows locally.
+    try { createPost(data.caption, data.mediaUri, undefined); } catch (err: any) {
+      console.warn('[Feed] createPost failed (post will show locally):', err?.message || err);
+    }
 
     // Share to profile
     addUserPost({
@@ -1144,7 +1175,7 @@ export default function FeedScreen() {
     setActiveFilter('all');
   };
 
-  const liveCount = FEED_POSTS.filter((p) => p.type === 'live').length;
+  const liveCount = useMemo(() => userPosts.filter((p) => p.type === 'live').length, [userPosts]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1251,6 +1282,7 @@ export default function FeedScreen() {
               onTagTap={handleTagTap}
               onMediaTap={(uri) => setViewerMedia(uri)}
               onDelete={userPostIds.has(item.id) ? () => handleDeletePost(item.id) : undefined}
+              isSaved={savedIds.has(item.id)}
             />
           )}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
@@ -1406,7 +1438,7 @@ export default function FeedScreen() {
                           {event.title}
                         </Text>
                         <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '500' }}>
-                          {event.date}{event.venue ? ` · ${event.venue}` : ''}
+                          {event.displayDate || event.date}{event.venue ? ` · ${event.venue}` : ''}
                         </Text>
                         {event.price && <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{event.price}</Text>}
                       </View>

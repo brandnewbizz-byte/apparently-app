@@ -776,6 +776,7 @@ export default function PlannerScreen() {
       }
     } catch (e) {
       console.error('[Planner] Delete failed:', e);
+      Alert.alert('Error', 'Failed to delete plan. Please try again.');
     }
   }, [deletePlan]);
 
@@ -798,28 +799,33 @@ export default function PlannerScreen() {
       });
       setMode('requests');
       console.log('[Planner] Service request created:', req.title);
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Planner] Create request failed:', e);
+      Alert.alert('Error', 'Failed to create request: ' + (e?.message || 'Please try again.'));
     }
   }, [createRequest]);
 
   const handleQuickCreate = useCallback(async (plan: { title: string; date: string; time: string; category: string; notes: string }) => {
     try {
+      const planLocation = plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home';
       await createPlan({
         date: plan.date,
         date_label: `${plan.time} — ${plan.title}`,
-        location_type: plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home',
+        location_type: planLocation,
         transport: 'none',
         plan_details: {
-          location_type: plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home',
+          location_type: planLocation,
           transport: 'none',
           assistance: [],
           payment: 'cash',
+          notes: plan.notes || undefined,
         },
       });
       console.log('[Planner] Quick plan created:', plan.title);
-    } catch (e) {
+      Alert.alert('Plan Created', `"${plan.title}" has been added to your planner.`);
+    } catch (e: any) {
       console.error('[Planner] Quick create failed:', e);
+      Alert.alert('Error', 'Failed to create plan: ' + (e?.message || 'Please try again.'));
     }
   }, [createPlan]);
 

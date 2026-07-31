@@ -12,7 +12,7 @@ import { useSocial, SocialComment } from '@/contexts/SocialContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PhotoViewer from '@/components/PhotoViewer';
-import { supabase } from '@/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 interface Props {
   post: Post;

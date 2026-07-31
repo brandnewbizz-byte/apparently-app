@@ -3,7 +3,7 @@
 // All calls go directly to Supabase (live), not the local dev server.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { supabase } from '@/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 export const LOCAL_API = 'https://inejlmksbzujgpwvnnch.supabase.co';
 const API_BASE = LOCAL_API;

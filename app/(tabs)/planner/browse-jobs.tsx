@@ -30,6 +30,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import { usePlanner, type HelpType, type PaymentType } from '@/contexts/PlannerContext';
 import { supabase } from '@/lib/supabase';
 
 interface JobRequest {
@@ -78,6 +79,7 @@ export default function BrowseJobsScreen() {
   const queryClient = useQueryClient();
 
   const [refreshing, setRefreshing] = useState(false);
+  const { createPlan } = usePlanner();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [addingToPlanner, setAddingToPlanner] = useState(false);
 
@@ -122,6 +124,7 @@ export default function BrowseJobsScreen() {
         .from('job_requests')
         .update({ 
           status: 'accepted',
+          accepted_by: user.id,
         })
         .eq('id', jobId);
 
@@ -131,17 +134,19 @@ export default function BrowseJobsScreen() {
       }
 
       const planDate = job.tasks?.date || new Date().toISOString().split('T')[0];
-      const planPayload = {
-        user_id: user.id,
+      const planLocation = job.type === 'chauffeur' ? 'coworking' as const : job.type === 'driver' ? 'coworking' as const : 'coworking' as const;
+      const planTransport = job.type === 'chauffeur' ? 'chauffeur' as const : 'none' as const;
+      
+      const plan = await createPlan({
         date: planDate,
         date_label: `${JOB_TYPE_CONFIG[job.type]?.label || 'Job'} - Accepted`,
-        location_type: 'coworking',
-        transport: job.type === 'chauffeur' ? 'chauffeur' : 'none',
-        plan: {
-          location_type: 'coworking',
-          transport: job.type === 'chauffeur' ? 'chauffeur' : 'none',
-          assistance: [job.type],
-          payment: job.payment_method || 'cash',
+        location_type: planLocation,
+        transport: planTransport,
+        plan_details: {
+          location_type: planLocation,
+          transport: planTransport,
+          assistance: [(job.type as HelpType) || 'other'],
+          payment: (job.payment_method as PaymentType) || 'cash',
           imported_job: {
             id: job.id,
             type: job.type,
@@ -154,27 +159,17 @@ export default function BrowseJobsScreen() {
           },
         },
         status: 'active',
-      };
+      });
 
-      console.log('[BrowseJobs] Creating plan for accepted job:', planPayload);
-
-      const { data: planData, error: planError } = await supabase
-        .from('plans')
-        .insert(planPayload)
-        .select()
-        .single();
-
-      if (planError) {
-        console.error('[BrowseJobs] Error creating plan:', planError);
-      } else {
-        console.log('[BrowseJobs] Plan created:', planData);
+      if (!plan) {
+        throw new Error('Failed to create plan for accepted job');
       }
 
-      return { job, plan: planData };
+      console.log('[BrowseJobs] Plan created via PlannerContext:', plan.id);
+      return { job, plan };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['availableJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['plans'] });
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }

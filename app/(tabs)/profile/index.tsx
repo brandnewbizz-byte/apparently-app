@@ -48,7 +48,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supabase } from '@/supabaseClient';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
@@ -225,17 +225,25 @@ function EditProfileModal({
           return;
         }
       }
-      // Save name and bio to Supabase
+      // Save name and bio to BOTH tables
       if (user?.id) {
-        const updates: any = {};
-        if (name.trim() && name !== user?.fullName) updates.full_name = name.trim();
-        if (bio.trim() !== (user?.bio || '')) updates.bio = bio.trim();
-        if (Object.keys(updates).length > 0) {
-          const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
+        const profileUpdates: any = {};
+        const userUpdates: any = {};
+        if (name.trim() && name !== user?.fullName) {
+          profileUpdates.full_name = name.trim();
+          userUpdates.name = name.trim();
+        }
+        if (bio.trim() !== (user?.bio || '')) profileUpdates.bio = bio.trim();
+        if (Object.keys(profileUpdates).length > 0) {
+          const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates, updated_at: new Date().toISOString() });
           if (saveErr) {
             Alert.alert('Error', saveErr.message);
             setSaving(false);
             return;
+          }
+          // Sync to users table
+          if (Object.keys(userUpdates).length > 0) {
+            await supabase.from('users').upsert({ id: user.id, ...userUpdates }, { onConflict: 'id' });
           }
           await refreshProfile();
         }
@@ -320,6 +328,8 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
 
   // Helper: get deduplicated post count matching the grid display
   const { getAllPosts } = useSocial();
@@ -374,31 +384,47 @@ export default function ProfileScreen() {
   const fetchProfileStats = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const { data: jobs } = await supabase
-        .from('job_requests')
-        .select('proposed_budget, status')
-        .eq('seller_id', user.id);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      // Fire all 3 queries in parallel — no data dependency between them
+      const [jobsResult, postsResult, reviewsResult] = await Promise.all([
+        supabase.from('job_requests').select('proposed_budget, status').eq('seller_id', user.id),
+        supabase.from('social_posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
+        supabase.from('user_reviews').select('rating').eq('reviewed_user_id', user.id),
+      ]);
+
+      // Earnings: ONLY completed jobs count
+      const jobs = jobsResult.data;
       if (jobs) {
         const completed = jobs.filter((j: any) => j.status === 'completed');
         setCompletedCount(completed.length);
-        const earnings = jobs.reduce((sum: number, j: any) => sum + Number(j.proposed_budget || 0), 0);
+        const earnings = completed.reduce((sum: number, j: any) => sum + Number(j.proposed_budget || 0), 0);
         setTotalEarnings(earnings);
       }
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const { data: recentPosts } = await supabase
-        .from('social_posts')
-        .select('created_at')
-        .eq('user_id', user.id)
-        .gte('created_at', sevenDaysAgo.toISOString());
+
+      // Streak: consecutive days ending at today, not just unique days
+      const recentPosts = postsResult.data;
       if (recentPosts && recentPosts.length > 0) {
         const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
-        setStreak(activeDays.size);
+        let streakCount = 0;
+        const today = new Date();
+        for (let i = 0; i < 7; i++) {
+          const check = new Date(today);
+          check.setDate(check.getDate() - i);
+          const day = check.toISOString().split('T')[0];
+          if (activeDays.has(day)) {
+            streakCount++;
+          } else if (i > 0) {
+            break; // streak broken — stop counting
+          }
+          // Day 0 (today): if no post today, skip to yesterday and try again
+        }
+        setStreak(streakCount);
       }
-      const { data: reviews } = await supabase
-        .from('user_reviews')
-        .select('rating')
-        .eq('reviewed_user_id', user.id);
+
+      // Reviews
+      const reviews = reviewsResult.data;
       if (reviews && reviews.length > 0) {
         const avg = reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length;
         setAvgRating(Math.round(avg * 10) / 10);
@@ -452,8 +478,18 @@ export default function ProfileScreen() {
     ]).start();
   }, [fadeAnim, scaleAnim]);
 
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
+  const handleViewPlanDetails = useCallback((plan: GrabbedBundle) => {
+    setDetailItem({
+      title: plan.title || 'Plan',
+      description: plan.plan_details?.description || 'No description',
+      price: Number(plan.proposed_budget || 0),
+      category: plan.status || 'Other',
+      grabCount: 0,
+      created_at: plan.booked_at,
+      creatorName: 'User',
+    });
+    setDetailModalVisible(true);
+  }, []);
 
   const handleViewBundleDetails = useCallback((bundle: any) => {
     setDetailItem({
@@ -733,7 +769,7 @@ export default function ProfileScreen() {
                   </View>
                 ) : (
                   grabbedBundles.map((bundle) => (
-                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} onPress={() => handleViewBundleDetails(bundle)} activeOpacity={0.7}>
+                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} onPress={() => handleViewPlanDetails(bundle)} activeOpacity={0.7}>
                       <View style={styles.bundleCardLeft}>
                         <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
                           <Package size={20} color={ACCENT_COLORS.gold} />
@@ -883,7 +919,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
     setCommentText('');
     supabase
       .from('post_comments')
-      .select('id, content, created_at, author_id')
+      .select('id, content, created_at, author_id, profiles:profiles(full_name, username, avatar)')
       .eq('post_id', postId)
       .order('created_at', { ascending: true })
       .limit(50)
@@ -1046,12 +1082,15 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
             {comments.length === 0 ? (
               <Text style={viewerStyles.noComments}>No comments yet. Be the first!</Text>
             ) : (
-              comments.map((c, i) => (
+              comments.map((c, i) => {
+                const authorName = c.author_id === 'me' ? 'you' : (c.profiles?.full_name || c.profiles?.username || 'user');
+                return (
                 <View key={c.id || i} style={viewerStyles.commentRow}>
-                  <Text style={viewerStyles.commentUser}>@{c.author_id === 'me' ? 'you' : 'user'}</Text>
+                  <Text style={viewerStyles.commentUser}>@{authorName}</Text>
                   <Text style={viewerStyles.commentBody}>{c.content}</Text>
                 </View>
-              ))
+                );
+              })
             )}
           </ScrollView>
 

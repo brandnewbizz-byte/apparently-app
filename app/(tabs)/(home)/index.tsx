@@ -22,7 +22,6 @@ import {
   Clock,
   Briefcase,
   Plus,
-  Camera,
   ImagePlus,
   BarChart3,
 } from 'lucide-react-native';
@@ -1205,7 +1204,8 @@ function ConfettiModal({ visible, amount, onClose }: ConfettiModalProps) {
         Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
         Animated.timing(rotateAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
       ]).start();
-      setTimeout(onClose, 2000);
+      const timer = setTimeout(onClose, 2000);
+      return () => clearTimeout(timer);
     } else {
       scaleAnim.setValue(0);
       rotateAnim.setValue(0);
@@ -1247,6 +1247,7 @@ export default function HomeScreen() {
   const { skills: contextSkills, grabSkill } = useSkills();
   const { requests: serviceRequests } = useServiceRequests();
 
+  const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
   const [bundleSetIndex, setBundleSetIndex] = useState(0);
@@ -1303,7 +1304,15 @@ export default function HomeScreen() {
     };
     loadCategories();
     return () => { cancelled = true; };
-  }, [contextBundles.length]);
+  }, [contextBundles]);
+
+  // Auto-clear locally-created deals once context picks them up from Supabase
+  useEffect(() => {
+    const contextBundleIds = new Set(contextBundles.map(b => b.id));
+    const contextSkillIds = new Set(contextSkills.map(s => s.id));
+    setCreatedBundles(prev => prev.filter(b => !contextBundleIds.has(b.id)));
+    setCreatedSkills(prev => prev.filter(s => !contextSkillIds.has(s.id)));
+  }, [contextBundles, contextSkills]);
 
   const updateAnim = useRef(new Animated.Value(0)).current;
 
@@ -1434,6 +1443,20 @@ export default function HomeScreen() {
     const budgetAmount = request.budgetMax || request.budgetMin || 0;
     setConfettiAmount(budgetAmount);
     setShowConfetti(true);
+    // Persist grab as a job_request so it shows in grabbedBundles
+    if (user?.id) {
+      supabase.from('job_requests').insert({
+        user_id: user.id,
+        type: 'service_request',
+        title: request.title,
+        proposed_budget: budgetAmount,
+        status: 'pending',
+        request_id: request.id,
+        plan_details: { category: request.category, description: request.description },
+      }).then(({ error }) => {
+        if (error) console.warn('Grab request DB write failed:', error);
+      });
+    }
     const budgetLabel = request.budgetMax ? `$${request.budgetMin}–$${request.budgetMax}` : budgetAmount > 0 ? `$${budgetAmount}` : 'TBD';
     sendMessage(request.creatorId || 'u-4', `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`);
   }, [sendMessage]);
@@ -1456,6 +1479,9 @@ export default function HomeScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] });
+    // Also refresh context-driven data by toggling a refresh key that
+    // forces re-render of sections relying on bundle/skill/request contexts
+    setRefreshKey(k => k + 1);
     console.log('Grid load:', 'refresh');
     setTimeout(() => setRefreshing(false), 1500);
   }, [queryClient]);
@@ -1488,7 +1514,17 @@ export default function HomeScreen() {
   }, [grabbedBundles]);
 
   const allBundles = useMemo(() => {
-    return [...currentBundleSet.data, ...myGrabbedBundles, ...createdBundles];
+    const seen = new Set<string>();
+    const deduped: BundlePlan[] = [];
+    for (const source of [currentBundleSet.data, myGrabbedBundles, createdBundles]) {
+      for (const b of source) {
+        if (!seen.has(b.id)) {
+          seen.add(b.id);
+          deduped.push(b);
+        }
+      }
+    }
+    return deduped;
   }, [currentBundleSet.data, myGrabbedBundles, createdBundles]);
 
   const allSkills = useMemo(() => {
@@ -1570,8 +1606,15 @@ export default function HomeScreen() {
         grabCount: 0,
         provider: { name: userInfo.name, avatar: userInfo.avatar },
       };
-      setCreatedSkills(prev => [newSkill, ...prev]);
-      try { await localApi.createSkillDeal({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, icon: dealIcon, image_url: dealImage || undefined, category: 'Skill' }); } catch {}
+      try {
+        await localApi.createSkillDeal({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, icon: dealIcon, image_url: dealImage || undefined, category: 'Skill' });
+        setCreatedSkills(prev => [newSkill, ...prev]);
+      } catch {
+        Alert.alert('Error', 'Failed to save your skill deal. Please try again.');
+        resetDealForm();
+        setShowCreateModal(false);
+        return;
+      }
     } else {
       const newBundle: BundlePlan = {
         id: `bundle-${Date.now()}`,
@@ -1591,8 +1634,15 @@ export default function HomeScreen() {
         grabCount: 0,
         location: 'Created by you',
       };
-      setCreatedBundles(prev => [newBundle, ...prev]);
-      try { await localApi.createBundle({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, items: dealItems, image_url: dealImage || undefined, category: 'Bundle' }); } catch {}
+      try {
+        await localApi.createBundle({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, items: dealItems, image_url: dealImage || undefined, category: 'Bundle' });
+        setCreatedBundles(prev => [newBundle, ...prev]);
+      } catch {
+        Alert.alert('Error', 'Failed to save your bundle. Please try again.');
+        resetDealForm();
+        setShowCreateModal(false);
+        return;
+      }
     }
 
     resetDealForm();

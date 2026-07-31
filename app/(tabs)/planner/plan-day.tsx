@@ -176,6 +176,11 @@ export default function PlanDayScreen() {
   const toastAnim = useRef(new Animated.Value(0)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   const [form, setForm] = useState<PlanForm>({
     date: formatDate(new Date()),
@@ -449,8 +454,10 @@ export default function PlanDayScreen() {
       
       if (userError || !user) {
         console.error('[PlanDay] User error:', userError);
-        showToast('Please log in to post a gig', 'error');
-        setIsSaving(false);
+        if (isMountedRef.current) {
+          showToast('Please log in to post a gig', 'error');
+          setIsSaving(false);
+        }
         return;
       }
 
@@ -496,8 +503,10 @@ export default function PlanDayScreen() {
 
       if (planError || !createdPlan) {
         console.error('[PlanDay] Plan insert error:', planError?.message, planError);
-        showToast('Failed to create plan: ' + (planError?.message || 'Unknown error'), 'error');
-        setIsSaving(false);
+        if (isMountedRef.current) {
+          showToast('Failed to create plan: ' + (planError?.message || 'Unknown error'), 'error');
+          setIsSaving(false);
+        }
         return;
       }
 
@@ -614,9 +623,14 @@ export default function PlanDayScreen() {
           .select();
 
         if (insertError) {
-          console.error('[PlanDay] Job insert error:', insertError.message, insertError);
-          showToast('Failed to post jobs: ' + insertError.message, 'error');
-          setIsSaving(false);
+          console.error('[PlanDay] Job insert error, rolling back plan:', insertError.message, insertError);
+          // Rollback: delete the orphaned plan so DB stays consistent
+          await supabase.from('plans').delete().eq('id', planId);
+          console.log('[PlanDay] Plan', planId, 'rolled back');
+          if (isMountedRef.current) {
+            showToast('Failed to post jobs: ' + insertError.message, 'error');
+            setIsSaving(false);
+          }
           return;
         }
 
@@ -628,21 +642,27 @@ export default function PlanDayScreen() {
 
       console.log('[PlanDay] Plan ID:', planId, 'All job requests inserted with plan_id:', planId);
 
-      refetchPlans();
+      if (isMountedRef.current) {
+        refetchPlans();
 
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        
+        showToast('Plan saved successfully!', 'success');
+        console.log('[PlanDay] Success! Redirecting...');
+        
+        setTimeout(() => router.replace('/(tabs)/planner' as any), 500);
       }
-      
-      showToast('Plan saved successfully!', 'success');
-      console.log('[PlanDay] Success! Redirecting...');
-      
-      setTimeout(() => router.replace('/(tabs)/planner' as any), 500);
     } catch (e: any) {
       console.error('[PlanDay] Post gig error:', e);
-      showToast('Error posting gig: ' + (e.message || 'Unknown error'), 'error');
+      if (isMountedRef.current) {
+        showToast('Error posting gig: ' + (e.message || 'Unknown error'), 'error');
+      }
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   }, [form, isSaving, haptic, router, showToast, refetchPlans]);
 

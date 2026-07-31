@@ -7,7 +7,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ImageBackground, Image, Animated, RefreshControl, Dimensions,
-  Modal, TextInput, KeyboardAvoidingView, Platform, FlatList,
+  Modal, TextInput, KeyboardAvoidingView, Platform, FlatList, Alert,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -41,11 +41,6 @@ const CHAT_SEED: ChatMessage[] = [
   { id: 'c8', user: 'soulful_', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=50', text: '💜💜💜' },
 ];
 
-// Real data fetched from the spot feed API — initialized empty
-const LIVE_STREAMS: Stream[] = [];
-const UPCOMING_SHOWS: Stream[] = [];
-const PAST_BROADCASTS: Stream[] = [];
-
 function formatViewers(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return String(n);
@@ -58,6 +53,7 @@ function formatViewers(n: number): string {
 function StreamViewer({
   stream, visible, onClose, colors, insets,
 }: { stream: Stream; visible: boolean; onClose: () => void; colors: any; insets: any }) {
+  const isVod = !stream.isLive;
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: 'sys-1', user: '', avatar: '', text: `Welcome to ${stream.streamerName}'s stream!`, isSystem: true },
     ...CHAT_SEED.sort(() => Math.random() - 0.5).slice(0, 4),
@@ -74,6 +70,7 @@ function StreamViewer({
 
   useEffect(() => {
     if (!visible) return;
+    if (isVod) return; // Skip simulated chat/viewers for VODs
     // Simulate viewer count fluctuation
     viewerTimer.current = setInterval(() => {
       setViewerCount((c) => Math.max(1, c + Math.floor(Math.random() * 21) - 10));
@@ -312,6 +309,10 @@ export default function LiveScreen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  // Stable user ref to avoid useEffect re-fetch cascade on user object identity changes
+  const userRef = useRef(user);
+  userRef.current = user;
+
   // Real data from Supabase live_streams table
   const [featuredStream, setFeaturedStream] = useState<Stream | null>(null);
   const [liveStreams, setLiveStreams] = useState<Stream[]>([]);
@@ -327,7 +328,7 @@ export default function LiveScreen() {
     viewers: row.viewers || 0,
     category: row.category || '',
     tags: row.tags ? (typeof row.tags === 'string' ? row.tags.split(',').map((s: string) => s.trim()) : row.tags) : [],
-    isLive: row.is_live ?? true,
+    isLive: row.is_live ?? false,
     scheduledFor: row.scheduled_for || undefined,
     duration: row.duration || undefined,
     description: row.description || undefined,
@@ -353,15 +354,20 @@ export default function LiveScreen() {
       setUpcomingShows(upcoming);
       setPastBroadcasts(past);
 
-      // Check if current user has a live stream
-      if (user) {
-        const myLive = live.find((s) => s.id.startsWith('mystream-') && s.streamerAvatar === (user.avatar || ''));
-        if (myLive) setMyStream(myLive);
+      // Check if current user has a live stream (matched by streamer_id, not fragile heuristics)
+      const currentUserId = userRef.current?.id;
+      if (currentUserId) {
+        const myLiveRow = (data || []).find((row: any) => row.streamer_id === currentUserId && row.is_live);
+        if (myLiveRow) {
+          setMyStream(mapRow(myLiveRow));
+        } else {
+          setMyStream(null);
+        }
       }
     } catch (err) {
       console.error('[LiveScreen] fetch exception:', err);
     }
-  }, [user]);
+  }, []);
 
   const handleStartStream = useCallback(async (stream: Stream) => {
     if (!user) return;
@@ -389,21 +395,22 @@ export default function LiveScreen() {
       setLiveStreams((prev) => [mapped, ...prev]);
     } catch (err: any) {
       console.error('[LiveScreen] start stream error:', err.message);
-      // Fallback: still show locally even if DB fails
-      setMyStream(stream);
-      setLiveStreams((prev) => [stream, ...prev]);
+      Alert.alert('Stream Error', 'Failed to start your stream: ' + (err?.message || 'Please try again.'));
     }
   }, [user]);
 
   const handleEndStream = useCallback(async () => {
     if (!myStream) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from('live_streams')
         .update({ is_live: false, duration: 'ended' })
-        .eq('id', parseInt(myStream.id, 10) || 0);
+        .eq('id', myStream.id);
+      if (error) throw error;
     } catch (err: any) {
       console.error('[LiveScreen] end stream error:', err.message);
+      Alert.alert('Error', 'Failed to end stream. Please try again.');
+      return;
     }
     setMyStream(null);
     fetchLiveStreams();

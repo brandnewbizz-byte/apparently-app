@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Post, Story } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
-import { supabase } from '@/supabaseClient';
+import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 
 function timeAgo(date: Date): string {
