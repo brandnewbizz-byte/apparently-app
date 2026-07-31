@@ -189,6 +189,8 @@ function EditProfileModal({
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
   const [saving, setSaving] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
 
   const handlePickPhoto = async () => {
     const { status } = mediaPerm || {};
@@ -387,11 +389,12 @@ export default function ProfileScreen() {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      // Fire all 3 queries in parallel — no data dependency between them
-      const [jobsResult, postsResult, reviewsResult] = await Promise.all([
+      // Fire all 4 queries in parallel — no data dependency between them
+      const [jobsResult, postsResult, reviewsResult, followsResult] = await Promise.all([
         supabase.from('job_requests').select('proposed_budget, status').eq('seller_id', user.id),
         supabase.from('social_posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
         supabase.from('user_reviews').select('rating').eq('reviewed_user_id', user.id),
+        supabase.from('follows').select('follower_id, following_id').or(`follower_id.eq.${user.id},following_id.eq.${user.id}`),
       ]);
 
       // Earnings: ONLY completed jobs count
@@ -403,7 +406,14 @@ export default function ProfileScreen() {
         setTotalEarnings(earnings);
       }
 
-      // Streak: consecutive days ending at today, not just unique days
+      // Followers / Following — real counts from follows table
+      const follows = followsResult.data;
+      if (follows) {
+        const followers = follows.filter((f: any) => f.following_id === user.id).length;
+        const following = follows.filter((f: any) => f.follower_id === user.id).length;
+        setFollowersCount(followers);
+        setFollowingCount(following);
+      }
       const recentPosts = postsResult.data;
       if (recentPosts && recentPosts.length > 0) {
         const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
@@ -631,14 +641,14 @@ export default function ProfileScreen() {
               <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{getAllPostsForCount()}</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>posts</Text>
             </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{myBundles.length}</Text>
-              <Text style={{ fontSize: 13, color: colors.textTertiary }}>bundles</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{grabbedBundles.length}</Text>
-              <Text style={{ fontSize: 13, color: colors.textTertiary }}>grabbed</Text>
-            </View>
+            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followersCount}</Text>
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>followers</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followingCount}</Text>
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>following</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Tab Bar */}

@@ -1,6 +1,7 @@
 import { MessageCircle, UserPlus, Check, X, MapPin, Clock, Star } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   View,
   Text,
@@ -33,6 +34,7 @@ export default function InboxScreen() {
   const messaging = useMessaging();
   const { colors } = useTheme();
   const { handleScroll: handleTabBarScroll } = useTabBar();
+  const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'messages' | 'requests'>('messages');
   const [refreshing, setRefreshing] = useState(false);
@@ -47,10 +49,18 @@ export default function InboxScreen() {
     }).start();
   }, []);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    try {
+      await Promise.all([
+        (connections as any).refresh?.() || Promise.resolve(),
+        (messaging as any).refresh?.() || Promise.resolve(),
+      ]);
+    } catch {
+      // contexts may not expose refresh methods — fall through
+    }
+    setRefreshing(false);
+  }, [connections, messaging]);
 
   const formatTimeAgo = (timestamp: string) => {
     const now = new Date();
@@ -90,7 +100,7 @@ export default function InboxScreen() {
           activeOpacity={0.8}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/inbox/conversation/${conv.participantId}` as any);
+            router.push(`/inbox/${conv.participantId}` as any);
           }}
         >
           <Image
@@ -122,10 +132,14 @@ export default function InboxScreen() {
 
   // ─── Requests Tab ───
 
-  const approveRequest = (r: ConnectionRequest) => {
+  const approveRequest = async (r: ConnectionRequest) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    connections.approveRequest(r.id);
-    Alert.alert('Connected!', `You are now connected with ${r.fromProfile.name}.`);
+    try {
+      await connections.approveRequest(r.id);
+      Alert.alert('Connected!', `You are now connected with ${r.fromProfile.name}.`);
+    } catch {
+      Alert.alert('Error', 'Failed to approve request. Please try again.');
+    }
   };
 
   const rejectRequest = (r: ConnectionRequest) => {
@@ -134,8 +148,12 @@ export default function InboxScreen() {
       {
         text: 'Decline',
         style: 'destructive',
-        onPress: () => {
-          connections.rejectRequest(r.id);
+        onPress: async () => {
+          try {
+            await connections.rejectRequest(r.id);
+          } catch {
+            Alert.alert('Error', 'Failed to reject request.');
+          }
         },
       },
     ]);
@@ -231,7 +249,7 @@ export default function InboxScreen() {
           {TABS.map((tab) => {
             const active = activeTab === tab.id;
             const Icon = tab.icon;
-            const badge = tab.id === 'messages' ? messaging.conversations.length : requestCount;
+            const badge = tab.id === 'messages' ? messaging.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0) : requestCount;
             return (
               <TouchableOpacity
                 key={tab.id}

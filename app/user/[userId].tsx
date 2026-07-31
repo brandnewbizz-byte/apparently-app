@@ -250,44 +250,50 @@ export default function UserProfileScreen() {
       Animated.timing(followButtonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start();
 
+    // Snapshot current state for rollback
+    const wasFollowing = isFollowing;
+    const prevCount = followersCount;
+
+    // Optimistic update
+    setIsFollowing(!wasFollowing);
+    setFollowersCount(prev => wasFollowing ? Math.max(0, prev - 1) : prev + 1);
+
     try {
       const { data: authData } = await supabase.auth.getUser();
       const followerId = authData?.user?.id;
-      if (!followerId) { setFollowLoading(false); return; }
-
-      if (isFollowing) {
-        // Unfollow
-        await supabase.from('follows').delete().eq('follower_id', followerId).eq('following_id', userId);
-        setIsFollowing(false);
-        setFollowersCount(prev => Math.max(0, prev - 1));
-      } else {
-        // Follow
-        await supabase.from('follows').insert({ follower_id: followerId, following_id: userId });
-        setIsFollowing(true);
-        setFollowersCount(prev => prev + 1);
+      if (!followerId) {
+        // Rollback — no authenticated user
+        setIsFollowing(wasFollowing);
+        setFollowersCount(prevCount);
+        setFollowLoading(false);
+        return;
       }
-    } catch (e) {
-      console.log('[UserProfile] Follow error:', e);
+
+      if (wasFollowing) {
+        const { error } = await supabase.from('follows').delete().eq('follower_id', followerId).eq('following_id', userId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('follows').insert({ follower_id: followerId, following_id: userId });
+        if (error) throw error;
+      }
+    } catch (e: any) {
+      console.log('[UserProfile] Follow error:', e.message);
+      // Rollback optimistic update
+      setIsFollowing(wasFollowing);
+      setFollowersCount(prevCount);
+      Alert.alert('Error', 'Failed to update follow status. Please try again.');
     } finally {
       setFollowLoading(false);
     }
-  }, [isFollowing, userId, followLoading]);
+  }, [isFollowing, followersCount, userId, followLoading]);
 
   const handleMessage = () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    Alert.alert(
-      'Start Conversation',
-      `Send a message to ${user.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Message', 
-          onPress: () => console.log('[UserProfile] Open chat with:', userId)
-        }
-      ]
-    );
+    if (userId) {
+      router.push(`/inbox/${userId}` as any);
+    }
   };
   
   const handleToggleNotifications = () => {
@@ -447,7 +453,7 @@ export default function UserProfileScreen() {
               </TouchableOpacity>
               <View style={styles.statDivider} />
               <TouchableOpacity style={styles.statItem}>
-                <Text style={styles.statValue}>{Math.floor(user.followersCount / 100)}</Text>
+                <Text style={styles.statValue}>{user.followersCount}</Text>
                 <Text style={styles.statLabel}>Following</Text>
               </TouchableOpacity>
               <View style={styles.statDivider} />

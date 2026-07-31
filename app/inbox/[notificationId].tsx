@@ -1,5 +1,5 @@
 import { ArrowLeft, Send, AtSign, Phone } from 'lucide-react-native';
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,14 +10,16 @@ import {
   Platform,
   ScrollView,
   Image,
-  Linking,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { supabase } from '@/lib/supabase';
 
 interface Message {
   id: string;
@@ -30,39 +32,130 @@ interface Message {
 export default function ConversationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { notificationId } = useLocalSearchParams<{ notificationId: string }>();
+  const { user } = useAuth();
+  const { colors } = useTheme();
+
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const currentUser = { name: 'Unknown User', avatar: '' };
-  const myAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
+  // Real participant data — fetched from Supabase
+  const [participant, setParticipant] = useState<{ name: string; avatar: string; username: string }>({
+    name: 'Loading...',
+    avatar: '',
+    username: '',
+  });
+  const myAvatar = user?.avatar || '';
+  const myName = user?.fullName || user?.name || 'You';
 
-  const handleSendMessage = () => {
-    if (messageText.trim()) {
-      if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const formatTimeAgo = (ts: string) => {
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - new Date(ts).getTime()) / 1000);
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}d`;
+  };
+
+  // Fetch participant + messages from Supabase
+  useEffect(() => {
+    if (!notificationId) return;
+
+    const fetchData = async () => {
+      // Fetch participant profile
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, name, username, avatar')
+        .eq('id', notificationId)
+        .single();
+      if (userData) {
+        setParticipant({
+          name: userData.name || 'Unknown',
+          avatar: userData.avatar || '',
+          username: userData.username || '',
+        });
       }
 
-      const mentionMatches = messageText.match(/@(\w+)/g) || [];
-      const mentions = mentionMatches.map(m => m.substring(1));
+      // Fetch messages between current user and participant
+      if (user?.id) {
+        const { data: msgData } = await supabase
+          .from('messages')
+          .select('*')
+          .or(
+            `and(sender_id.eq.${user.id},recipient_id.eq.${notificationId}),and(sender_id.eq.${notificationId},recipient_id.eq.${user.id})`,
+          )
+          .order('created_at', { ascending: true })
+          .limit(100);
+        if (msgData) {
+          setMessages(
+            (msgData || []).map((m: any) => ({
+              id: m.id,
+              text: m.text || '',
+              userId: m.sender_id === user.id ? 'me' : notificationId,
+              timestamp: formatTimeAgo(m.created_at),
+            })),
+          );
+        }
+      }
+      setIsLoadingMessages(false);
+    };
 
-      const newMessage: Message = {
-        id: Date.now().toString(),
+    fetchData();
+  }, [notificationId, user?.id]);
+
+  const handleSendMessage = async () => {
+    if (!messageText.trim() || !user?.id) return;
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    const mentionMatches = messageText.match(/@(\w+)/g) || [];
+    const mentions = mentionMatches.map(m => m.substring(1));
+
+    // Optimistic local update
+    const tempId = `temp-${Date.now()}`;
+    const newMessage: Message = {
+      id: tempId,
+      text: messageText,
+      userId: 'me',
+      timestamp: 'Just now',
+      mentions,
+    };
+
+    const previousMessages = messages;
+    setMessages(prev => [...prev, newMessage]);
+    setMessageText('');
+    setShowMentionSuggestions(false);
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    // Persist to Supabase
+    try {
+      const { data, error } = await supabase.from('messages').insert({
+        sender_id: user.id,
+        recipient_id: notificationId,
         text: messageText,
-        userId: 'me',
-        timestamp: 'Just now',
-        mentions,
-      };
+        mentions: mentions.length ? mentions : null,
+      }).select('id, created_at').single();
 
-      setMessages(prev => [...prev, newMessage]);
-      setMessageText('');
-      setShowMentionSuggestions(false);
-      
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      if (error) throw error;
+      // Replace optimistic temp id with real DB id
+      if (data) {
+        setMessages(prev =>
+          prev.map(m => m.id === tempId ? { ...m, id: data.id, timestamp: formatTimeAgo(data.created_at) } : m),
+        );
+      }
+    } catch (err: any) {
+      console.error('[Conversation] send error:', err.message);
+      // Rollback optimistic message on failure
+      setMessages(previousMessages);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
@@ -88,11 +181,28 @@ export default function ConversationScreen() {
     setMentionQuery('');
   };
 
-  const filteredUsers: { id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[] = [];
+  const filteredUsers = useCallback(async (query: string) => {
+    if (!query || query.length < 2) return [];
+    const { data } = await supabase
+      .from('users')
+      .select('id, name, username, avatar')
+      .ilike('username', `%${query}%`)
+      .limit(5);
+    return (data || []).map((u: any) => ({
+      id: u.id,
+      name: u.name || '',
+      username: u.username || '',
+      avatar: u.avatar || '',
+      isVerified: false,
+      followersCount: 0,
+    }));
+  }, []);
+
+  const [mentionUsers, setMentionUsers] = useState<ReturnType<typeof filteredUsers> extends (...args: any) => infer R ? R extends Promise<infer T> ? T : never : never>([]);
 
   const renderMessage = (message: Message, index: number) => {
     const isMe = message.userId === 'me';
-    const user = isMe ? { name: 'You', avatar: myAvatar } : currentUser;
+    const msgUser = isMe ? { name: myName, avatar: myAvatar } : participant;
 
     const textWithMentions = message.text.split(/(@\w+)/g).map((part, i) => {
       if (part.startsWith('@')) {
@@ -142,23 +252,16 @@ export default function ConversationScreen() {
           <ArrowLeft size={24} color={Colors.dark.text} />
         </TouchableOpacity>
         <View style={styles.headerUser}>
-          <Image source={{ uri: currentUser.avatar }} style={styles.headerAvatar} />
+          <Image source={{ uri: participant.avatar }} style={styles.headerAvatar} />
           <View>
-            <Text style={styles.headerName}>{currentUser.name}</Text>
-            <Text style={styles.headerStatus}>Active now</Text>
+            <Text style={styles.headerName}>{participant.name}</Text>
+            <Text style={styles.headerStatus}>Online</Text>
           </View>
         </View>
         <TouchableOpacity
           style={styles.callButton}
           onPress={() => {
-            const phoneNumber = '555-123-4567';
-            if (Platform.OS === 'web') {
-              Alert.alert('Call', `Call ${currentUser.name} at ${phoneNumber}?`);
-            } else {
-              Linking.openURL(`tel:${phoneNumber}`).catch(() => {
-                Alert.alert('Unable to Call', 'Phone calls are not supported on this device.');
-              });
-            }
+            Alert.alert('Call', `Call ${participant.name}?`);
           }}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >

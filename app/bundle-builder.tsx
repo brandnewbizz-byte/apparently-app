@@ -37,7 +37,7 @@ import { useBundles, type BundleItem } from '@/contexts/BundleContext';
 
 type Step = 'services' | 'details' | 'preview';
 
-let serviceIdCounter = 0;
+  const [serviceIdCounter, setServiceIdCounter] = useState(0);
 
 interface ServiceDraft {
   id: string;
@@ -61,7 +61,7 @@ export default function BundleBuilderScreen() {
 
   // Step 1 state — free-form service entries
   const [selectedServices, setSelectedServices] = useState<ServiceDraft[]>([
-    { id: `svc-${++serviceIdCounter}`, name: '', description: '', price: 0, provider: '', providerLink: '', deliveryNotes: '', resourcesNeeded: '' },
+    { id: `svc-${serviceIdCounter + 1}`, name: '', description: '', price: 0, provider: '', providerLink: '', deliveryNotes: '', resourcesNeeded: '' },
   ]);
 
   // Step 2 state
@@ -79,7 +79,9 @@ export default function BundleBuilderScreen() {
   const finalPrice = bundlePrice ? parseFloat(bundlePrice) : totalItemsPrice;
 
   const addServiceDraft = useCallback(() => {
-    const id = `svc-${++serviceIdCounter}`;
+    const counter = serviceIdCounter + 1;
+    setServiceIdCounter(counter);
+    const id = `svc-${counter}`;
     setSelectedServices((prev) => [
       ...prev,
       { id, name: '', description: '', price: 0, provider: '', providerLink: '', deliveryNotes: '', resourcesNeeded: '' },
@@ -182,8 +184,8 @@ export default function BundleBuilderScreen() {
       dateRange: dateRange.trim(),
       tags: tags.length ? tags : ['Bundle'],
       creator: {
-        name: 'You',
-        avatar: '',
+        name: user?.fullName || 'You',
+        avatar: user?.avatar || '',
         rating: 5.0,
         reviews: 0,
       },
