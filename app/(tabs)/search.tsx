@@ -189,7 +189,7 @@ export default function SearchScreen() {
 
   const handleUserPress = (userId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/user/${userId}` as any);
+    router.push(`/(tabs)/profile?userId=${userId}` as any);
   };
 
   const handlePostPress = (postId: string) => {

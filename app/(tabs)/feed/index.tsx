@@ -536,7 +536,7 @@ function PostCard({
     if (authUser?.id && post.author.userId === authUser.id) {
       routerFromCard.push('/(tabs)/profile' as any);
     } else {
-      routerFromCard.push(`/user/${post.author.userId}` as any);
+      routerFromCard.push(`/(tabs)/profile?userId=${post.author.userId}` as any);
     }
   };
 
