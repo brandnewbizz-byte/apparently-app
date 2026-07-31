@@ -1146,6 +1146,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   }, [activeIndex, postsList, onNavigate, screenWidth]);
 
   return (
+    <>
     <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
       <Animated.View style={[viewerStyles.backdrop, { opacity: bgOpacity }]}>
         {/* Tap-to-dismiss background */}
@@ -1299,6 +1300,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
         </View>
       </TouchableOpacity>
     </Modal>
+  </>
   );
 }
 
