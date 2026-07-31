@@ -372,7 +372,7 @@ export default function ProfileScreen() {
   };
 
   // Helper: get deduplicated post count matching the grid display
-  const { getAllPosts } = useSocial();
+  const { getAllPosts, deletePost: socialDeletePost } = useSocial();
   const { userPosts } = useUserPosts();
   const getAllPostsForCount = useCallback(() => {
     const posts = getAllPosts() || [];
@@ -849,6 +849,7 @@ export default function ProfileScreen() {
         onDelete={() => {
           if (!selectedPost?.id) return;
           supabase.from('posts').delete().eq('id', selectedPost.id).then(() => {
+            socialDeletePost(selectedPost.id);
             setSelectedPost(null);
             setViewerPosts([]);
           });
