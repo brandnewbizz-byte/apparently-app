@@ -1524,8 +1524,9 @@ export default function HomeScreen() {
         }
       }
     }
-    return deduped;
-  }, [currentBundleSet.data, myGrabbedBundles, createdBundles]);
+    // Exclude own bundles — shouldn't see your own stuff on discovery page
+    return deduped.filter(b => b.creatorId !== user?.id);
+  }, [currentBundleSet.data, myGrabbedBundles, createdBundles, user?.id]);
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])
@@ -1549,8 +1550,10 @@ export default function HomeScreen() {
         category: s.category,
         grabCount: s.grabCount,
       }));
-    return [...convertedSkills, ...createdSkills];
-  }, [contextSkills, createdSkills]);
+    const merged = [...convertedSkills, ...createdSkills];
+    // Exclude own skills
+    return merged.filter(s => s.creatorId !== user?.id);
+  }, [contextSkills, createdSkills, user?.id]);
 
   // ─── Create Handlers ───
   const resetDealForm = () => {
@@ -1860,7 +1863,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests : []}
+            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests.filter(r => r.creatorId !== user?.id) : []}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}
