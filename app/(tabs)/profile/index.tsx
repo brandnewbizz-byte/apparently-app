@@ -954,7 +954,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
     );
   };
 
-  const onViewableChanged = useRef(({ viewableItems }: any) => {
+  const onViewableChanged = useCallback(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
       const idx = viewableItems[0].index;
       setActiveIndex(idx);
@@ -962,7 +962,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
         onNavigate(postsList[idx]);
       }
     }
-  }).current;
+  }, [postsList, onNavigate]);
 
   const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
 
