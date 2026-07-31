@@ -939,16 +939,22 @@ export default function FeedScreen() {
 
     const isDuplicate = (post: FeedPost): boolean => {
       if (seenIds.has(post.id)) return true;
-      // Near-duplicate detection: same title/caption + author name
-      const contentKey = `${(post.title || post.caption || '').toLowerCase().trim()}|${post.author.name.toLowerCase().trim()}`;
-      if (seenContentKeys.has(contentKey)) return true;
+      // Near-duplicate detection: only for posts with actual text content
+      const caption = (post.title || post.caption || '').toLowerCase().trim();
+      if (caption) {
+        const contentKey = `${caption}|${post.author.name.toLowerCase().trim()}`;
+        if (seenContentKeys.has(contentKey)) return true;
+      }
       return false;
     };
 
     const addPost = (post: FeedPost) => {
       if (isDuplicate(post)) return;
       seenIds.add(post.id);
-      seenContentKeys.add(`${(post.title || post.caption || '').toLowerCase().trim()}|${post.author.name.toLowerCase().trim()}`);
+      const caption = (post.title || post.caption || '').toLowerCase().trim();
+      if (caption) {
+        seenContentKeys.add(`${caption}|${post.author.name.toLowerCase().trim()}`);
+      }
       deduped.push(post);
     };
 
