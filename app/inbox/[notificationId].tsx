@@ -1,5 +1,6 @@
-import { ArrowLeft, Send, AtSign, Phone } from 'lucide-react-native';
+import { ArrowLeft, Send, AtSign, Phone, Mic, Play, Pause, Square } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Audio } from 'expo-av';
 import {
   View,
   Text,
@@ -27,6 +28,8 @@ interface Message {
   userId: string;
   timestamp: string;
   mentions?: string[];
+  audioUrl?: string;
+  audioDuration?: number;
 }
 
 export default function ConversationScreen() {
@@ -41,7 +44,40 @@ export default function ConversationScreen() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [isCalling, setIsCalling] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(false);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const callRoomRef = useRef<string | null>(null);
+
+  // ── Phone call ──
+  const startCall = async () => {
+    if (!user?.id) return;
+    const roomId = `call-${Date.now()}`;
+    callRoomRef.current = roomId;
+    setIsCalling(true);
+    // Send call notification to recipient
+    await supabase.from('notifications').insert({
+      recipient_id: notificationId,
+      sender_id: user.id,
+      type: 'call_request',
+      content: JSON.stringify({
+        room_id: roomId,
+        caller_name: user.fullName || 'Someone',
+        message: `is calling you...`,
+      }),
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+    Alert.alert('Calling...', `Calling ${participant.name}...`, [
+      { text: 'Cancel', onPress: () => { setIsCalling(false); callRoomRef.current = null; }, style: 'cancel' },
+    ]);
+  };
 
   // Real participant data — fetched from Supabase
   const [participant, setParticipant] = useState<{ name: string; avatar: string; username: string }>({
@@ -50,7 +86,7 @@ export default function ConversationScreen() {
     username: '',
   });
   const myAvatar = user?.avatar || '';
-  const myName = user?.fullName || user?.name || 'You';
+  const myName = user?.fullName || 'You';
 
   const formatTimeAgo = (ts: string) => {
     const now = new Date();
@@ -113,14 +149,14 @@ export default function ConversationScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    const mentionMatches = messageText.match(/@(\w+)/g) || [];
+    const text = messageText.trim();
+    const mentionMatches = text.match(/@(\w+)/g) || [];
     const mentions = mentionMatches.map(m => m.substring(1));
 
-    // Optimistic local update
     const tempId = `temp-${Date.now()}`;
     const newMessage: Message = {
       id: tempId,
-      text: messageText,
+      text,
       userId: 'me',
       timestamp: 'Just now',
       mentions,
@@ -135,17 +171,15 @@ export default function ConversationScreen() {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
 
-    // Persist to Supabase
     try {
       const { data, error } = await supabase.from('messages').insert({
         sender_id: user.id,
         recipient_id: notificationId,
-        text: messageText,
+        text,
         mentions: mentions.length ? mentions : null,
       }).select('id, created_at').single();
 
       if (error) throw error;
-      // Replace optimistic temp id with real DB id
       if (data) {
         setMessages(prev =>
           prev.map(m => m.id === tempId ? { ...m, id: data.id, timestamp: formatTimeAgo(data.created_at) } : m),
@@ -153,11 +187,94 @@ export default function ConversationScreen() {
       }
     } catch (err: any) {
       console.error('[Conversation] send error:', err.message);
-      // Rollback optimistic message on failure
       setMessages(previousMessages);
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      Alert.alert('Error', 'Failed to send message.');
     }
   };
+
+  // ── Voice recording ──
+  const startRecording = async () => {
+    try {
+      await Audio.requestPermissionsAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const rec = new Audio.Recording();
+      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.startAsync();
+      recordingRef.current = rec;
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => setRecordingDuration(p => p + 1), 1000);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (err: any) {
+      console.error('[Voice] start:', err.message);
+      Alert.alert('Error', 'Could not access microphone.');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recordingRef.current) return;
+    try {
+      setIsRecording(false);
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      const dur = recordingDuration;
+      setRecordingDuration(0);
+
+      if (!uri || !user?.id) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      const fileName = `voice/${user.id}/${Date.now()}.m4a`;
+      const resp = await fetch(uri);
+      const blob = await resp.blob();
+      const { error: uploadError } = await supabase.storage
+        .from('messages')
+        .upload(fileName, blob, { contentType: 'audio/m4a', upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('messages').getPublicUrl(fileName);
+      const audioUrl = urlData?.publicUrl;
+      if (audioUrl) {
+        const tempId = `temp-${Date.now()}`;
+        const prev = messages;
+        setMessages(p => [...p, { id: tempId, text: '', userId: 'me', timestamp: 'Just now', audioUrl, audioDuration: dur }]);
+        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+        const { data, error } = await supabase.from('messages').insert({
+          sender_id: user.id, recipient_id: notificationId,
+          text: JSON.stringify({ type: 'voice', audio_url: audioUrl, duration: dur }),
+        }).select('id, created_at').single();
+        if (!error && data) {
+          setMessages(p => p.map(m => m.id === tempId ? { ...m, id: data.id, timestamp: formatTimeAgo(data.created_at) } : m));
+        } else if (error) { setMessages(prev); }
+      }
+    } catch (err: any) {
+      console.error('[Voice] stop:', err.message);
+      Alert.alert('Error', 'Failed to send voice message.');
+    }
+  };
+
+  const playAudio = async (audioUrl: string, messageId: string) => {
+    try {
+      if (playingAudioId === messageId) {
+        if (soundRef.current) { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); soundRef.current = null; }
+        setPlayingAudioId(null); return;
+      }
+      if (soundRef.current) { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, { shouldPlay: true });
+      soundRef.current = sound;
+      setPlayingAudioId(messageId);
+      sound.setOnPlaybackStatusUpdate((s: any) => { if (s.didJustFinish) { setPlayingAudioId(null); soundRef.current = null; } });
+    } catch (err: any) { console.error('[Voice] play:', err.message); setPlayingAudioId(null); }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (soundRef.current) soundRef.current.unloadAsync().catch(() => {});
+      if (recordingRef.current) recordingRef.current.stopAndUnloadAsync().catch(() => {});
+    };
+  }, []);
 
   const handleTextChange = (text: string) => {
     setMessageText(text);
@@ -198,45 +315,62 @@ export default function ConversationScreen() {
     }));
   }, []);
 
-  const [mentionUsers, setMentionUsers] = useState<ReturnType<typeof filteredUsers> extends (...args: any) => infer R ? R extends Promise<infer T> ? T : never : never>([]);
+  const [mentionUsers, setMentionUsers] = useState<any[]>([]);
+
+  const formatDuration = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const renderMessage = (message: Message, index: number) => {
     const isMe = message.userId === 'me';
-    const msgUser = isMe ? { name: myName, avatar: myAvatar } : participant;
+    const isAudio = !!message.audioUrl;
 
-    const textWithMentions = message.text.split(/(@\w+)/g).map((part, i) => {
-      if (part.startsWith('@')) {
-        return (
-          <Text key={i} style={styles.mentionText}>
-            {part}
+    if (isAudio) {
+      const isPlaying = playingAudioId === message.id;
+      return (
+        <View key={message.id} style={[styles.messageContainer, isMe ? styles.myMessageContainer : styles.theirMessageContainer]}>
+          {!isMe && <Image source={{ uri: participant.avatar }} style={styles.messageAvatar} />}
+          <TouchableOpacity
+            style={[styles.audioBubble, isMe ? styles.myAudioBubble : styles.theirAudioBubble]}
+            onPress={() => playAudio(message.audioUrl!, message.id)}
+            activeOpacity={0.7}
+          >
+            {isPlaying ? <Pause size={22} color="#FFFFFF" /> : <Play size={22} color="#FFFFFF" />}
+            <View style={styles.audioWave}>
+              <View style={[styles.audioWaveBar, { height: 8 }]} />
+              <View style={[styles.audioWaveBar, { height: 16 }]} />
+              <View style={[styles.audioWaveBar, { height: 12 }]} />
+              <View style={[styles.audioWaveBar, { height: 20 }]} />
+              <View style={[styles.audioWaveBar, { height: 10 }]} />
+              <View style={[styles.audioWaveBar, { height: 14 }]} />
+            </View>
+            <Text style={styles.audioDuration}>{formatDuration(message.audioDuration || 0)}</Text>
+          </TouchableOpacity>
+          <Text style={[styles.messageTimestamp, isMe && styles.myMessageTimestamp, { alignSelf: 'flex-end', marginTop: 2 }]}>
+            {message.timestamp}
           </Text>
-        );
+          {isMe && <Image source={{ uri: myAvatar }} style={styles.messageAvatar} />}
+        </View>
+      );
+    }
+
+    const textWithMentions = (message.text || '').split(/(@\w+)/g).map((part, i) => {
+      if (part.startsWith('@')) {
+        return <Text key={i} style={styles.mentionText}>{part}</Text>;
       }
       return part;
     });
 
     return (
-      <View
-        key={message.id}
-        style={[
-          styles.messageContainer,
-          isMe ? styles.myMessageContainer : styles.theirMessageContainer,
-        ]}
-      >
-        {!isMe && (
-          <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
-        )}
+      <View key={message.id} style={[styles.messageContainer, isMe ? styles.myMessageContainer : styles.theirMessageContainer]}>
+        {!isMe && <Image source={{ uri: participant.avatar }} style={styles.messageAvatar} />}
         <View style={[styles.messageBubble, isMe ? styles.myMessageBubble : styles.theirMessageBubble]}>
-          <Text style={[styles.messageText, isMe && styles.myMessageText]}>
-            {textWithMentions}
-          </Text>
-          <Text style={[styles.messageTimestamp, isMe && styles.myMessageTimestamp]}>
-            {message.timestamp}
-          </Text>
+          <Text style={[styles.messageText, isMe && styles.myMessageText]}>{textWithMentions}</Text>
+          <Text style={[styles.messageTimestamp, isMe && styles.myMessageTimestamp]}>{message.timestamp}</Text>
         </View>
-        {isMe && (
-          <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
-        )}
+        {isMe && <Image source={{ uri: myAvatar }} style={styles.messageAvatar} />}
       </View>
     );
   };
@@ -284,14 +418,14 @@ export default function ConversationScreen() {
           {messages.map(renderMessage)}
         </ScrollView>
 
-        {showMentionSuggestions && filteredUsers.length > 0 && (
+        {showMentionSuggestions && mentionUsers.length > 0 && (
           <View style={styles.mentionSuggestions}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.mentionSuggestionsContent}
             >
-              {filteredUsers.map((user) => (
+              {mentionUsers.map((user: any) => (
                 <TouchableOpacity
                   key={user.id}
                   style={styles.mentionSuggestion}
@@ -306,34 +440,51 @@ export default function ConversationScreen() {
         )}
 
         <View style={[styles.inputContainer, { paddingBottom: insets.bottom || 12 }]}>
-          <TouchableOpacity
-            style={styles.mentionButton}
-            onPress={() => {
-              setMessageText(prev => prev + '@');
-              setShowMentionSuggestions(true);
-            }}
-          >
-            <AtSign size={20} color={Colors.dark.textSecondary} />
-          </TouchableOpacity>
-          <TextInput
-            style={styles.messageInput}
-            placeholder="Type a message..."
-            placeholderTextColor={Colors.dark.textTertiary}
-            value={messageText}
-            onChangeText={handleTextChange}
-            multiline
-            maxLength={500}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !messageText.trim() && styles.sendButtonDisabled]}
-            onPress={handleSendMessage}
-            disabled={!messageText.trim()}
-          >
-            <Send
-              size={20}
-              color={messageText.trim() ? Colors.dark.accent : Colors.dark.textTertiary}
-            />
-          </TouchableOpacity>
+          {isRecording ? (
+            <View style={styles.recordingBar}>
+              <Square size={20} color="#FF4444" />
+              <Text style={styles.recordingText}>Recording {formatDuration(recordingDuration)}</Text>
+              <TouchableOpacity onPress={stopRecording} style={styles.recordingSendBtn}>
+                <Send size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={styles.micButton}
+                onPressIn={startRecording}
+                onPressOut={stopRecording}
+                activeOpacity={0.6}
+              >
+                <Mic size={20} color={Colors.dark.textSecondary} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.mentionButton}
+                onPress={() => {
+                  setMessageText(prev => prev + '@');
+                  setShowMentionSuggestions(true);
+                }}
+              >
+                <AtSign size={20} color={Colors.dark.textSecondary} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.messageInput}
+                placeholder="Type a message..."
+                placeholderTextColor={Colors.dark.textTertiary}
+                value={messageText}
+                onChangeText={handleTextChange}
+                multiline
+                maxLength={500}
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, !messageText.trim() && styles.sendButtonDisabled]}
+                onPress={handleSendMessage}
+                disabled={!messageText.trim()}
+              >
+                <Send size={20} color={messageText.trim() ? Colors.dark.accent : Colors.dark.textTertiary} />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -368,6 +519,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // ── Audio / Voice ──
+  micButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.dark.surface, alignItems: 'center', justifyContent: 'center' },
+  audioBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, minWidth: 120 },
+  myAudioBubble: { backgroundColor: Colors.dark.accent, borderBottomRightRadius: 4 },
+  theirAudioBubble: { backgroundColor: Colors.dark.surface, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.dark.border },
+  audioWave: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 28 },
+  audioWaveBar: { width: 3, backgroundColor: '#FFFFFF', borderRadius: 2 },
+  audioDuration: { fontSize: 12, color: '#FFFFFF', minWidth: 32 },
+  recordingBar: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  recordingText: { flex: 1, fontSize: 14, color: '#FF4444', fontWeight: '600' },
+  recordingSendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.dark.accent, alignItems: 'center', justifyContent: 'center' },
   headerUser: {
     flexDirection: 'row',
     alignItems: 'center',

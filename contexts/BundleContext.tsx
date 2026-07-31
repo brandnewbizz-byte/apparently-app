@@ -210,7 +210,25 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
     });
-  }, [isLoaded, saveBundles, user?.id, bundles]);
+    // Create inbox notification for the bundle owner
+    if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
+      supabase.from('notifications').insert({
+        recipient_id: bundle.creatorId,
+        sender_id: user.id,
+        type: 'bundle_grab',
+        content: JSON.stringify({
+          bundle_id: id,
+          bundle_title: bundle.title,
+          grabber_name: user.fullName || user.username || 'Someone',
+          message: `grabbed your bundle "${bundle.title}"`,
+        }),
+        read: false,
+        created_at: new Date().toISOString(),
+      }).then(({ error }) => {
+        if (error) logger.warn('BundleContext', 'Notification insert failed', { error });
+      });
+    }
+  }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, bundles]);
 
   const deleteBundle = useCallback((id: string) => {
     setBundles((prev) => {

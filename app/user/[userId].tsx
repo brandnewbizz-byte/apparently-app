@@ -330,20 +330,29 @@ export default function UserProfileScreen() {
             >
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, gap: 12 }}>
                 {!isOwnProfile && (
-                  <TouchableOpacity
-                    style={[styles.followBtn, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#FFFFFF' }]}
-                    onPress={handleFollow}
-                    disabled={followLoading}
-                  >
-                    {isFollowing ? (
-                      <UserCheck size={18} color="#FFFFFF" />
-                    ) : (
-                      <UserPlus size={18} color={isDark ? '#1a1a2e' : '#667eea'} />
-                    )}
-                    <Text style={[styles.followBtnText, { color: isFollowing ? '#FFFFFF' : isDark ? '#1a1a2e' : '#667eea' }]}>
-                      {isFollowing ? 'Following' : 'Follow'}
-                    </Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      style={[styles.followBtn, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#FFFFFF' }]}
+                      onPress={handleFollow}
+                      disabled={followLoading}
+                    >
+                      {isFollowing ? (
+                        <UserCheck size={18} color="#FFFFFF" />
+                      ) : (
+                        <UserPlus size={18} color={isDark ? '#1a1a2e' : '#667eea'} />
+                      )}
+                      <Text style={[styles.followBtnText, { color: isFollowing ? '#FFFFFF' : isDark ? '#1a1a2e' : '#667eea' }]}>
+                        {isFollowing ? 'Following' : 'Follow'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.followBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
+                      onPress={() => router.push(`/inbox/${userId}` as any)}
+                    >
+                      <MessageCircle size={18} color="#FFFFFF" />
+                      <Text style={[styles.followBtnText, { color: '#FFFFFF' }]}>Message</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
 
