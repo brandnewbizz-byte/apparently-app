@@ -1619,7 +1619,7 @@ export default function HomeScreen() {
       };
       try {
         await localApi.createSkillDeal({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, icon: dealIcon, image_url: dealImage || undefined, category: 'Skill' });
-        setCreatedSkills(prev => [newSkill, ...prev]);
+        // Don't add to local state — user's own skills should not appear on home page discovery feed
       } catch {
         Alert.alert('Error', 'Failed to save your skill deal. Please try again.');
         resetDealForm();
@@ -1647,7 +1647,7 @@ export default function HomeScreen() {
       };
       try {
         await localApi.createBundle({ creator_id: userInfo.id, creator_name: userInfo.name, creator_avatar: userInfo.avatar, title: dealTitle.trim(), description: dealDesc.trim(), price, items: dealItems, image_url: dealImage || undefined, category: 'Bundle' });
-        setCreatedBundles(prev => [newBundle, ...prev]);
+        // Don't add to local state — user's own bundles should not appear on home page discovery feed
       } catch {
         Alert.alert('Error', 'Failed to save your bundle. Please try again.');
         resetDealForm();
