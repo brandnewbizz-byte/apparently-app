@@ -332,6 +332,40 @@ export default function ProfileScreen() {
   const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
+  const [followListVisible, setFollowListVisible] = useState(false);
+  const [followListTitle, setFollowListTitle] = useState('');
+  const [followListUsers, setFollowListUsers] = useState<any[]>([]);
+  const [loadingFollowList, setLoadingFollowList] = useState(false);
+
+  const fetchFollowUsers = async (type: 'followers' | 'following') => {
+    if (!user?.id) return;
+    setFollowListTitle(type === 'followers' ? 'Followers' : 'Following');
+    setFollowListVisible(true);
+    setLoadingFollowList(true);
+    try {
+      // Followers = people whose following_id = me  |  Following = people whose follower_id = me
+      const filterCol = type === 'followers' ? 'following_id' : 'follower_id';
+      const joinCol = type === 'followers' ? 'follower_id' : 'following_id';
+      const { data: follows } = await supabase
+        .from('follows')
+        .select(joinCol)
+        .eq(filterCol, user.id);
+      if (follows && follows.length > 0) {
+        const ids = follows.map((f: any) => f[joinCol]);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name, username, avatar')
+          .in('id', ids);
+        setFollowListUsers(profiles || []);
+      } else {
+        setFollowListUsers([]);
+      }
+    } catch {
+      setFollowListUsers([]);
+    } finally {
+      setLoadingFollowList(false);
+    }
+  };
 
   // Helper: get deduplicated post count matching the grid display
   const { getAllPosts } = useSocial();
@@ -639,11 +673,11 @@ export default function ProfileScreen() {
               <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{getAllPostsForCount()}</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>posts</Text>
             </View>
-            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7}>
+            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7} onPress={() => fetchFollowUsers('followers')}>
               <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followersCount}</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7}>
+            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7} onPress={() => fetchFollowUsers('following')}>
               <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followingCount}</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>following</Text>
             </TouchableOpacity>
@@ -863,6 +897,59 @@ export default function ProfileScreen() {
                 </View>
               ) : null}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Follow List Modal — followers / following user list */}
+      <Modal visible={followListVisible} animationType="slide" transparent onRequestClose={() => setFollowListVisible(false)}>
+        <View style={[styles.detailOverlay]}>
+          <View style={[styles.detailSheet, { backgroundColor: colors.surface }]}>
+            <View style={[styles.detailHandle, { backgroundColor: colors.border }]} />
+            <View style={styles.detailHeader}>
+              <Text style={[styles.detailTitle, { color: colors.text }]}>{followListTitle}</Text>
+              <TouchableOpacity onPress={() => setFollowListVisible(false)} style={styles.detailCloseBtn}>
+                <X size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            {loadingFollowList ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={ACCENT_COLORS.neonGreen} />
+              </View>
+            ) : followListUsers.length === 0 ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 15 }}>No users yet</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={followListUsers}
+                keyExtractor={(item: any) => item.id}
+                showsVerticalScrollIndicator={false}
+                style={{ flex: 1 }}
+                renderItem={({ item }: any) => (
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 12 }}
+                    onPress={() => {
+                      setFollowListVisible(false);
+                      router.push(`/user/${item.id}`);
+                    }}
+                  >
+                    {item.avatar ? (
+                      <Image source={{ uri: item.avatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                    ) : (
+                      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 20, color: colors.textSecondary }}>{item.full_name?.charAt(0) || '?'}</Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text }} numberOfLines={1}>{item.full_name || 'Unknown'}</Text>
+                      <Text style={{ fontSize: 13, color: colors.textSecondary }}>@{item.username || 'unknown'}</Text>
+                    </View>
+                    <ChevronRight size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              />
+            )}
           </View>
         </View>
       </Modal>
