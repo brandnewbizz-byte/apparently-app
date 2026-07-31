@@ -189,8 +189,6 @@ function EditProfileModal({
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
   const [saving, setSaving] = useState(false);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [followingCount, setFollowingCount] = useState(0);
 
   const handlePickPhoto = async () => {
     const { status } = mediaPerm || {};
@@ -332,6 +330,8 @@ export default function ProfileScreen() {
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
 
   // Helper: get deduplicated post count matching the grid display
   const { getAllPosts } = useSocial();
@@ -397,6 +397,11 @@ export default function ProfileScreen() {
         supabase.from('follows').select('follower_id, following_id').or(`follower_id.eq.${user.id},following_id.eq.${user.id}`),
       ]);
 
+      // Followers / Following — real counts from the follows table
+      const follows = followsResult.data ?? [];
+      setFollowersCount(follows.filter((f: any) => f.following_id === user.id).length);
+      setFollowingCount(follows.filter((f: any) => f.follower_id === user.id).length);
+
       // Earnings: ONLY completed jobs count
       const jobs = jobsResult.data;
       if (jobs) {
@@ -406,14 +411,7 @@ export default function ProfileScreen() {
         setTotalEarnings(earnings);
       }
 
-      // Followers / Following — real counts from follows table
-      const follows = followsResult.data;
-      if (follows) {
-        const followers = follows.filter((f: any) => f.following_id === user.id).length;
-        const following = follows.filter((f: any) => f.follower_id === user.id).length;
-        setFollowersCount(followers);
-        setFollowingCount(following);
-      }
+      // Streak: consecutive days ending at today, not just unique days
       const recentPosts = postsResult.data;
       if (recentPosts && recentPosts.length > 0) {
         const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
