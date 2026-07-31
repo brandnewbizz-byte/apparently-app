@@ -1525,7 +1525,11 @@ export default function HomeScreen() {
       }
     }
     // Exclude own bundles — shouldn't see your own stuff on discovery page
-    return deduped.filter(b => b.creatorId !== user?.id);
+    const uid = user?.id;
+    return uid ? deduped.filter(b => {
+      const cid = b.creatorId || (b as any).creator_id || '';
+      return cid !== uid;
+    }) : deduped;
   }, [currentBundleSet.data, myGrabbedBundles, createdBundles, user?.id]);
 
   const allSkills = useMemo(() => {
@@ -1552,7 +1556,11 @@ export default function HomeScreen() {
       }));
     const merged = [...convertedSkills, ...createdSkills];
     // Exclude own skills
-    return merged.filter(s => s.creatorId !== user?.id);
+    const uid = user?.id;
+    return uid ? merged.filter(s => {
+      const cid = s.creatorId || (s as any).creator_id || '';
+      return cid !== uid;
+    }) : merged;
   }, [contextSkills, createdSkills, user?.id]);
 
   // ─── Create Handlers ───
@@ -1863,7 +1871,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests.filter(r => r.creatorId !== user?.id) : []}
+            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests.filter(r => (r.creatorId || (r as any).creator_id || '') !== user?.id) : []}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}
