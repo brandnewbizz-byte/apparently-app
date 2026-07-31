@@ -61,8 +61,20 @@ export default function SettingsScreen() {
         }
       }
       const updates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar_url: finalAvatar };
-      await supabase.from('profiles').upsert({ id: user.id, ...updates });
-      await supabase.from('users').update(updates).eq('id', user.id);
+      // Fetch full row, delete, re-insert (workaround for broken updated_at trigger on profiles)
+      const { data: existing } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      if (existing) {
+        await supabase.from('profiles').delete().eq('id', user.id);
+      }
+      const merged = { ...(existing || {}), ...updates, id: user.id };
+      delete merged.created_at;
+      const { error: insertErr } = await supabase.from('profiles').insert(merged);
+      if (insertErr) {
+        console.log('[Settings] Save error:', insertErr.message);
+        Alert.alert('Error', insertErr.message || 'Failed to save profile.');
+        setSaving(false);
+        return;
+      }
       await refreshProfile();
       Alert.alert('Saved', 'Profile updated.');
     } catch (e: any) {
