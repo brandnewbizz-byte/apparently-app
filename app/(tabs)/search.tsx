@@ -27,6 +27,15 @@ interface UserResult {
   followers_count?: number;
 }
 
+// Maps profile row (full_name, avatar_url) to UserResult (name, avatar)
+interface ProfileRow {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+  avatar_url: string | null;
+  bio?: string | null;
+}
+
 interface PostResult {
   id: string;
   content: string;
@@ -103,9 +112,9 @@ export default function SearchScreen() {
       const userPromise = isHashtag
         ? Promise.resolve({ data: [], error: null })
         : supabase
-            .from('users')
-            .select('id, name, username, avatar, is_verified, bio, followers_count')
-            .or(`name.ilike.${pattern},username.ilike.${pattern}`)
+            .from('profiles')
+            .select('id, full_name, username, avatar_url, bio')
+            .or(`full_name.ilike.${pattern},username.ilike.${pattern}`)
             .limit(20);
 
       const postPattern = `%${trimmed}%`;
@@ -126,10 +135,19 @@ export default function SearchScreen() {
       if (seq !== requestSeqRef.current) return;
 
       if (!userRes.error) {
-        setUsers((userRes.data as UserResult[]) || []);
+        // Map profiles rows to UserResult shape
+        const mapped: UserResult[] = ((userRes.data as ProfileRow[]) || []).map(p => ({
+          id: p.id,
+          name: p.full_name || p.username || 'User',
+          username: p.username || '',
+          avatar: p.avatar_url || '',
+          is_verified: false,
+          bio: p.bio || undefined,
+        }));
+        setUsers(mapped);
         // Load following status for found users
-        if (userRes.data && currentUser?.id) {
-          const userIds = (userRes.data as UserResult[]).map(u => u.id);
+        if (mapped.length > 0 && currentUser?.id) {
+          const userIds = mapped.map(u => u.id);
           supabase
             .from('follows')
             .select('following_id')
