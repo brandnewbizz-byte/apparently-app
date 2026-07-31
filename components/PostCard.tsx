@@ -464,6 +464,14 @@ const authorAvatar = post.user.avatar || post.user.avatar_url || '';
           </Text>
         </View>
       )}
+      {(post as any).post_kind === 'reshare' && (
+        <View style={[styles.reshareBanner, { backgroundColor: colors.accent + '12' }]}>
+          <Forward size={14} color={colors.accent} />
+          <Text style={[styles.reshareText, { color: colors.accent }]}>
+            Reshared
+          </Text>
+        </View>
+      )}
 
       <View style={styles.headerWrapper}>
         <View style={styles.header}>
@@ -1017,6 +1025,22 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   apparentlyText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  reshareBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  reshareText: {
     fontSize: 12,
     fontWeight: '600' as const,
     textTransform: 'uppercase',

@@ -24,6 +24,7 @@ import {
   Bookmark,
   Send,
   Trash2,
+  Forward,
   Plus,
 } from 'lucide-react-native';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -850,6 +851,27 @@ export default function ProfileScreen() {
             setViewerPosts([]);
           });
         }}
+        onReshare={() => {
+          if (!selectedPost?.id || !user?.id) return;
+          const p = selectedPost;
+          const reshareData = {
+            user_id: user.id,
+            content: JSON.stringify({ type: 'reshare', originalPostId: p.id, originalCaption: p.caption || p.content || '', originalAuthor: p.user?.name || p.author_name || '' }),
+            image_url: p.imageUrl || p.image_url || '',
+            post_kind: 'reshare',
+            likes: 0, comments: 0, shares: 0,
+          };
+          supabase.from('posts').insert(reshareData).then(({ error }) => {
+            if (!error) {
+              supabase.from('posts').select('shares').eq('id', p.id).single().then(({ data: orig }) => {
+                const current = orig?.shares || 0;
+                supabase.from('posts').update({ shares: current + 1 }).eq('id', p.id).then(() => {});
+              });
+              setSelectedPost(null);
+              setViewerPosts([]);
+            }
+          });
+        }}
         colors={colors}
       />
 
@@ -973,13 +995,14 @@ export default function ProfileScreen() {
 // ═══════════════════════════════════════════════════════════════════════════
 // Instagram-Style Fullscreen Post Viewer (profile)
 // ═══════════════════════════════════════════════════════════════════════════
-function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, colors }: {
+function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, onReshare, colors }: {
   visible: boolean;
   post: any;
   allPosts?: any[];
   onClose: () => void;
   onNavigate?: (post: any) => void;
   onDelete?: () => void;
+  onReshare?: () => void;
   colors: any;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -1185,6 +1208,12 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
               <Heart size={22} color={liked ? '#EF4444' : '#999'} fill={liked ? '#EF4444' : 'none'} />
               <Text style={viewerStyles.likesText}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
             </TouchableOpacity>
+            {onReshare && (
+              <TouchableOpacity onPress={onReshare} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 24 }}>
+                <Forward size={20} color="#22C55E" />
+                <Text style={[viewerStyles.likesText, { color: '#22C55E' }]}>Reshare</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Comments list */}
