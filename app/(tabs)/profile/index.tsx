@@ -638,7 +638,7 @@ export default function ProfileScreen() {
                   </View>
                 ) : (
                   myBundles.map((bundle) => (
-                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7}>
+                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7} onPress={() => handleViewBundleDetails(bundle)}>
                       <View style={styles.bundleCardLeft}>
                         <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.purpleDim }]}>
                           <Package size={20} color={ACCENT_COLORS.purple} />
