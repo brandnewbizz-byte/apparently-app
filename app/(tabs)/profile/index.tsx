@@ -387,6 +387,19 @@ export default function ProfileScreen() {
     return uniqueSocial.length + userPosts.length;
   }, [getAllPosts, userPosts]);
   
+  // Direct Supabase post count — always matches the grid (same query, same filter)
+  const [userPostsCount, setUserPostsCount] = useState<number | null>(null);
+  const fetchPostCount = useCallback(async () => {
+    if (!user?.id) return;
+    const { count, error } = await supabase
+      .from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .or('post_kind.is.null,post_kind.neq.reshare');
+    if (!error && count !== null) setUserPostsCount(count);
+  }, [user?.id]);
+  useEffect(() => { fetchPostCount(); }, [fetchPostCount]);
+  
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
@@ -675,7 +688,7 @@ export default function ProfileScreen() {
           {/* Instagram-Style Stats Row */}
           <View style={{ paddingHorizontal: 32, paddingTop: 28, paddingBottom: 16, flexDirection: 'row', justifyContent: 'space-around' }}>
             <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{getAllPostsForCount()}</Text>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{userPostsCount ?? 0}</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>posts</Text>
             </View>
             <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7} onPress={() => fetchFollowUsers('followers')}>
@@ -850,6 +863,7 @@ export default function ProfileScreen() {
           if (!selectedPost?.id) return;
           supabase.from('posts').delete().eq('id', selectedPost.id).then(() => {
             socialDeletePost(selectedPost.id);
+            setUserPostsCount(prev => prev !== null ? prev - 1 : null);
             setSelectedPost(null);
             setViewerPosts([]);
           });
@@ -1196,11 +1210,21 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
                 {typeof timestamp === 'string' ? timestamp : new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
             </View>
-            {onDelete && (
-              <TouchableOpacity style={viewerStyles.xBtn} onPress={() => setShowOptions(true)}>
-                <MoreHorizontal size={22} color="#CCC" />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity style={viewerStyles.xBtn} onPress={() => setShowOptions(true)}>
+              <MoreHorizontal size={22} color="#CCC" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[viewerStyles.xBtn, { marginLeft: 8 }]} onPress={() => {
+              Alert.alert(
+                'Delete Post',
+                'This action cannot be undone. Are you sure?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
+                ]
+              );
+            }}>
+              <Trash2 size={22} color="#EF4444" />
+            </TouchableOpacity>
             <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
               <X size={22} color="#CCC" />
             </TouchableOpacity>
