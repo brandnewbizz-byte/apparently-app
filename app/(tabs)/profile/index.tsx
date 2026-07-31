@@ -231,17 +231,9 @@ function EditProfileModal({
         if (name.trim() && name !== user?.fullName) updates.full_name = name.trim();
         if (bio.trim() !== (user?.bio || '')) updates.bio = bio.trim();
         if (Object.keys(updates).length > 0) {
-          // Fetch full row, delete, then re-insert (workaround for broken updated_at trigger)
-          const { data: existing } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          if (existing) {
-            await supabase.from('profiles').delete().eq('id', user.id);
-          }
-          const merged = { ...(existing || {}), ...updates, id: user.id };
-          delete merged.created_at; // let DB handle timestamps
-          const { error: insertErr } = await supabase.from('profiles').insert(merged);
-          if (insertErr) {
-            console.log('[EditProfile] Save error:', insertErr.message);
-            Alert.alert('Error', insertErr.message || 'Failed to save profile.');
+          const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
+          if (saveErr) {
+            Alert.alert('Error', saveErr.message);
             setSaving(false);
             return;
           }
