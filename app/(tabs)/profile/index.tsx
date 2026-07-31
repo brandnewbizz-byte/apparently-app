@@ -1063,7 +1063,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
     }
   }, [visible]);
 
-  if (!currentPost) return null;
+  // Always render Modal shell — visible prop handles show/hide
 
   const handleClose = () => {
     Animated.parallel([
