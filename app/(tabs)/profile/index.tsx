@@ -26,6 +26,7 @@ import {
   Trash2,
   Forward,
   Plus,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
@@ -110,6 +111,7 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
       .from('posts')
       .select('id, content, image_url, created_at, likes')
       .eq('user_id', authUser.id)
+      .neq('post_kind', 'reshare')
       .order('created_at', { ascending: false })
       .limit(100)
       .then(({ data, error: err }) => {
@@ -1016,6 +1018,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const [commentText, setCommentText] = useState('');
   const [commenting, setCommenting] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [showComments, setShowComments] = useState(true);
+  const [showOptions, setShowOptions] = useState(false);
 
   const postsList = allPosts && allPosts.length > 0 ? allPosts : (post ? [post] : []);
   const currentPost = postsList[activeIndex] || post;
@@ -1117,13 +1121,17 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const renderSwipeItem = ({ item }: { item: any }) => {
     const imgUrl = item?.imageUrl || item?.image_url || item?.mediaUri || '';
     return (
-      <View style={{ width: screenWidth, height: screenHeight * 0.55 }}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => setShowComments(prev => !prev)}
+        style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}
+      >
         <Image
           source={{ uri: imgUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800' }}
           style={{ width: '100%', height: '100%' }}
           resizeMode="cover"
         />
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -1172,7 +1180,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
           />
         </Animated.View>
 
-          {/* Engagement + comments sheet */}
+          {/* Engagement + comments sheet — toggled by tapping image */}
+        {showComments && (
         <Animated.View style={[viewerStyles.igSheet, { transform: [{ translateY }] }]}>
           {/* Drag handle */}
           <View style={viewerStyles.sheetHandle} />
@@ -1186,12 +1195,12 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
               </Text>
             </View>
             {onDelete && (
-              <TouchableOpacity style={viewerStyles.xBtn} onPress={onDelete}>
-                <Trash2 size={18} color="#EF4444" />
+              <TouchableOpacity style={viewerStyles.xBtn} onPress={() => setShowOptions(true)}>
+                <MoreHorizontal size={22} color="#CCC" />
               </TouchableOpacity>
             )}
             <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
-              <X size={20} color="#999" />
+              <X size={22} color="#CCC" />
             </TouchableOpacity>
           </View>
 
@@ -1249,7 +1258,46 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
             </TouchableOpacity>
           </View>
         </Animated.View>
+        )}
       </Animated.View>
+    </Modal>
+
+    {/* Options action sheet */}
+    <Modal visible={showOptions} transparent animationType="fade" onRequestClose={() => setShowOptions(false)}>
+      <TouchableOpacity
+        style={viewerStyles.optionOverlay}
+        activeOpacity={1}
+        onPress={() => setShowOptions(false)}
+      >
+        <View style={[viewerStyles.optionSheet, { backgroundColor: '#1C1C1E' }]}>
+          <TouchableOpacity
+            style={viewerStyles.optionItem}
+            onPress={() => {
+              setShowOptions(false);
+              setTimeout(() => {
+                Alert.alert(
+                  'Delete Post',
+                  'This action cannot be undone. Are you sure?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
+                  ]
+                );
+              }, 350);
+            }}
+          >
+            <Trash2 size={20} color="#EF4444" />
+            <Text style={[viewerStyles.optionText, { color: '#EF4444' }]}>Delete Post</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
+            onPress={() => setShowOptions(false)}
+          >
+            <X size={20} color="#999" />
+            <Text style={[viewerStyles.optionText, { color: '#999' }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -1647,6 +1695,31 @@ const viewerStyles = StyleSheet.create({
     marginHorizontal: 24, marginTop: 'auto', marginBottom: 'auto',
     backgroundColor: '#1a1a1a', borderRadius: 20, padding: 24, alignItems: 'center',
   },
+  optionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+    paddingBottom: 40,
+    paddingHorizontal: 16,
+  },
+  optionSheet: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#333',
+  },
+  optionText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+
   textCardHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 },
   dismissBtn: { marginTop: 16, paddingHorizontal: 32, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)' },
   dismissBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
