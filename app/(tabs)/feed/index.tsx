@@ -532,12 +532,7 @@ function PostCard({
 
   const handleProfileTap = () => {
     if (!post.author.userId) return;
-    // Your own avatar → go to your actual profile tab, not the /user/ viewer
-    if (currentUser?.id && post.author.userId === currentUser.id) {
-      routerFromCard.push('/(tabs)/profile' as any);
-    } else {
-      routerFromCard.push(`/user/${post.author.userId}` as any);
-    }
+    routerFromCard.push(`/user/${post.author.userId}` as any);
   };
 
   return (

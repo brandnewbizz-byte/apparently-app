@@ -1,7 +1,8 @@
-import { MessageCircle, UserPlus, Check, X, MapPin, Clock, Star } from 'lucide-react-native';
+import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Star } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import {
   View,
   Text,
@@ -49,6 +50,51 @@ export default function InboxScreen() {
     }).start();
   }, []);
 
+  // Fetch bundle grab / call notifications from Supabase
+  const [notifs, setNotifs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchNotifs = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('recipient_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (!error && data) {
+        setNotifs(data.map((n: any) => {
+          const content = typeof n.content === 'string' ? JSON.parse(n.content) : n.content || {};
+          return {
+            id: n.id,
+            type: n.type,
+            senderId: n.sender_id,
+            senderName: content.grabber_name || content.caller_name || 'Someone',
+            message: content.message || content.title || '',
+            read: n.read,
+            createdAt: n.created_at,
+          };
+        }));
+      }
+    };
+
+    fetchNotifs();
+
+    const sub = supabase
+      .channel('notifs-inbox')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `recipient_id=eq.${user.id}`,
+      }, () => fetchNotifs())
+      .subscribe();
+
+    return () => { sub.unsubscribe(); };
+  }, [user?.id]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -77,7 +123,10 @@ export default function InboxScreen() {
   // ─── Messages Tab ───
 
   const renderMessages = () => {
-    if (messaging.conversations.length === 0) {
+    const hasNotifs = notifs.length > 0;
+    const hasConversations = messaging.conversations.length > 0;
+
+    if (!hasNotifs && !hasConversations) {
       return (
         <View style={styles.empty}>
           <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
@@ -91,7 +140,42 @@ export default function InboxScreen() {
       );
     }
 
-    return messaging.conversations.map((conv) => {
+    return (
+      <>
+        {notifs.map((n) => (
+          <TouchableOpacity
+            key={`notif-${n.id}`}
+            style={[styles.card, { backgroundColor: n.read ? colors.surface : colors.accent + '08', borderColor: n.read ? colors.border : colors.accent + '40' }]}
+            activeOpacity={0.8}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push(`/inbox/${n.senderId}` as any);
+            }}
+          >
+            <View style={[styles.avatar, { backgroundColor: colors.accent + '20', alignItems: 'center', justifyContent: 'center' }]}>
+              <Bell size={20} color={colors.accent} />
+            </View>
+            <View style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
+                  {n.type === 'bundle_grab' ? 'Bundle grabbed' : n.type === 'call_request' ? 'Missed call' : 'Notification'}
+                </Text>
+                <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
+                  {formatTimeAgo(n.createdAt)}
+                </Text>
+              </View>
+              <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
+                {n.senderName}: {n.message}
+              </Text>
+            </View>
+            {!n.read && (
+              <View style={[styles.unread, { backgroundColor: colors.accent }]}>
+                <Text style={styles.unreadText}>1</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+        {messaging.conversations.map((conv) => {
       const lastMsg = conv.messages[conv.messages.length - 1];
       return (
         <TouchableOpacity
@@ -127,7 +211,9 @@ export default function InboxScreen() {
           )}
         </TouchableOpacity>
       );
-    });
+    })}
+      </>
+    );
   };
 
   // ─── Requests Tab ───
