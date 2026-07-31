@@ -113,7 +113,7 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     image: b.imageUrl,
     distance: 0,
     status: b.status === 'grabbed' ? 'grabbed' : 'available',
-    creatorId: 'u-dev',
+    creatorId: b.creatorId,
     creator: b.creator,
     summary: b.items.map((i) => i.name),
     description: b.description,
