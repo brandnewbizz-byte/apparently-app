@@ -23,6 +23,7 @@ import {
   Camera,
   Bookmark,
   Send,
+  Trash2,
   Plus,
 } from 'lucide-react-native';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -424,17 +425,18 @@ export default function ProfileScreen() {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
       // Fire all 4 queries in parallel — no data dependency between them
-      const [jobsResult, postsResult, reviewsResult, followsResult] = await Promise.all([
+      const [jobsResult, postsResult, reviewsResult, followersResult, followingResult] = await Promise.all([
         supabase.from('job_requests').select('proposed_budget, status').eq('seller_id', user.id),
         supabase.from('social_posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
         supabase.from('user_reviews').select('rating').eq('reviewed_user_id', user.id),
-        supabase.from('follows').select('follower_id, following_id').or(`follower_id.eq.${user.id},following_id.eq.${user.id}`),
+        // count queries: more reliable than .or() with UUIDs, excludes self-follow
+        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', user.id).neq('follower_id', user.id),
+        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', user.id).neq('following_id', user.id),
       ]);
 
-      // Followers / Following — real counts from the follows table
-      const follows = followsResult.data ?? [];
-      setFollowersCount(follows.filter((f: any) => f.following_id === user.id).length);
-      setFollowingCount(follows.filter((f: any) => f.follower_id === user.id).length);
+      // Followers / Following — real counts (excludes self-follow)
+      setFollowersCount(followersResult.count ?? 0);
+      setFollowingCount(followingResult.count ?? 0);
 
       // Earnings: ONLY completed jobs count
       const jobs = jobsResult.data;
@@ -841,6 +843,13 @@ export default function ProfileScreen() {
         allPosts={viewerPosts}
         onClose={() => { setSelectedPost(null); setViewerPosts([]); }}
         onNavigate={(p: any) => setSelectedPost(p)}
+        onDelete={() => {
+          if (!selectedPost?.id) return;
+          supabase.from('posts').delete().eq('id', selectedPost.id).then(() => {
+            setSelectedPost(null);
+            setViewerPosts([]);
+          });
+        }}
         colors={colors}
       />
 
@@ -964,12 +973,13 @@ export default function ProfileScreen() {
 // ═══════════════════════════════════════════════════════════════════════════
 // Instagram-Style Fullscreen Post Viewer (profile)
 // ═══════════════════════════════════════════════════════════════════════════
-function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, colors }: {
+function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, colors }: {
   visible: boolean;
   post: any;
   allPosts?: any[];
   onClose: () => void;
   onNavigate?: (post: any) => void;
+  onDelete?: () => void;
   colors: any;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -1152,6 +1162,11 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
                 {typeof timestamp === 'string' ? timestamp : new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </Text>
             </View>
+            {onDelete && (
+              <TouchableOpacity style={viewerStyles.xBtn} onPress={onDelete}>
+                <Trash2 size={18} color="#EF4444" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
               <X size={20} color="#999" />
             </TouchableOpacity>
