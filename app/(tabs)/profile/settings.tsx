@@ -1,4 +1,4 @@
-import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save } from 'lucide-react-native';
+import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign } from 'lucide-react-native';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert, Switch, TextInput, Image } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,12 +17,14 @@ export default function SettingsScreen() {
   const { user, refreshProfile, signOut } = useAuth();
 
   const [editingName, setEditingName] = useState(user?.fullName || '');
+  const [editingUsername, setEditingUsername] = useState(user?.username || '');
   const [editingBio, setEditingBio] = useState(user?.bio || '');
   const [editingAvatar, setEditingAvatar] = useState((user as any)?.avatar_url || user?.avatar || '');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setEditingName(user?.fullName || '');
+    setEditingUsername(user?.username || '');
     setEditingBio(user?.bio || '');
     setEditingAvatar((user as any)?.avatar_url || user?.avatar || '');
   }, [user]);
@@ -58,7 +60,7 @@ export default function SettingsScreen() {
           finalAvatar = urlData?.publicUrl || editingAvatar;
         }
       }
-      const updates: any = { full_name: editingName, bio: editingBio, avatar_url: finalAvatar };
+      const updates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar_url: finalAvatar };
       await supabase.from('profiles').upsert({ id: user.id, ...updates });
       await supabase.from('users').update(updates).eq('id', user.id);
       await refreshProfile();
@@ -148,6 +150,14 @@ export default function SettingsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <User size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
               <TextInput style={[styles.input, { flex: 1, color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} value={editingName} onChangeText={setEditingName} placeholder="Your name" placeholderTextColor={colors.textTertiary} />
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Username</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <AtSign size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <TextInput style={[styles.input, { flex: 1, color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} value={editingUsername} onChangeText={setEditingUsername} placeholder="your_username" placeholderTextColor={colors.textTertiary} autoCapitalize="none" />
             </View>
           </View>
 

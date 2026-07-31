@@ -98,28 +98,30 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
   const { user: authUser } = useAuth();
   const [allPosts, setAllPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   // Load user's posts from Supabase — ensures persistence across sessions
   useEffect(() => {
     if (!authUser?.id) { setLoading(false); return; }
+    setError(false);
     supabase
       .from('posts')
       .select('id, content, image_url, created_at, likes')
       .eq('user_id', authUser.id)
       .order('created_at', { ascending: false })
       .limit(100)
-      .then(({ data, error }) => {
-        if (!error && data) {
-          setAllPosts(data.map(p => ({
-            id: p.id,
-            imageUrl: p.image_url,
-            caption: p.content,
-            likes: p.likes || 0,
-            timestamp: p.created_at,
-            type: 'photo',
-            isOwnPost: true,
-          })));
-        }
+      .then(({ data, error: err }) => {
+        if (err) { console.log('[UserPosts] Supabase error:', err.message); setError(true); setLoading(false); return; }
+        if (!data || data.length === 0) { setLoading(false); return; }
+        setAllPosts(data.map(p => ({
+          id: p.id,
+          imageUrl: p.image_url,
+          caption: p.content,
+          likes: p.likes || 0,
+          timestamp: p.created_at,
+          type: 'photo',
+          isOwnPost: true,
+        })));
         setLoading(false);
       });
   }, [authUser?.id]);
@@ -512,7 +514,8 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [fetchProfileStats, fetchGrabbedBundles]);
 
-  const userName = user?.fullName || user?.username || 'User';
+  const userName = user?.fullName || 'User';
+  const userUsername = user?.username || '';
   const userAvatar = user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
   const userBio = user?.bio || '';
 
@@ -566,6 +569,7 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.userName}>{userName}</Text>
+                {userUsername ? <Text style={[styles.userBio, { fontWeight: '500' }]}>@{userUsername}</Text> : null}
                 <Text style={styles.userBio}>{userBio}</Text>
               </View>
 
@@ -954,17 +958,15 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
     );
   };
 
-  const onViewableChanged = useCallback(({ viewableItems }: any) => {
-    if (viewableItems && viewableItems.length > 0) {
-      const idx = viewableItems[0].index;
+  const handleMomentumScrollEnd = useCallback((e: any) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+    if (idx !== activeIndex) {
       setActiveIndex(idx);
       if (onNavigate && postsList[idx]) {
         onNavigate(postsList[idx]);
       }
     }
-  }, [postsList, onNavigate]);
-
-  const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 50 });
+  }, [activeIndex, postsList, onNavigate, screenWidth]);
 
   return (
     <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
@@ -987,12 +989,11 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, col
             ref={flatListRef}
             data={postsList}
             renderItem={renderSwipeItem}
-            keyExtractor={(item: any) => item.id || String(Math.random())}
+            keyExtractor={(item: any, index: number) => item.id || `post-${index}`}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            onViewableItemsChanged={onViewableChanged}
-            viewabilityConfig={viewConfigRef.current}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
             initialNumToRender={3}
             getItemLayout={(_, index) => ({
               length: screenWidth,
