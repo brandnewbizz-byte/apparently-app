@@ -114,9 +114,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           if (stored) {
             const cached = JSON.parse(stored);
             setBundles(cached);
-            const { data: { user: authUser2 } } = await supabase.auth.getUser();
-            const myId2 = authUser2?.id || '';
-            setMyBundles(cached.filter((b: UserBundle) => b.creatorId === myId2));
+            // Show all cached bundles as user's own (AsyncStorage is already user-scoped)
+            setMyBundles(cached);
           }
           setIsLoaded(true);
           return;

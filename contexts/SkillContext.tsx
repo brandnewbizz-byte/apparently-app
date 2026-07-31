@@ -99,9 +99,8 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           if (stored) {
             const cached = JSON.parse(stored);
             setSkills(cached);
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            const myId = authUser?.id || '';
-            setMySkills(cached.filter((s: UserSkill) => s.creatorId === myId));
+            // Show all cached skills as user's own (AsyncStorage is already user-scoped)
+            setMySkills(cached);
           }
           setIsLoaded(true);
           return;
