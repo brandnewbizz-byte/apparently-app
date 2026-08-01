@@ -16,6 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
 import { usePlan, PlanProvider } from '@/contexts/PlanContext';
+import { useLiveAudio } from '@/hooks/useLiveAudio';
 import OverviewTab from './plan/OverviewTab';
 import IdeasTab from './plan/IdeasTab';
 import TasksTab from './plan/TasksTab';
@@ -198,6 +199,15 @@ function RoomContent() {
   const router = useRouter();
   const { colors } = useTheme();
   const { user } = useAuth();
+
+  // ── Live Audio (push-to-talk + multi-speaker) ──
+  const audio = useLiveAudio({
+    roomId: roomId || '',
+    peerId: user?.id || '',
+    peerName: user?.fullName || 'Anonymous',
+    enabled: !!roomId,
+    onMutedByHost: () => setIsSpeaking(false),
+  });
   const { hideTabBar, showTabBar } = useTabBar();
   const {
     rooms, joinRoom, leaveRoom,
@@ -232,11 +242,14 @@ function RoomContent() {
       joinRoom(roomId);
       loadPlan(roomId);
       createPlan(roomId, { title: room?.name || 'New Plan' });
+      // Connect push-to-talk audio relay
+      audio.joinRoom();
       const t = setTimeout(() => setLoading(false), 600);
       return () => {
         clearTimeout(t);
         showTabBar();
         leaveRoom(roomId);
+        audio.leaveRoom();
       };
     }
   }, [roomId]);
@@ -267,13 +280,17 @@ function RoomContent() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setIsSpeaking(true);
     startSpeaking(roomId || '');
-  }, [roomId, startSpeaking]);
+    // Push-to-talk via live audio relay
+    audio.micPressIn();
+  }, [roomId, startSpeaking, audio]);
 
   const handlePressOut = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsSpeaking(false);
     stopSpeaking(roomId || '');
-  }, [roomId, stopSpeaking]);
+    // Release push-to-talk
+    audio.micPressOut();
+  }, [roomId, stopSpeaking, audio]);
 
   const handleCamera = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
