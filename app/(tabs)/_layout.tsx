@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, RadioTower, CalendarDays, User, Search } from 'lucide-react-native';
+import { Home, Newspaper, Radio, CalendarDays, User, Search } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -77,10 +77,10 @@ export default function TabLayout() {
         <Tabs.Screen
           name="live"
           options={{
-            title: 'Spot',
+            tabBarShowLabel: false,
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <RadioTower size={24} color={color} />
+                <Radio size={24} color={color} />
               </View>
             ),
           }}
