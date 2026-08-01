@@ -1,545 +1,144 @@
 import {
-  Play, Radio, Clock, Eye, Flame, Zap, Calendar,
-  Sparkles, Send, X, Heart, MoreHorizontal, StopCircle,
+  Radio, Plus, Users, Circle, Zap, Sparkles, X, Hash,
 } from 'lucide-react-native';
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ImageBackground, Image, Animated, RefreshControl, Dimensions,
-  Modal, TextInput, KeyboardAvoidingView, Platform, FlatList, Alert,
+  Animated, RefreshControl, Modal, TextInput,
+  KeyboardAvoidingView, Platform, Dimensions, Image,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { SkeletonStreamCard } from '@/components/SkeletonCard';
-import { supabase } from '@/lib/supabase';
+import { useRoom, LiveRoom } from '@/contexts/RoomContext';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-interface Stream {
-  id: string; title: string; streamerName: string; streamerAvatar: string;
-  thumbnail: string; viewers: number; category: string; tags: string[];
-  isLive: boolean; scheduledFor?: string; duration?: string; description?: string;
-}
-
-interface ChatMessage {
-  id: string; user: string; avatar: string; text: string; isSystem?: boolean;
-}
-
-const CHAT_SEED: ChatMessage[] = [
-  { id: 'c1', user: 'StreamFan22', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=50', text: '🔥🔥🔥 Love this!' },
-  { id: 'c2', user: 'MusicLover', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=50', text: 'That transition was smooth' },
-  { id: 'c3', user: 'nightowl', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=50', text: 'First time here, this is amazing!' },
-  { id: 'c4', user: 'beatmaker99', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=50', text: 'What BPM is this?' },
-  { id: 'c5', user: 'vibes_only', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=50', text: '🙌🙌🙌' },
-  { id: 'c6', user: 'dj_cat', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=50', text: 'drop the track ID please' },
-  { id: 'c7', user: 'latenight', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=50', text: 'this is the vibe tonight' },
-  { id: 'c8', user: 'soulful_', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=50', text: '💜💜💜' },
-];
-
-function formatViewers(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Stream Viewer Modal
-// ═══════════════════════════════════════════════════════════════════
-
-function StreamViewer({
-  stream, visible, onClose, colors, insets,
-}: { stream: Stream; visible: boolean; onClose: () => void; colors: any; insets: any }) {
-  const isVod = !stream.isLive;
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 'sys-1', user: '', avatar: '', text: `Welcome to ${stream.streamerName}'s stream!`, isSystem: true },
-    ...CHAT_SEED.sort(() => Math.random() - 0.5).slice(0, 4),
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [viewerCount, setViewerCount] = useState(stream.viewers);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [elapsed, setElapsed] = useState(0);
-  const [liked, setLiked] = useState(false);
-  const chatListRef = useRef<FlatList>(null);
-  const chatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const viewerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (isVod) return; // Skip simulated chat/viewers for VODs
-    // Simulate viewer count fluctuation
-    viewerTimer.current = setInterval(() => {
-      setViewerCount((c) => Math.max(1, c + Math.floor(Math.random() * 21) - 10));
-    }, 4000);
-    // Simulate elapsed time
-    elapsedTimer.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    // Simulate incoming chat messages
-    chatTimer.current = setInterval(() => {
-      const msg = CHAT_SEED[Math.floor(Math.random() * CHAT_SEED.length)];
-      setMessages((prev) => [...prev, { ...msg, id: `chat-${Date.now()}-${Math.random()}` }]);
-    }, 5000);
-    return () => {
-      if (viewerTimer.current != null) clearInterval(viewerTimer.current);
-      if (elapsedTimer.current != null) clearInterval(elapsedTimer.current);
-      if (chatTimer.current != null) clearInterval(chatTimer.current);
-    };
-  }, [visible]);
-
-  const sendMessage = () => {
-    if (!chatInput.trim()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setMessages((prev) => [...prev, {
-      id: `me-${Date.now()}`, user: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=50', text: chatInput.trim(),
-    }]);
-    setChatInput('');
-    setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 150);
-  };
-
-  const handleLike = () => {
-    setLiked(!liked);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-  };
-
-  const el = Math.floor(elapsed);
-  const timeStr = `${String(Math.floor(el / 60)).padStart(2, '0')}:${String(el % 60).padStart(2, '0')}`;
-
-  return (
-    <Modal visible={visible} animationType="slide" statusBarTranslucent>
-      <View style={styles.viewerRoot}>
-        {/* Stream area */}
-        <View style={styles.viewerStream}>
-          <ImageBackground source={{ uri: stream.thumbnail }} style={styles.viewerStreamBg} blurRadius={isPlaying ? 0 : 30}>
-            <LinearGradient colors={['rgba(0,0,0,0.4)', 'transparent', 'rgba(0,0,0,0.6)']} style={styles.viewerGradient}>
-              {/* Top bar */}
-              <View style={[styles.viewerTop, { marginTop: insets.top + 8 }]}>
-                <TouchableOpacity style={styles.viewerCloseBtn} onPress={onClose}>
-                  <X size={22} color="#FFF" />
-                </TouchableOpacity>
-                <View style={styles.viewerTopCenter}>
-                  <View style={styles.viewerLiveBadge}>
-                    <View style={styles.viewerLiveDot} />
-                    <Text style={styles.viewerLiveText}>{timeStr}</Text>
-                  </View>
-                  <View style={styles.viewerCountBadge}>
-                    <Eye size={11} color="#FFF" />
-                    <Text style={styles.viewerCountText}>{formatViewers(viewerCount)}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity style={styles.viewerMoreBtn} onPress={() => setIsPlaying(!isPlaying)}>
-                  <MoreHorizontal size={22} color="#FFF" />
-                </TouchableOpacity>
-              </View>
-              {/* Stream info + play overlay */}
-              <View style={styles.viewerCenter}>
-                {!isPlaying && (
-                  <TouchableOpacity style={styles.viewerPlayBtn} onPress={() => setIsPlaying(true)}>
-                    <Play size={40} color="#FFF" fill="#FFF" style={{ marginLeft: 4 }} />
-                  </TouchableOpacity>
-                )}
-              </View>
-              {/* Bottom stream info */}
-              <View style={styles.viewerBottom}>
-                <View style={styles.viewerBottomLeft}>
-                  <Image source={{ uri: stream.streamerAvatar }} style={styles.viewerStreamAvatar} />
-                  <View>
-                    <Text style={styles.viewerStreamName}>{stream.streamerName}</Text>
-                    <Text style={styles.viewerStreamTitle} numberOfLines={1}>{stream.title}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity style={styles.viewerHeartBtn} onPress={handleLike}>
-                  <Heart size={20} color={liked ? '#EF4444' : '#FFF'} fill={liked ? '#EF4444' : 'none'} />
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </ImageBackground>
-        </View>
-        {/* Chat */}
-        <View style={[styles.viewerChat, { backgroundColor: colors.background }]}>
-          <FlatList
-            ref={chatListRef}
-            data={messages}
-            keyExtractor={(m) => m.id}
-            style={styles.chatList}
-            contentContainerStyle={styles.chatListContent}
-            renderItem={({ item }) => (
-              item.isSystem ? (
-                <View style={styles.chatSystem}><Text style={styles.chatSystemText}>{item.text}</Text></View>
-              ) : (
-                <View style={styles.chatMsg}>
-                  <Image source={{ uri: item.avatar }} style={styles.chatAvatar} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.chatUser, { color: item.user === 'You' ? colors.accent : colors.textTertiary }]}>
-                      {item.user}
-                    </Text>
-                    <Text style={[styles.chatText, { color: colors.text }]}>{item.text}</Text>
-                  </View>
-                </View>
-              )
-            )}
-            onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: false })}
-          />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
-            <View style={[styles.chatInputRow, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-              <TextInput
-                style={[styles.chatInput, { color: colors.text }]}
-                placeholder="Send a message..."
-                placeholderTextColor={colors.textTertiary}
-                value={chatInput}
-                onChangeText={setChatInput}
-                onSubmitEditing={sendMessage}
-                returnKeyType="send"
-              />
-              <TouchableOpacity style={[styles.chatSendBtn, { backgroundColor: colors.accent }]} onPress={sendMessage}>
-                <Send size={14} color="#FFF" />
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Go Live Setup Modal
-// ═══════════════════════════════════════════════════════════════════
-
-const GO_LIVE_CATEGORIES = ['Music', 'Wellness', 'Fitness', 'Food', 'Creative', 'Entertainment', 'Travel'];
-
-function GoLiveModal({
-  visible, onClose, onStart, colors, insets,
-}: { visible: boolean; onClose: () => void; onStart: (s: Stream) => void; colors: any; insets: any }) {
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Music');
-  const [description, setDescription] = useState('');
-
-  const handleStart = () => {
-    if (!title.trim()) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onStart({
-      id: `my-live-${Date.now()}`, title: title.trim(),
-      streamerName: 'You', streamerAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
-      thumbnail: 'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=600',
-      viewers: 0, category, tags: [category],
-      isLive: true, description: description.trim() || undefined,
-    });
-    setTitle(''); setDescription(''); setCategory('Music');
-    onClose();
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.goLiveRoot, { backgroundColor: colors.background }]}>
-        <View style={[styles.goLiveHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
-          <Text style={[styles.goLiveTitle, { color: colors.text }]}>Go Live</Text>
-          <TouchableOpacity
-            style={[styles.goLiveStart, { backgroundColor: title.trim() ? '#EF4444' : colors.surface, opacity: title.trim() ? 1 : 0.5 }]}
-            onPress={handleStart} disabled={!title.trim()}
-          >
-            <Zap size={12} color="#FFF" />
-            <Text style={styles.goLiveStartText}>Start</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 20 }}>
-          <View>
-            <Text style={[styles.goLiveLabel, { color: colors.textSecondary }]}>Stream Title</Text>
-            <TextInput
-              style={[styles.goLiveField, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="What are you streaming?"
-              placeholderTextColor={colors.textTertiary}
-              value={title} onChangeText={setTitle}
-            />
-          </View>
-          <View>
-            <Text style={[styles.goLiveLabel, { color: colors.textSecondary }]}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {GO_LIVE_CATEGORIES.map((cat) => {
-                  const active = category === cat;
-                  return (
-                    <TouchableOpacity key={cat}
-                      style={[styles.goLiveCat, { backgroundColor: active ? '#EF4444' : colors.surface, borderColor: active ? '#EF4444' : colors.border }]}
-                      onPress={() => setCategory(cat)}
-                    >
-                      <Text style={[styles.goLiveCatText, { color: active ? '#FFF' : colors.textSecondary }]}>{cat}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
-          <View>
-            <Text style={[styles.goLiveLabel, { color: colors.textSecondary }]}>Description (optional)</Text>
-            <TextInput
-              style={[styles.goLiveField, styles.goLiveDesc, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Tell viewers what to expect..."
-              placeholderTextColor={colors.textTertiary}
-              value={description} onChangeText={setDescription} multiline textAlignVertical="top"
-            />
-          </View>
-          <View style={[styles.goLivePreview, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Radio size={28} color={colors.textTertiary} />
-            <Text style={[styles.goLivePreviewText, { color: colors.textTertiary }]}>Camera preview will appear here</Text>
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Main Screen
-// ═══════════════════════════════════════════════════════════════════
+const { width: SCREEN_W } = Dimensions.get('window');
 
 export default function LiveScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { colors } = useTheme();
   const { user } = useAuth();
   const { handleScroll: handleTabBarScroll } = useTabBar();
+  const { rooms, createRoom, fetchRooms } = useRoom();
+
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedStream, setSelectedStream] = useState<Stream | null>(null);
-  const [showGoLive, setShowGoLive] = useState(false);
-  const [myStream, setMyStream] = useState<Stream | null>(null);
-  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [roomName, setRoomName] = useState('');
+  const [roomTopic, setRoomTopic] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Stable user ref to avoid useEffect re-fetch cascade on user object identity changes
-  const userRef = useRef(user);
-  userRef.current = user;
-
-  // Real data from Supabase live_streams table
-  const [featuredStream, setFeaturedStream] = useState<Stream | null>(null);
-  const [liveStreams, setLiveStreams] = useState<Stream[]>([]);
-  const [upcomingShows, setUpcomingShows] = useState<Stream[]>([]);
-  const [pastBroadcasts, setPastBroadcasts] = useState<Stream[]>([]);
-
-  const mapRow = (row: any): Stream => ({
-    id: String(row.id),
-    title: row.title || '',
-    streamerName: row.streamer_name || '',
-    streamerAvatar: row.streamer_avatar || '',
-    thumbnail: row.thumbnail || '',
-    viewers: row.viewers || 0,
-    category: row.category || '',
-    tags: row.tags ? (typeof row.tags === 'string' ? row.tags.split(',').map((s: string) => s.trim()) : row.tags) : [],
-    isLive: row.is_live ?? false,
-    scheduledFor: row.scheduled_for || undefined,
-    duration: row.duration || undefined,
-    description: row.description || undefined,
-  });
-
-  const fetchLiveStreams = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('live_streams')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(30);
-
-      if (error) { console.error('[LiveScreen] fetch error:', error.message); return; }
-
-      const streams = (data || []).map(mapRow);
-      const live = streams.filter((s) => s.isLive);
-      const upcoming = streams.filter((s) => !s.isLive && s.scheduledFor);
-      const past = streams.filter((s) => !s.isLive && !s.scheduledFor);
-
-      setFeaturedStream(live[0] || past[0] || null);
-      setLiveStreams(live.filter((_, i) => i > 0));
-      setUpcomingShows(upcoming);
-      setPastBroadcasts(past);
-
-      // Check if current user has a live stream (matched by streamer_id, not fragile heuristics)
-      const currentUserId = userRef.current?.id;
-      if (currentUserId) {
-        const myLiveRow = (data || []).find((row: any) => row.streamer_id === currentUserId && row.is_live);
-        if (myLiveRow) {
-          setMyStream(mapRow(myLiveRow));
-        } else {
-          setMyStream(null);
-        }
-      }
-    } catch (err) {
-      console.error('[LiveScreen] fetch exception:', err);
-    }
-  }, []);
-
-  const handleStartStream = useCallback(async (stream: Stream) => {
-    if (!user) return;
-    try {
-      const { data, error } = await supabase
-        .from('live_streams')
-        .insert({
-          streamer_id: user.id,
-          streamer_name: user.fullName || user.username || 'You',
-          streamer_avatar: user.avatar || '',
-          title: stream.title,
-          thumbnail: stream.thumbnail,
-          category: stream.category,
-          tags: stream.tags,
-          description: stream.description,
-          is_live: true,
-          viewers: 1,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      const mapped = mapRow(data);
-      setMyStream(mapped);
-      setLiveStreams((prev) => [mapped, ...prev]);
-    } catch (err: any) {
-      console.error('[LiveScreen] start stream error:', err.message);
-      Alert.alert('Stream Error', 'Failed to start your stream: ' + (err?.message || 'Please try again.'));
-    }
-  }, [user]);
-
-  const handleEndStream = useCallback(async () => {
-    if (!myStream) return;
-    try {
-      const { error } = await supabase
-        .from('live_streams')
-        .update({ is_live: false, duration: 'ended' })
-        .eq('id', myStream.id);
-      if (error) throw error;
-    } catch (err: any) {
-      console.error('[LiveScreen] end stream error:', err.message);
-      Alert.alert('Error', 'Failed to end stream. Please try again.');
-      return;
-    }
-    setMyStream(null);
-    fetchLiveStreams();
-  }, [myStream, fetchLiveStreams]);
+  const SUGGESTED_TOPICS = [
+    'Build Plans', 'Design Sprint', 'Ideas', 'Resources', 'Feedback', 'Chill',
+  ];
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    fetchLiveStreams();
-    const timer = setTimeout(() => setIsInitialLoad(false), 400);
-    return () => clearTimeout(timer);
-  }, [fetchLiveStreams]);
+    Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+  }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchLiveStreams().finally(() => setRefreshing(false));
-  }, [fetchLiveStreams]);
+    fetchRooms().finally(() => setRefreshing(false));
+  }, [fetchRooms]);
 
-  const allLive = [...(myStream ? [myStream] : []), ...liveStreams];
+  // ── Create Room ──
+  const handleCreateRoom = useCallback(async () => {
+    if (!roomName.trim()) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsCreating(true);
+    try {
+      const room = await createRoom(roomName.trim(), roomTopic.trim());
+      setRoomName('');
+      setRoomTopic('');
+      setShowCreateModal(false);
+      if (room) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.push(`/(tabs)/live/room/${room.id}` as any);
+      }
+    } catch {
+      // fall through
+    }
+    setIsCreating(false);
+  }, [roomName, roomTopic, createRoom, router]);
 
-  const renderLiveBadge = () => (
-    <View style={styles.liveBadge}>
-      <View style={styles.liveDot} />
-      <Text style={styles.liveBadgeText}>LIVE</Text>
-    </View>
-  );
-
-  const renderViewerCount = (count: number) => (
-    <View style={styles.viewerRow}>
-      <Eye size={11} color="#FFF" />
-      <Text style={styles.viewerText}>{formatViewers(count)} watching</Text>
-    </View>
-  );
+  // ── Join Room ──
+  const handleJoinRoom = useCallback((room: LiveRoom) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push(`/(tabs)/live/room/${room.id}` as any);
+  }, [router]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      <View style={[
+        styles.header,
+        {
+          paddingTop: insets.top + 8,
+          backgroundColor: colors.background,
+          borderBottomColor: colors.border,
+        },
+      ]}>
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
-            <View style={styles.headerIcon}>
-              <Radio size={22} color="#FFF" />
-            </View>
+            <LinearGradient
+              colors={['#8B5CF6', '#6366F1']}
+              style={styles.headerIcon}
+            >
+              <Radio size={20} color="#FFF" />
+            </LinearGradient>
             <View>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Spot</Text>
-              <Text style={[styles.headerSub, { color: colors.textTertiary }]}>{allLive.filter((s) => s.isLive).length} streaming now</Text>
+              <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
+                {rooms.length > 0
+                  ? `${rooms.length} room${rooms.length > 1 ? 's' : ''} live`
+                  : 'Live collaboration space'}
+              </Text>
             </View>
           </View>
           <TouchableOpacity
-            style={[styles.goLiveBtn, { backgroundColor: '#EF4444' }]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setShowGoLive(true); }}
+            style={styles.createBtn}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowCreateModal(true);
+            }}
           >
-            <Zap size={14} color="#FFF" />
-            <Text style={styles.goLiveText}>Go Live</Text>
+            <Plus size={16} color="#FFF" />
+            <Text style={styles.createBtnText}>Create Room</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Tagline */}
+        <View style={[styles.tagline, { backgroundColor: colors.accent + '0C' }]}>
+          <Sparkles size={13} color={colors.accent} />
+          <Text style={[styles.taglineText, { color: colors.textSecondary }]}>
+            Go live · Build together · Share resources
+          </Text>
         </View>
       </View>
 
+      {/* Content */}
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.accent}
+          />
+        }
       >
         <Animated.View style={{ opacity: fadeAnim }}>
 
-          {/* ── Loading Skeleton ── */}
-          {isInitialLoad && !refreshing ? (
-            <SkeletonStreamCard count={4} baseColor={colors.surface} shimmerColor={colors.border} />
-          ) : (
-            <>
-
-          {/* My Streams (if any) */}
-          {myStream && (
-            <View style={styles.featuredSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionLabel}>
-                  <Sparkles size={16} color="#10B981" />
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Stream</Text>
-                </View>
-                <TouchableOpacity style={styles.endStreamBtn} onPress={handleEndStream}>
-                  <StopCircle size={16} color="#EF4444" />
-                  <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700', marginLeft: 4 }}>End</Text>
-                </TouchableOpacity>
-              </View>
-                <TouchableOpacity key={myStream.id} activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(myStream); }}>
-                  <ImageBackground source={{ uri: myStream.thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
-                    <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.featuredOverlay}>
-                      <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(myStream.viewers)}</View>
-                      <View style={styles.featuredBottom}>
-                        <Text style={styles.featuredTitle}>{myStream.title}</Text>
-                        <View style={styles.featuredMeta}>
-                          <Image source={{ uri: myStream.streamerAvatar }} style={styles.streamerAvatar} />
-                          <Text style={styles.streamerName}>{myStream.streamerName}</Text>
-                        </View>
-                      </View>
-                    </LinearGradient>
-                  </ImageBackground>
-                </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Featured */}
-          <View style={styles.featuredSection}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionLabel}>
-                <Flame size={16} color="#EF4444" />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Featured</Text>
-              </View>
-            </View>
-            {featuredStream && (
-            <TouchableOpacity activeOpacity={0.95} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectedStream(featuredStream); }}>
-              <ImageBackground source={{ uri: featuredStream.thumbnail }} style={styles.featuredCard} imageStyle={styles.featuredImage}>
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.featuredOverlay}>
-                  <View style={styles.featuredTop}>{renderLiveBadge()}{renderViewerCount(featuredStream.viewers)}</View>
-                  <View style={styles.featuredBottom}>
-                    <Text style={styles.featuredTitle}>{featuredStream.title}</Text>
-                    <View style={styles.featuredMeta}>
-                      <Image source={{ uri: featuredStream.streamerAvatar }} style={styles.streamerAvatar} />
-                      <Text style={styles.streamerName}>{featuredStream.streamerName}</Text>
-                    </View>
-                  </View>
-                </LinearGradient>
-              </ImageBackground>
-            </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Live Now */}
+          {/* ── Live Now ── */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLabel}>
@@ -547,258 +146,448 @@ export default function LiveScreen() {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Live Now</Text>
               </View>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveScroll}>
-              {allLive.map((stream) => (
-                <TouchableOpacity key={stream.id} style={[styles.liveCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(stream)}>
-                  <ImageBackground source={{ uri: stream.thumbnail }} style={styles.liveThumb} imageStyle={styles.liveThumbImg}>
-                    <View style={styles.liveCardTop}>{renderLiveBadge()}</View>
-                    <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.liveCardGradient}>
-                      {renderViewerCount(stream.viewers)}
-                    </LinearGradient>
-                  </ImageBackground>
-                  <View style={styles.liveCardBody}>
-                    <Text style={[styles.liveCardTitle, { color: colors.text }]} numberOfLines={2}>{stream.title}</Text>
-                    <View style={styles.liveCardMeta}>
-                      <Image source={{ uri: stream.streamerAvatar }} style={styles.miniAvatar} />
-                      <Text style={[styles.liveCardStreamer, { color: colors.textSecondary }]}>{stream.streamerName}</Text>
-                    </View>
-                    <View style={styles.tagRow}>
-                      {stream.tags.slice(0, 2).map((tag) => (
-                        <View key={tag} style={[styles.tag, { backgroundColor: colors.accent + '18' }]}>
-                          <Text style={[styles.tagText, { color: colors.accent }]}>{tag}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
 
-          {/* Upcoming */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionLabel}>
-                <Calendar size={16} color="#8B5CF6" />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Upcoming</Text>
+            {rooms.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Circle size={48} color={colors.accent + '30'} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                  No rooms live yet
+                </Text>
+                <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
+                  Create the first room and invite your network
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyCreateBtn}
+                  onPress={() => setShowCreateModal(true)}
+                >
+                  <Zap size={16} color="#FFF" />
+                  <Text style={styles.emptyCreateText}>Start a Room</Text>
+                </TouchableOpacity>
               </View>
-            </View>
-            {upcomingShows.map((show) => {
-              const reminded = remindedIds.has(show.id);
-              return (
-                <TouchableOpacity key={show.id} style={[styles.upcomingCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(show)}>
-                  <Image source={{ uri: show.thumbnail }} style={styles.upcomingThumb} />
-                  <View style={styles.upcomingBody}>
-                    <Text style={[styles.upcomingTitle, { color: colors.text }]} numberOfLines={2}>{show.title}</Text>
-                    <View style={styles.upcomingMeta}>
-                      <Image source={{ uri: show.streamerAvatar }} style={styles.miniAvatar} />
-                      <Text style={[styles.upcomingStreamer, { color: colors.textSecondary }]}>{show.streamerName}</Text>
-                    </View>
-                    {show.description && <Text style={[styles.upcomingDesc, { color: colors.textTertiary }]} numberOfLines={1}>{show.description}</Text>}
-                  </View>
-                  <View style={styles.upcomingTime}>
-                    <Clock size={12} color="#8B5CF6" />
-                    <Text style={styles.upcomingTimeText}>{show.scheduledFor}</Text>
-                    <TouchableOpacity
-                      style={styles.remindBtn}
-                      onPress={() => {
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                        setRemindedIds((prev) => {
-                          const next = new Set(prev);
-                          reminded ? next.delete(show.id) : next.add(show.id);
-                          return next;
-                        });
-                      }}
+            ) : (
+              <View style={styles.roomGrid}>
+                {rooms.map((room) => (
+                  <TouchableOpacity
+                    key={room.id}
+                    style={[
+                      styles.roomCard,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    activeOpacity={0.9}
+                    onPress={() => handleJoinRoom(room)}
+                  >
+                    <LinearGradient
+                      colors={['#8B5CF6', '#6366F1']}
+                      style={styles.roomGradient}
                     >
-                      <Sparkles size={12} color={reminded ? '#FFF' : '#8B5CF6'} fill={reminded ? '#8B5CF6' : 'none'} />
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+                      <View style={styles.roomLiveIndicator}>
+                        <View style={styles.roomLiveDot} />
+                        <Text style={styles.roomLiveText}>LIVE</Text>
+                      </View>
+                    </LinearGradient>
+
+                    <View style={styles.roomCardBody}>
+                      <Text
+                        style={[styles.roomCardName, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {room.name}
+                      </Text>
+
+                      {room.topic ? (
+                        <View style={styles.roomTopicRow}>
+                          <Hash size={12} color={colors.accent} />
+                          <Text
+                            style={[styles.roomTopicText, { color: colors.accent }]}
+                            numberOfLines={1}
+                          >
+                            {room.topic}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      <View style={styles.roomCardFooter}>
+                        <View style={styles.roomCreator}>
+                          <Image
+                            source={{
+                              uri: room.creatorAvatar
+                                || `https://ui-avatars.com/api/?name=${encodeURIComponent(room.creatorName)}&background=8B5CF6&color=fff&size=40`,
+                            }}
+                            style={styles.roomCreatorAvatar}
+                          />
+                          <Text
+                            style={[styles.roomCreatorName, { color: colors.textSecondary }]}
+                            numberOfLines={1}
+                          >
+                            {room.creatorName}
+                          </Text>
+                        </View>
+                        <View style={styles.roomParticipants}>
+                          <Users size={13} color={colors.textTertiary} />
+                          <Text style={[styles.roomParticipantCount, { color: colors.textTertiary }]}>
+                            {room.participants?.length || 1}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
 
-          {/* Past Broadcasts */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionLabel}>
-                <Play size={16} color={colors.accent} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Past Broadcasts</Text>
+          {/* ── Info Card ── */}
+          <View style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}>
+            <View style={styles.infoRow}>
+              <View style={[styles.infoBullet, { backgroundColor: colors.accent + '20' }]}>
+                <Sparkles size={14} color={colors.accent} />
+              </View>
+              <View>
+                <Text style={[styles.infoTitle, { color: colors.text }]}>How rooms work</Text>
+                <Text style={[styles.infoDesc, { color: colors.textTertiary }]}>
+                  Press-hold mic to talk · Tap camera for video · Build plans & share resources together
+                </Text>
               </View>
             </View>
-            <View style={styles.pastGrid}>
-              {pastBroadcasts.map((vod) => (
-                <TouchableOpacity key={vod.id} style={[styles.pastCard, { backgroundColor: colors.surface, borderColor: colors.border }]} activeOpacity={0.9} onPress={() => setSelectedStream(vod)}>
-                  <ImageBackground source={{ uri: vod.thumbnail }} style={styles.pastThumb} imageStyle={styles.pastThumbImg}>
-                    <View style={styles.pastDuration}>
-                      <Play size={10} color="#FFF" fill="#FFF" />
-                      <Text style={styles.pastDurationText}>{vod.duration}</Text>
-                    </View>
-                  </ImageBackground>
-                  <View style={styles.pastBody}>
-                    <Text style={[styles.pastTitle, { color: colors.text }]} numberOfLines={2}>{vod.title}</Text>
-                    <View style={styles.pastMeta}>
-                      <Image source={{ uri: vod.streamerAvatar }} style={styles.miniAvatar} />
-                      <Text style={[styles.pastStreamer, { color: colors.textSecondary }]}>{vod.streamerName}</Text>
-                    </View>
-                    <View style={styles.pastStats}>
-                      <Eye size={11} color={colors.textTertiary} />
-                      <Text style={[styles.pastViewCount, { color: colors.textTertiary }]}>{formatViewers(vod.viewers)} views</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
 
-          <View style={{ height: 100 }} />
-          </>
-          )}
+          <View style={{ height: 120 }} />
         </Animated.View>
       </ScrollView>
 
-      {/* Stream Viewer */}
-      {selectedStream && selectedStream.isLive && (
-        <StreamViewer stream={selectedStream} visible={!!selectedStream} onClose={() => setSelectedStream(null)} colors={colors} insets={insets} />
-      )}
+      {/* ── Create Room Modal ── */}
+      <Modal
+        visible={showCreateModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={[styles.modalRoot, { backgroundColor: colors.background }]}>
+            {/* Modal Header */}
+            <View style={[
+              styles.modalHeader,
+              { paddingTop: insets.top + 8, borderBottomColor: colors.border },
+            ]}>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <X size={22} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Room</Text>
+              <TouchableOpacity
+                style={[
+                  styles.modalCreateBtn,
+                  {
+                    backgroundColor: roomName.trim() ? colors.accent : colors.surface,
+                    opacity: roomName.trim() ? 1 : 0.5,
+                  },
+                ]}
+                onPress={handleCreateRoom}
+                disabled={!roomName.trim() || isCreating}
+              >
+                <Zap size={12} color="#FFF" />
+                <Text style={styles.modalCreateText}>
+                  {isCreating ? 'Creating...' : 'Go Live'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-      {/* VOD Viewer */}
-      {selectedStream && !selectedStream.isLive && (
-        <StreamViewer stream={selectedStream} visible={!!selectedStream} onClose={() => setSelectedStream(null)} colors={colors} insets={insets} />
-      )}
+            {/* Modal Body */}
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Room Name
+                </Text>
+                <TextInput
+                  style={[styles.fieldInput, {
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  }]}
+                  placeholder="Give your room a name"
+                  placeholderTextColor={colors.textTertiary}
+                  value={roomName}
+                  onChangeText={setRoomName}
+                  maxLength={60}
+                  returnKeyType="next"
+                  autoFocus
+                />
+              </View>
 
-      {/* Go Live Modal */}
-      <GoLiveModal
-        visible={showGoLive}
-        onClose={() => setShowGoLive(false)}
-        onStart={(s) => { handleStartStream(s); setShowGoLive(false); }}
-        colors={colors}
-        insets={insets}
-      />
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Topic
+                </Text>
+                <TextInput
+                  style={[styles.fieldInput, {
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  }]}
+                  placeholder="What are you working on?"
+                  placeholderTextColor={colors.textTertiary}
+                  value={roomTopic}
+                  onChangeText={setRoomTopic}
+                  maxLength={80}
+                  returnKeyType="done"
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+                  Suggestions
+                </Text>
+                <View style={styles.topicRow}>
+                  {SUGGESTED_TOPICS.map((topic) => {
+                    const active = roomTopic === topic;
+                    return (
+                      <TouchableOpacity
+                        key={topic}
+                        style={[
+                          styles.topicChip,
+                          {
+                            backgroundColor: active ? colors.accent : colors.surface,
+                            borderColor: active ? colors.accent : colors.border,
+                          },
+                        ]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setRoomTopic(active ? '' : topic);
+                        }}
+                      >
+                        <Text style={[
+                          styles.topicChipText,
+                          { color: active ? '#FFF' : colors.textSecondary },
+                        ]}>
+                          {topic}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Preview card */}
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
+                  Preview
+                </Text>
+                <View style={[
+                  styles.previewCard,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}>
+                  <LinearGradient
+                    colors={['#8B5CF6', '#6366F1']}
+                    style={styles.previewGradient}
+                  >
+                    <View style={styles.previewLive}>
+                      <View style={styles.previewDot} />
+                      <Text style={styles.previewLiveText}>LIVE</Text>
+                    </View>
+                  </LinearGradient>
+                  <View style={styles.previewBody}>
+                    <Text style={[styles.previewName, { color: colors.text }]}>
+                      {roomName.trim() || 'Room Name'}
+                    </Text>
+                    <Text style={[styles.previewTopic, { color: colors.textTertiary }]}>
+                      {roomTopic.trim() || 'No topic set'}
+                    </Text>
+                    <View style={styles.previewFooter}>
+                      <View style={[
+                        styles.previewAvatar,
+                        { backgroundColor: colors.accent + '30' },
+                      ]}>
+                        <Text style={styles.previewAvatarText}>
+                          {(user?.fullName || 'Y')[0].toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={[styles.previewCreator, { color: colors.textSecondary }]}>
+                        {user?.fullName || 'You'}
+                      </Text>
+                      <View style={styles.previewParticipants}>
+                        <Users size={11} color={colors.textTertiary} />
+                        <Text style={[styles.previewCount, { color: colors.textTertiary }]}>1</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Styles
-// ═══════════════════════════════════════════════════════════════════
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 20, fontWeight: '700' },
-  headerSub: { fontSize: 12, marginTop: 1 },
-  goLiveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
-  endStreamBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.1)' },
-  goLiveText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   scroll: { flex: 1 },
-  featuredSection: { paddingHorizontal: 16, paddingTop: 16 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+
+  // ── Header ──
+  header: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  headerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerIcon: {
+    width: 38, height: 38, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  headerTitle: { fontSize: 22, fontWeight: '700' },
+  headerSub: { fontSize: 12, marginTop: 1 },
+  createBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#8B5CF6', paddingHorizontal: 16,
+    paddingVertical: 10, borderRadius: 24,
+  },
+  createBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  tagline: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 12, paddingVertical: 8, paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  taglineText: { fontSize: 13, fontWeight: '500' },
+
+  // ── Section ──
+  section: { paddingHorizontal: 16, paddingTop: 20 },
+  sectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 14,
+  },
   sectionLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle: { fontSize: 18, fontWeight: '700' },
-  featuredCard: { height: 240, borderRadius: 16, overflow: 'hidden', marginBottom: 4 },
-  featuredImage: { borderRadius: 16 },
-  featuredOverlay: { flex: 1, justifyContent: 'space-between', padding: 16 },
-  featuredTop: { flexDirection: 'row', justifyContent: 'space-between' },
-  featuredBottom: { gap: 8 },
-  featuredTitle: { fontSize: 22, fontWeight: '800', color: '#FFF', letterSpacing: -0.3 },
-  featuredMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  streamerAvatar: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: '#FFF' },
-  streamerName: { fontSize: 14, fontWeight: '600', color: '#FFF' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
-  liveBadgeText: { fontSize: 10, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
-  viewerRow: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  viewerText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
-  section: { paddingHorizontal: 16, paddingTop: 24 },
-  pulsingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  liveScroll: { gap: 12, paddingRight: 16 },
-  liveCard: { width: 200, borderRadius: 14, overflow: 'hidden', borderWidth: 1 },
-  liveThumb: { height: 120, justifyContent: 'space-between' },
-  liveThumbImg: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
-  liveCardTop: { padding: 8 },
-  liveCardGradient: { padding: 8, alignItems: 'flex-end' },
-  liveCardBody: { padding: 10, gap: 4 },
-  liveCardTitle: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  liveCardMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  miniAvatar: { width: 18, height: 18, borderRadius: 9 },
-  liveCardStreamer: { fontSize: 12 },
-  tagRow: { flexDirection: 'row', gap: 4, marginTop: 2, flexWrap: 'wrap' },
-  tag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  tagText: { fontSize: 10, fontWeight: '600' },
-  upcomingCard: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 10, marginBottom: 10, gap: 10 },
-  upcomingThumb: { width: 80, height: 80, borderRadius: 10 },
-  upcomingBody: { flex: 1, gap: 4, justifyContent: 'center' },
-  upcomingTitle: { fontSize: 14, fontWeight: '600', lineHeight: 19 },
-  upcomingMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  upcomingStreamer: { fontSize: 12 },
-  upcomingDesc: { fontSize: 11, lineHeight: 15 },
-  upcomingTime: { alignItems: 'center', gap: 4, justifyContent: 'center' },
-  upcomingTimeText: { fontSize: 11, fontWeight: '700', color: '#8B5CF6' },
-  remindBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#8B5CF618', alignItems: 'center', justifyContent: 'center' },
-  pastGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  pastCard: { width: (SCREEN_WIDTH - 42) / 2, borderRadius: 12, overflow: 'hidden', borderWidth: 1 },
-  pastThumb: { height: 100 },
-  pastThumbImg: { borderTopLeftRadius: 12, borderTopRightRadius: 12 },
-  pastDuration: { position: 'absolute', bottom: 6, right: 6, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  pastDurationText: { fontSize: 10, fontWeight: '700', color: '#FFF' },
-  pastBody: { padding: 10, gap: 4 },
-  pastTitle: { fontSize: 12, fontWeight: '600', lineHeight: 16 },
-  pastMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pastStreamer: { fontSize: 11 },
-  pastStats: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
-  pastViewCount: { fontSize: 11 },
+  pulsingDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981',
+  },
+  sectionTitle: { fontSize: 17, fontWeight: '700' },
 
-  // ── Stream Viewer ──
-  viewerRoot: { flex: 1, backgroundColor: '#000' },
-  viewerStream: { flex: 0.55 },
-  viewerStreamBg: { flex: 1 },
-  viewerGradient: { flex: 1, justifyContent: 'space-between' },
-  viewerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 },
-  viewerCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  viewerMoreBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  viewerTopCenter: { flexDirection: 'row', gap: 8 },
-  viewerLiveBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  viewerLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
-  viewerLiveText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-  viewerCountBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  viewerCountText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
-  viewerCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  viewerPlayBtn: { width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(239,68,68,0.9)', alignItems: 'center', justifyContent: 'center' },
-  viewerBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingBottom: 12 },
-  viewerBottomLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  viewerStreamAvatar: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: '#FFF' },
-  viewerStreamName: { fontSize: 14, fontWeight: '700', color: '#FFF' },
-  viewerStreamTitle: { fontSize: 12, color: 'rgba(255,255,255,0.8)', maxWidth: SCREEN_WIDTH - 100 },
-  viewerHeartBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
-  // Chat
-  viewerChat: { flex: 0.45 },
-  chatList: { flex: 1 },
-  chatListContent: { padding: 10, gap: 10 },
-  chatSystem: { alignItems: 'center', paddingVertical: 4 },
-  chatSystemText: { fontSize: 11, fontWeight: '600', color: '#888' },
-  chatMsg: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  chatAvatar: { width: 24, height: 24, borderRadius: 12 },
-  chatUser: { fontSize: 10, fontWeight: '700', marginBottom: 1 },
-  chatText: { fontSize: 13, lineHeight: 18 },
-  chatInputRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, gap: 8 },
-  chatInput: { flex: 1, fontSize: 14, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)' },
-  chatSendBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // ── Empty ──
+  emptyState: {
+    alignItems: 'center', paddingVertical: 48, gap: 10,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '600' },
+  emptySub: {
+    fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 20,
+  },
+  emptyCreateBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#8B5CF6', paddingHorizontal: 20,
+    paddingVertical: 12, borderRadius: 24, marginTop: 8,
+  },
+  emptyCreateText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 
-  // ── Go Live Modal ──
-  goLiveRoot: { flex: 1 },
-  goLiveHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
-  goLiveTitle: { fontSize: 17, fontWeight: '700' },
-  goLiveStart: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
-  goLiveStartText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
-  goLiveLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  goLiveField: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  goLiveDesc: { minHeight: 80 },
-  goLiveCat: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
-  goLiveCatText: { fontSize: 13, fontWeight: '600' },
-  goLivePreview: { borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', height: 200, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  goLivePreviewText: { fontSize: 13, fontWeight: '500' },
+  // ── Room Grid ──
+  roomGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 12,
+  },
+  roomCard: {
+    width: (SCREEN_W - 44) / 2,
+    borderRadius: 16, borderWidth: 1, overflow: 'hidden',
+  },
+  roomGradient: {
+    height: 80, alignItems: 'center', justifyContent: 'center',
+  },
+  roomLiveIndicator: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 10,
+    paddingVertical: 4, borderRadius: 12,
+  },
+  roomLiveDot: {
+    width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF',
+  },
+  roomLiveText: {
+    color: '#FFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.5,
+  },
+  roomCardBody: { padding: 12 },
+  roomCardName: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  roomTopicRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10,
+  },
+  roomTopicText: { fontSize: 12, fontWeight: '600' },
+  roomCardFooter: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  roomCreator: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1,
+  },
+  roomCreatorAvatar: { width: 20, height: 20, borderRadius: 10 },
+  roomCreatorName: { fontSize: 11, fontWeight: '500', flex: 1 },
+  roomParticipants: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  roomParticipantCount: { fontSize: 12, fontWeight: '600' },
+
+  // ── Info Card ──
+  infoCard: {
+    marginHorizontal: 16, marginTop: 24, padding: 16,
+    borderRadius: 14, borderWidth: 1,
+  },
+  infoRow: { flexDirection: 'row', gap: 12 },
+  infoBullet: {
+    width: 36, height: 36, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+  },
+  infoTitle: { fontSize: 15, fontWeight: '600', marginBottom: 3 },
+  infoDesc: { fontSize: 13, lineHeight: 19, paddingRight: 8 },
+
+  // ── Modal ──
+  modalRoot: { flex: 1 },
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '700' },
+  modalCreateBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24,
+  },
+  modalCreateText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  modalBody: { padding: 16, gap: 20 },
+
+  // ── Fields ──
+  fieldGroup: { gap: 8 },
+  fieldLabel: {
+    fontSize: 13, fontWeight: '600', textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  fieldInput: {
+    fontSize: 16, paddingHorizontal: 14, paddingVertical: 14,
+    borderRadius: 12, borderWidth: 1,
+  },
+  topicRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  topicChip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1,
+  },
+  topicChipText: { fontSize: 13, fontWeight: '600' },
+
+  // ── Preview ──
+  previewCard: { borderRadius: 14, overflow: 'hidden', borderWidth: 1 },
+  previewGradient: {
+    height: 60, alignItems: 'center', justifyContent: 'center',
+  },
+  previewLive: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 10,
+    paddingVertical: 3, borderRadius: 12,
+  },
+  previewDot: {
+    width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF',
+  },
+  previewLiveText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+  previewBody: { padding: 12 },
+  previewName: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  previewTopic: { fontSize: 13, marginBottom: 10 },
+  previewFooter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  previewAvatar: {
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  previewAvatarText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+  previewCreator: { fontSize: 12, fontWeight: '500', flex: 1 },
+  previewParticipants: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  previewCount: { fontSize: 11, fontWeight: '600' },
 });

@@ -22,6 +22,7 @@ import { ConnectionsProvider } from '@/contexts/ConnectionsContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { TabBarProvider } from '@/contexts/TabBarContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
+import { RoomProvider } from '@/contexts/RoomContext';
 import { UserPostsProvider } from '@/contexts/UserPostsContext';
 
 import { BundleProvider } from '@/contexts/BundleContext';
@@ -218,6 +219,7 @@ export default function RootLayout() {
                         <BundleProvider>
                           <SkillProvider>
                           <ServiceRequestProvider>
+                                <RoomProvider>
                                 <MessagingProvider>
                                   <MarketplaceProvider>
                                     <BookingsProvider>
@@ -231,6 +233,7 @@ export default function RootLayout() {
                                     </BookingsProvider>
                                   </MarketplaceProvider>
                                 </MessagingProvider>
+                                </RoomProvider>
                           </ServiceRequestProvider>
                           </SkillProvider>
                         </BundleProvider>
