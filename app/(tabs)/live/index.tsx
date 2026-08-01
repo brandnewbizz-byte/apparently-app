@@ -176,13 +176,28 @@ export default function LiveScreen() {
                     activeOpacity={0.9}
                     onPress={() => handleJoinRoom(room)}
                   >
+                    {/* Room status indicator */}
                     <LinearGradient
-                      colors={['#8B5CF6', '#6366F1']}
+                      colors={
+                        room.status === 'ended' ? ['#6B7280', '#4B5563'] :
+                        room.status === 'draft' ? ['#F59E0B', '#D97706'] :
+                        ['#8B5CF6', '#6366F1']
+                      }
                       style={styles.roomGradient}
                     >
                       <View style={styles.roomLiveIndicator}>
-                        <View style={styles.roomLiveDot} />
-                        <Text style={styles.roomLiveText}>LIVE</Text>
+                        <View style={[
+                          styles.roomLiveDot,
+                          room.status === 'draft' && { backgroundColor: '#FBBF24' },
+                          room.status === 'ended' && { backgroundColor: '#9CA3AF' },
+                        ]} />
+                        <Text style={[
+                          styles.roomLiveText,
+                          room.status === 'draft' && { color: '#FBBF24' },
+                          room.status === 'ended' && { color: '#D1D5DB' },
+                        ]}>
+                          {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
+                        </Text>
                       </View>
                     </LinearGradient>
 
@@ -292,7 +307,7 @@ export default function LiveScreen() {
               >
                 <Zap size={12} color="#FFF" />
                 <Text style={styles.modalCreateText}>
-                  {isCreating ? 'Creating...' : 'Go Live'}
+                  {isCreating ? 'Creating...' : 'Create Room'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -382,12 +397,12 @@ export default function LiveScreen() {
                   { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}>
                   <LinearGradient
-                    colors={['#8B5CF6', '#6366F1']}
+                    colors={['#F59E0B', '#D97706']}
                     style={styles.previewGradient}
                   >
                     <View style={styles.previewLive}>
-                      <View style={styles.previewDot} />
-                      <Text style={styles.previewLiveText}>LIVE</Text>
+                      <View style={[styles.previewDot, { backgroundColor: '#FBBF24' }]} />
+                      <Text style={[styles.previewLiveText, { color: '#FBBF24' }]}>SETUP</Text>
                     </View>
                   </LinearGradient>
                   <View style={styles.previewBody}>

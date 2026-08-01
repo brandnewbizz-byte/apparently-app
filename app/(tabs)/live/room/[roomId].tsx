@@ -7,7 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
-  MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck,
+  MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck, Radio,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
@@ -258,6 +258,7 @@ function RoomContent() {
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
     viewMode, setViewMode, currentRoom, addActivity,
+    goLive, endLive, deleteRoom, generateInviteLink,
   } = useRoom();
   const { plan, createPlan, loadPlan, saveNow } = usePlan();
 
@@ -452,9 +453,23 @@ function RoomContent() {
           <View style={{ flex: 1 }}>
             <Text style={styles.roomName}>{room?.name || 'Room'}</Text>
             <View style={styles.headerMeta}>
-              <View style={styles.headerBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>LIVE</Text>
+              <View style={[
+                styles.headerBadge,
+                room?.status === 'draft' && { backgroundColor: '#F59E0B20' },
+                room?.status === 'ended' && { backgroundColor: '#6B728020' },
+              ]}>
+                <View style={[
+                  styles.liveDot,
+                  room?.status === 'draft' && { backgroundColor: '#FBBF24' },
+                  room?.status === 'ended' && { backgroundColor: '#9CA3AF' },
+                ]} />
+                <Text style={[
+                  styles.liveText,
+                  room?.status === 'draft' && { color: '#FBBF24' },
+                  room?.status === 'ended' && { color: '#D1D5DB' },
+                ]}>
+                  {room?.status === 'draft' ? 'SETUP' : room?.status === 'ended' ? 'ENDED' : 'LIVE'}
+                </Text>
               </View>
               {room?.creatorName && (
                 <Text style={styles.hostText}>Host: {room.creatorName}</Text>
@@ -471,7 +486,19 @@ function RoomContent() {
             </View>
           </View>
           <View style={styles.headerActions}>
-            {userIsHostOrAbove && (
+            {room?.status === 'draft' && userIsHostOrAbove && (
+              <TouchableOpacity
+                style={[styles.manageBtn, { backgroundColor: '#10B98120' }]}
+                onPress={() => {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  goLive(roomId || '');
+                }}
+              >
+                <Radio size={14} color="#10B981" />
+                <Text style={[styles.manageBtnText, { color: '#10B981' }]}>Go Live</Text>
+              </TouchableOpacity>
+            )}
+            {room?.status === 'live' && userIsHostOrAbove && (
               <TouchableOpacity
                 style={styles.manageBtn}
                 onPress={() => setShowAdminPanel(true)}
@@ -480,16 +507,27 @@ function RoomContent() {
                 <Text style={styles.manageBtnText}>Manage</Text>
               </TouchableOpacity>
             )}
-            {!isPresenting && userIsHostOrAbove && (
+            {room?.status === 'live' && (
               <TouchableOpacity
-                style={styles.presentBtn}
-                onPress={() => { startPresenting(); }}
+                style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
+                onPress={() => {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                  endLive(roomId || '');
+                }}
               >
                 <Monitor size={14} color="#FFF" />
-                <Text style={styles.presentBtnText}>Present</Text>
+                <Text style={styles.presentBtnText}>End Live</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.headerBtn}>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={() => {
+                const link = generateInviteLink(roomId || '');
+                // Copy to clipboard via Share API
+                const { Share } = require('react-native');
+                Share.share({ message: `Join my live room on Apparently: ${link}`, url: link }).catch(() => {});
+              }}
+            >
               <Share2 size={16} color="#9CA3AF" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerBtn}>

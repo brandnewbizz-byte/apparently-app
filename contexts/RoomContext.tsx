@@ -36,6 +36,8 @@ export interface EditIndicator {
   startedAt: string;
 }
 
+export type RoomStatus = 'draft' | 'live' | 'ended';
+
 export interface LiveRoom {
   id: string;
   name: string;
@@ -52,6 +54,9 @@ export interface LiveRoom {
   participants: RoomParticipant[];
   created_at: string;
   isLocal?: boolean;
+  // Room lifecycle
+  status: RoomStatus;
+  inviteLink: string | null;
   // Presentation
   presentationState: 'idle' | 'presenting' | 'paused';
   presenterId: string | null;
@@ -79,6 +84,10 @@ interface RoomContextValue {
   joinRoom: (roomId: string) => void;
   leaveRoom: (roomId: string) => void;
   isInRoom: (roomId: string) => boolean;
+  goLive: (roomId: string) => void;
+  endLive: (roomId: string) => void;
+  deleteRoom: (roomId: string) => void;
+  generateInviteLink: (roomId: string) => string;
 
   // Gestures
   toggleRaiseHand: (roomId: string) => void;
@@ -240,6 +249,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number;
   }) => {
     const roomId = `room_${seededId()}`;
+    const inviteLink = `apparently://live/room/${roomId}`;
     const newRoom: LiveRoom = {
       id: roomId, name, topic,
       goal: opts?.goal || '', category: opts?.category || 'General',
@@ -250,6 +260,8 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       participants: [makeParticipant(user, 'host')],
       created_at: new Date().toISOString(),
       isLocal: true,
+      status: 'draft',
+      inviteLink,
       presentationState: 'idle',
       presenterId: null,
       presenterName: null,
@@ -257,7 +269,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       openDiscussion: true,
       activityLog: [{
         id: seededId(), userId: user?.id || '', userName: user?.fullName || 'Anonymous',
-        action: 'room_created', detail: `Room "${name}" created`, timestamp: new Date().toISOString(),
+        action: 'room_created', detail: `Room "${name}" created — setup mode`, timestamp: new Date().toISOString(),
       }],
       editIndicators: [],
     };
@@ -318,6 +330,78 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const isInRoom = useCallback((roomId: string) => currentRoom?.id === roomId, [currentRoom]);
+
+  // ── Lifecycle: goLive, endLive, deleteRoom, invite link ──
+  const goLive = useCallback((roomId: string) => {
+    if (!user) return;
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        status: 'live' as const,
+        activityLog: [{
+          id: seededId(), userId: user.id, userName: user.fullName || '',
+          action: 'went_live', detail: `Live started by ${user.fullName}`, timestamp: new Date().toISOString(),
+        }, ...r.activityLog],
+      };
+    }));
+    setCurrentRoom(prev => {
+      if (!prev || prev.id !== roomId) return prev;
+      return {
+        ...prev,
+        status: 'live' as const,
+        activityLog: [{
+          id: seededId(), userId: user.id, userName: user.fullName || '',
+          action: 'went_live', detail: `Live started by ${user.fullName}`, timestamp: new Date().toISOString(),
+        }, ...prev.activityLog],
+      };
+    });
+  }, [user]);
+
+  const endLive = useCallback((roomId: string) => {
+    if (!user) return;
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      return {
+        ...r,
+        status: 'ended' as const,
+        presentationState: 'idle' as const,
+        presenterId: null,
+        presenterName: null,
+        activityLog: [{
+          id: seededId(), userId: user.id, userName: user.fullName || '',
+          action: 'live_ended', detail: `Live ended by ${user.fullName} — room saved`, timestamp: new Date().toISOString(),
+        }, ...r.activityLog],
+      };
+    }));
+    setCurrentRoom(prev => {
+      if (!prev || prev.id !== roomId) return prev;
+      return {
+        ...prev,
+        status: 'ended' as const,
+        presentationState: 'idle' as const,
+        presenterId: null,
+        presenterName: null,
+        activityLog: [{
+          id: seededId(), userId: user.id, userName: user.fullName || '',
+          action: 'live_ended', detail: `Live ended by ${user.fullName} — room saved`, timestamp: new Date().toISOString(),
+        }, ...prev.activityLog],
+      };
+    });
+  }, [user]);
+
+  const deleteRoom = useCallback((roomId: string) => {
+    setRooms(prev => prev.filter(r => r.id !== roomId));
+    setCurrentRoom(prev => prev?.id === roomId ? null : prev);
+    // also delete from supabase if connected
+    if (isTableReady.current) {
+      supabase.from('rooms').delete().eq('id', roomId).then(() => {}, () => {});
+    }
+  }, []);
+
+  const generateInviteLink = useCallback((roomId: string): string => {
+    return `apparently://live/room/${roomId}`;
+  }, []);
 
   // ── Push-to-talk ──
   const startSpeaking = useCallback((roomId: string) => {
@@ -699,6 +783,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const value: RoomContextValue = {
     rooms, currentRoom, isLoading,
     fetchRooms, createRoom, joinRoom, leaveRoom, isInRoom,
+    goLive, endLive, deleteRoom, generateInviteLink,
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
     muteParticipant, unmuteParticipant, muteAllExceptHosts, toggleOpenDiscussion,
@@ -736,9 +821,12 @@ function mapFromDB(data: any): LiveRoom {
       ? JSON.parse(data.participants)
       : data.participants || [],
     created_at: data.created_at,
+    status: data.status || 'draft',
+    inviteLink: data.invite_link || null,
     presentationState: data.presentation_state || 'idle',
     presenterId: data.presenter_id || null,
     presenterName: data.presenter_name || null,
+    presenterTab: data.presenter_tab || undefined,
     openDiscussion: data.open_discussion !== false,
     activityLog: data.activity_log || [],
     editIndicators: data.edit_indicators || [],
