@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -25,6 +26,7 @@ export default function RoomScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { user } = useAuth();
+  const { hideTabBar, showTabBar } = useTabBar();
   const {
     rooms, joinRoom, leaveRoom,
     startSpeaking, stopSpeaking, toggleCamera,
@@ -36,10 +38,12 @@ export default function RoomScreen() {
 
   useEffect(() => {
     if (roomId) {
+      hideTabBar();
       joinRoom(roomId);
       const t = setTimeout(() => setLoading(false), 600);
       return () => {
         clearTimeout(t);
+        showTabBar();
         leaveRoom(roomId);
       };
     }
