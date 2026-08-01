@@ -3,6 +3,7 @@ import React, {
 } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { Platform, Alert } from 'react-native';
 
 // ── Types ──
 export type PlanStage = 'idea' | 'build' | 'assign' | 'launch';
@@ -54,8 +55,9 @@ export interface VoteItem {
 }
 
 export interface FileRef {
-  id: string; name: string; type: string; url: string; uploadedBy: string;
-  uploadedAt: string; attachedTo: { type: 'section' | 'task' | 'idea'; id: string };
+  id: string; name: string; type: string; url: string; sizeBytes: number;
+  uploadedBy: string; uploadedAt: string;
+  attachedTo: { type: 'section' | 'task' | 'idea'; id: string };
 }
 
 interface Comment { id: string; text: string; authorId: string; authorName: string; createdAt: string; }
@@ -79,6 +81,7 @@ export interface PlanData {
   budget: { total: number; plannedCost: number; actualCost: number; remaining: number; expectedRevenue: number; expectedProfit: number; items: BudgetItem[] };
   timeline: TimelineItem[];
   files: FileRef[];
+  storageUsedBytes: number;
   votes: VoteItem[];
   createdAt: string;
   updatedAt: string;
@@ -131,6 +134,9 @@ interface PlanContextValue {
   // Files
   addFile: (file: Partial<FileRef>) => void;
   deleteFile: (fileId: string) => void;
+  uploadFile: (uri: string, name: string, mimeType: string, type: string) => Promise<boolean>;
+  storageUsedBytes: number;
+  storageLimit: number;
   // Sections
   addSection: (section: Partial<PlanSection>) => void;
   updateSection: (sectionId: string, updates: Partial<PlanSection>) => void;
@@ -155,7 +161,7 @@ function defaultPlan(roomId: string, ownerId?: string): PlanData {
     startDate: null, targetDate: null, stage: 'idea', progress: 0, ownerId: ownerId || '',
     members: [], sections: [], tasks: [], ideas: [],
     budget: { total: 0, plannedCost: 0, actualCost: 0, remaining: 0, expectedRevenue: 0, expectedProfit: 0, items: [] },
-    timeline: [], files: [], votes: [],
+    timeline: [], files: [], storageUsedBytes: 0, votes: [],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
@@ -621,6 +627,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (!prev) return prev;
       const newFile: FileRef = {
         id: nextId(), name: file.name || '', type: file.type || '', url: file.url || '',
+        sizeBytes: file.sizeBytes || 0,
         uploadedBy: user?.id || '', uploadedAt: new Date().toISOString(),
         attachedTo: file.attachedTo || { type: 'section', id: '' },
       };
@@ -638,6 +645,111 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
   }, []);
+
+  // ── Helpers ──
+  function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result.split(',')[1] || result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function decodeBase64(base64: string): Uint8Array {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // ── Upload file to Supabase Storage ──
+  const STORAGE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB
+
+  const uploadFile = useCallback(async (uri: string, name: string, mimeType: string, fileType: string): Promise<boolean> => {
+    if (!plan?.roomId) return false;
+    const currentUsed = plan?.storageUsedBytes || 0;
+
+    try {
+      // Get file size from headers (non-blocking, estimate from URI)
+      const resp = await fetch(uri, { method: 'HEAD' });
+      const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+      const fileSize = contentLength > 0 ? contentLength : 1_000_000; // default 1MB if unknown
+
+      if (currentUsed + fileSize > STORAGE_LIMIT) {
+        Alert.alert('Storage Full', `Upload would exceed the 5 GB limit. (${(currentUsed / 1e9).toFixed(1)} GB used)`);
+        return false;
+      }
+
+      // Fetch file as blob, convert to base64
+      const fileResp = await fetch(uri);
+      const blob = await fileResp.blob();
+      const base64 = await blobToBase64(blob);
+
+      // Generate storage path
+      const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const fileId = nextId();
+      const storagePath = `${plan.roomId}/${fileId}-${safeName}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadErr } = await supabase.storage
+        .from('room-files')
+        .upload(storagePath, decodeBase64(base64), {
+          contentType: mimeType,
+          cacheControl: '3600',
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from('room-files').getPublicUrl(storagePath);
+      const publicUrl = urlData?.publicUrl || '';
+
+      // Add file ref to plan
+      const newFile: FileRef = {
+        id: fileId, name, type: fileType, url: publicUrl, sizeBytes: fileSize,
+        uploadedBy: user?.id || '', uploadedAt: new Date().toISOString(),
+        attachedTo: { type: 'section', id: '' },
+      };
+
+      setPlan(prev => {
+        if (!prev) return prev;
+        const updated = {
+          ...prev,
+          files: [...prev.files, newFile],
+          storageUsedBytes: (prev.storageUsedBytes || 0) + fileSize,
+          updatedAt: new Date().toISOString(),
+        };
+        savePlan(updated);
+        return updated;
+      });
+
+      // Update quota in Supabase
+      try { await supabase.from('room_storage_quota').upsert({ room_id: plan.roomId, bytes_used: currentUsed + fileSize, updated_at: new Date().toISOString() }, { onConflict: 'room_id' }); } catch {}
+      return true;
+    } catch (e: any) {
+      console.log('Upload to Supabase failed:', e?.message);
+      // Fallback: store locally via fetch cache
+      try {
+        const fileId = nextId();
+        const localFile: FileRef = {
+          id: fileId, name, type: fileType, url: uri, sizeBytes: 0,
+          uploadedBy: user?.id || '', uploadedAt: new Date().toISOString(),
+          attachedTo: { type: 'section', id: '' },
+        };
+        setPlan(prev => {
+          if (!prev) return prev;
+          const updated = { ...prev, files: [...prev.files, localFile], updatedAt: new Date().toISOString() };
+          savePlan(updated);
+          return updated;
+        });
+        return true;
+      } catch { return false; }
+    }
+  }, [plan?.roomId, plan?.storageUsedBytes, user]);
 
   const addSection = useCallback((section: Partial<PlanSection>) => {
     setPlan(prev => {
@@ -703,7 +815,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       addIdea, updateIdea, voteIdea, reactToIdea, convertIdeaToTask, deleteIdea,
       addBudgetItem, updateBudgetItem, deleteBudgetItem,
       addVote, castVote, decideVote,
-      addFile, deleteFile,
+      addFile, deleteFile, uploadFile,
+      storageUsedBytes: plan?.storageUsedBytes || 0,
+      storageLimit: STORAGE_LIMIT,
       addSection, updateSection,
       addTimelineItem, updateTimelineItem,
     }}>
