@@ -84,14 +84,31 @@ export interface PlanData {
   updatedAt: string;
 }
 
+export type PlanViewMode = 'browse' | 'presenting';
+
+export interface PlanVersion {
+  id: string; planId: string; version: number;
+  editedBy: string; editedByName: string;
+  createdAt: string;
+}
+
 interface PlanContextValue {
   plan: PlanData | null;
   isLoading: boolean;
+  isSyncing: boolean;
+  isSaving: boolean;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  viewMode: PlanViewMode;
+  setViewMode: (mode: PlanViewMode) => void;
+  lastSavedVersion: number;
+  versions: PlanVersion[];
   createPlan: (roomId: string, data: Partial<PlanData>) => Promise<void>;
   loadPlan: (roomId: string) => Promise<void>;
+  loadVersions: () => Promise<void>;
+  rollbackToVersion: (versionId: string) => Promise<void>;
   updatePlan: (updates: Partial<PlanData>) => void;
+  saveNow: (summary?: string) => Promise<void>;
   // Tasks
   addTask: (task: Partial<TaskItem>) => void;
   updateTask: (taskId: string, updates: Partial<TaskItem>) => void;
@@ -161,7 +178,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [viewMode, setViewMode] = useState<PlanViewMode>('browse');
+  const [versions, setVersions] = useState<PlanVersion[]>([]);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveVersionRef = useRef(0);
 
   // ── Realtime subscription ──
   useEffect(() => {
@@ -215,18 +238,133 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const savePlan = (p: PlanData) => {
+  const savePlan = useCallback((p: PlanData, summary?: string) => {
     setPlan(p);
-    try {
-      supabase.from('plans').upsert({
-        id: p.id, room_id: p.roomId, title: p.title, goal: p.goal,
-        description: p.description, project_type: p.projectType,
-        start_date: p.startDate, target_date: p.targetDate,
-        stage: p.stage, progress: p.progress, owner_id: p.ownerId,
-        data: JSON.stringify(p), updated_at: new Date().toISOString(),
+    setIsSaving(true);
+
+    // Debounced autosave — 2 second delay
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const newVersion = saveVersionRef.current + 1;
+      saveVersionRef.current = newVersion;
+
+      try {
+        supabase.from('plan_sync').insert({
+          id: `v_${p.id}_${newVersion}`,
+          room_id: p.roomId,
+          plan_id: p.id,
+          section: 'full',
+          field: 'data',
+          value: JSON.stringify(p),
+          version: newVersion,
+          edited_by: user?.id || '',
+          edited_by_name: user?.fullName || '',
+          created_at: new Date().toISOString(),
+        }).then(() => {});
+
+        supabase.from('plans').upsert({
+          id: p.id, room_id: p.roomId, title: p.title, goal: p.goal,
+          description: p.description, project_type: p.projectType,
+          start_date: p.startDate, target_date: p.targetDate,
+          stage: p.stage, progress: p.progress, owner_id: p.ownerId,
+          data: JSON.stringify(p), updated_at: new Date().toISOString(),
+        }).then(() => {});
+
+        // Log to room history if summary provided
+        if (summary) {
+          supabase.from('room_history').insert({
+            room_id: p.roomId, user_id: user?.id || '',
+            user_name: user?.fullName || '', action: 'plan_edited',
+            detail: summary,
+            metadata: JSON.stringify({ version: newVersion, planId: p.id }),
+          }).then(() => {});
+        }
+      } catch {}
+      setIsSaving(false);
+    }, 2000);
+  }, [user]);
+
+  // Immediate save (flushes debounce)
+  const saveNow = useCallback(async (summary?: string) => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    setPlan(prev => {
+      if (!prev) return prev;
+      const newVersion = saveVersionRef.current + 1;
+      saveVersionRef.current = newVersion;
+      setIsSaving(true);
+
+      supabase.from('plan_sync').insert({
+        id: `v_${prev.id}_${newVersion}`,
+        room_id: prev.roomId, plan_id: prev.id,
+        section: 'full', field: 'data',
+        value: JSON.stringify(prev), version: newVersion,
+        edited_by: user?.id || '', edited_by_name: user?.fullName || '',
+        created_at: new Date().toISOString(),
       }).then(() => {});
+
+      supabase.from('plans').upsert({
+        id: prev.id, room_id: prev.roomId, title: prev.title,
+        goal: prev.goal, description: prev.description, project_type: prev.projectType,
+        start_date: prev.startDate, target_date: prev.targetDate,
+        stage: prev.stage, progress: prev.progress, owner_id: prev.ownerId,
+        data: JSON.stringify(prev), updated_at: new Date().toISOString(),
+      }).then(() => setIsSaving(false));
+
+      if (summary) {
+        supabase.from('room_history').insert({
+          room_id: prev.roomId, user_id: user?.id || '',
+          user_name: user?.fullName || '', action: 'plan_edited',
+          detail: summary,
+        }).then(() => {});
+      }
+
+      return prev;
+    });
+  }, [user]);
+
+  // Version history
+  const loadVersions = useCallback(async () => {
+    if (!plan?.id) return;
+    try {
+      const { data } = await supabase.from('plan_sync')
+        .select('*').eq('plan_id', plan.id)
+        .order('version', { ascending: false }).limit(50);
+      if (data) {
+        setVersions(data.map((r: any) => ({
+          id: r.id, planId: r.plan_id, version: r.version,
+          editedBy: r.edited_by, editedByName: r.edited_by_name,
+          createdAt: r.created_at,
+        })));
+      }
     } catch {}
-  };
+  }, [plan?.id]);
+
+  const rollbackToVersion = useCallback(async (versionId: string) => {
+    try {
+      const { data } = await supabase.from('plan_sync')
+        .select('value').eq('id', versionId).single();
+      if (data?.value) {
+        const restored = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+        setPlan(restored);
+        saveNow(`Rolled back to version ${versionId}`);
+      }
+    } catch {}
+  }, [saveNow]);
+
+  // Set initial version from DB
+  useEffect(() => {
+    if (!plan?.id) return;
+    supabase.from('plan_sync')
+      .select('version').eq('plan_id', plan.id)
+      .order('version', { ascending: false }).limit(1).single()
+      .then(({ data }) => { if (data?.version) saveVersionRef.current = data.version; })
+      .then(() => {}, () => {});
+  }, [plan?.id]);
+
+  // Flush on unmount
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+  }, []);
 
   const updatePlan = useCallback((updates: Partial<PlanData>) => {
     setPlan(prev => {
@@ -556,8 +694,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PlanContext.Provider value={{
-      plan, isLoading, activeTab, setActiveTab,
-      createPlan, loadPlan, updatePlan,
+      plan, isLoading, isSyncing, isSaving, activeTab, setActiveTab,
+      viewMode, setViewMode,
+      lastSavedVersion: saveVersionRef.current,
+      versions,
+      createPlan, loadPlan, loadVersions, rollbackToVersion, updatePlan, saveNow,
       addTask, updateTask, deleteTask,
       addIdea, updateIdea, voteIdea, reactToIdea, convertIdeaToTask, deleteIdea,
       addBudgetItem, updateBudgetItem, deleteBudgetItem,

@@ -17,6 +17,12 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
 import { usePlan, PlanProvider } from '@/contexts/PlanContext';
 import { useLiveAudio } from '@/hooks/useLiveAudio';
+import { useRoomHistory } from '@/hooks/useRoomHistory';
+import { useRoomRoles, useRolePermissionsSafe } from '@/hooks/useRoomRoles';
+import { EditIndicator } from '@/components/live/EditIndicator';
+import { RoleBadge } from '@/components/live/RoleBadge';
+import { HistoryFeed } from '@/components/live/HistoryFeed';
+import { PresentationOverlay } from '@/components/live/PresentationOverlay';
 import OverviewTab from './plan/OverviewTab';
 import IdeasTab from './plan/IdeasTab';
 import TasksTab from './plan/TasksTab';
@@ -33,6 +39,7 @@ const TABS = [
   { key: 'budget', label: 'Budget' },
   { key: 'timeline', label: 'Timeline' },
   { key: 'files', label: 'Files' },
+  { key: 'history', label: 'History' },
   { key: 'chat', label: 'Chat' },
   { key: 'people', label: 'People' },
 ];
@@ -215,8 +222,19 @@ function RoomContent() {
     startPresenting, stopPresenting,
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
+    viewMode, setViewMode, currentRoom, addActivity,
   } = useRoom();
-  const { plan, createPlan, loadPlan } = usePlan();
+  const { plan, createPlan, loadPlan, saveNow } = usePlan();
+
+  // ── Room Roles ──
+  const { role: myRole, permissions: myPerms, isEditorOrAbove } = useRoomRoles();
+
+  // ── Room History ──
+  const history = useRoomHistory({
+    roomId: roomId || '',
+    enabled: !!roomId,
+    limit: 100,
+  });
   const glowAnim = useRef(new Animated.Value(0)).current;
   const micScale = useRef(new Animated.Value(1)).current;
 
@@ -415,6 +433,35 @@ function RoomContent() {
         />
       </View>
 
+      {/* ── Edit Indicators ── */}
+      <EditIndicator
+        indicators={(currentRoom?.editIndicators || []).map(e => ({
+          userId: e.userId,
+          userName: e.userName,
+          section: e.section,
+          tab: e.section,
+          startedAt: e.startedAt,
+        }))}
+        currentUserId={user?.id}
+      />
+
+      {/* ── Presentation Overlay ── */}
+      <PresentationOverlay
+        visible={true}
+        isPresenter={isPresenting && isUserPresenting}
+        presenterName={currentRoom?.presenterName || null}
+        isFollowing={isUserFollowing}
+        onStartPresenting={startPresenting}
+        onStopPresenting={stopPresenting}
+        onEnterFollow={enterFollowMode}
+        onLeaveFollow={leaveFollowMode}
+        onRequestControl={() => {}}
+        onTakeBackControl={() => {}}
+        pendingRequests={[]}
+        onApproveRequest={() => {}}
+        canPresent={isHost() || isCoHostOrAbove()}
+      />
+
       {/* ── Tab Bar ── */}
       <View style={[styles.tabBar, { borderBottomColor: '#1F2937' }]}>
         <FlatList
@@ -484,6 +531,12 @@ function RoomContent() {
             <Text style={styles.placeholderTitle}>Chat</Text>
             <Text style={styles.placeholderSub}>Room chat coming soon</Text>
           </View>
+        ) : activeTab === 'history' ? (
+          <HistoryFeed
+            entries={history.entries}
+            isLoading={history.isLoading}
+            onRefresh={history.refresh}
+          />
         ) : activeTab === 'people' ? (
           <View style={styles.placeholder}>
             <Users size={36} color="#4B5563" />
@@ -500,9 +553,14 @@ function RoomContent() {
                     />
                     {p.isSpeaking && <SpeakingRing size={44} color="#A78BFA" pulseSpeed={500} />}
                   </View>
-                  <Text style={styles.personName}>{p.fullName}</Text>
-                  {p.isSpeaking && <Text style={styles.speakingLabel}>🔊</Text>}
-                  {p.hasCamera && <Text style={styles.speakingLabel}>📹</Text>}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.personName}>{p.fullName}</Text>
+                      <RoleBadge role={p.role} isCreator={currentRoom?.creatorId === p.userId} size="sm" />
+                    </View>
+                    {p.isSpeaking && <Text style={styles.speakingLabel}>🔊 Speaking</Text>}
+                    {p.hasCamera && <Text style={styles.speakingLabel}>📹 Camera on</Text>}
+                  </View>
                 </View>
               ))}
             </ScrollView>

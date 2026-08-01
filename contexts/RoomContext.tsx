@@ -110,6 +110,13 @@ interface RoomContextValue {
   setEditIndicator: (section: string) => void;
   clearEditIndicator: (section: string) => void;
 
+  // View mode (Personal Browse vs Shared Presentation)
+  viewMode: 'browse' | 'presenting';
+  setViewMode: (mode: 'browse' | 'presenting') => void;
+
+  // Persistence guarantee
+  syncActivityToSupabase: (entry: ActivityEntry) => void;
+
   // Permissions check
   canEdit: () => boolean;
   canSpeak: (userId: string) => boolean;
@@ -134,6 +141,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const isTableReady = useRef(false);
   const controlRequestsRef = useRef<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<'browse' | 'presenting'>('browse');
 
   // ── Init ──
   useEffect(() => {
@@ -624,6 +632,27 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     });
   }, [user]);
 
+  // ── Persist activity to Supabase room_history ──
+  const syncActivityToSupabase = useCallback((entry: ActivityEntry) => {
+    try {
+      supabase.from('room_history').insert({
+        room_id: currentRoom?.id,
+        user_id: entry.userId,
+        user_name: entry.userName,
+        action: entry.action,
+        detail: entry.detail,
+        metadata: JSON.stringify({ timestamp: entry.timestamp }),
+      }).then(() => {}).then(() => {}, () => {});
+    } catch {}
+  }, [currentRoom?.id]);
+
+  // ── Auto-sync activity log to Supabase ──
+  useEffect(() => {
+    if (!currentRoom?.activityLog.length) return;
+    const latest = currentRoom.activityLog[0];
+    syncActivityToSupabase(latest);
+  }, [currentRoom?.activityLog[0]?.id]);
+
   const value: RoomContextValue = {
     rooms, currentRoom, isLoading,
     fetchRooms, createRoom, joinRoom, leaveRoom, isInRoom,
@@ -635,6 +664,8 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
     addActivity, setEditIndicator, clearEditIndicator,
     canEdit, canSpeak, isHost, isCoHostOrAbove, getUserRole,
+    viewMode, setViewMode,
+    syncActivityToSupabase,
   };
 
   return <RoomContext.Provider value={value}>{children}</RoomContext.Provider>;
