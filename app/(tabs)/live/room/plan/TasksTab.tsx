@@ -1,19 +1,11 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  ScrollView, Modal,
+  ScrollView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Plus, Check, Circle, Clock, AlertCircle, ChevronDown, Trash2, User } from 'lucide-react-native';
+import { Plus, Check, Circle, Trash2 } from 'lucide-react-native';
 import { usePlan, TaskItem, Priority, TaskStatus } from '@/contexts/PlanContext';
-
-const STATUS_OPTS: { key: TaskStatus; label: string; color: string }[] = [
-  { key: 'not_started', label: 'Not Started', color: '#6B7280' },
-  { key: 'in_progress', label: 'In Progress', color: '#3B82F6' },
-  { key: 'waiting', label: 'Waiting', color: '#F59E0B' },
-  { key: 'needs_review', label: 'Needs Review', color: '#A855F7' },
-  { key: 'completed', label: 'Completed', color: '#10B981' },
-];
 
 const PRIORITY_OPTS: { key: Priority; label: string; color: string }[] = [
   { key: 'low', label: 'Low', color: '#6B7280' },
@@ -22,30 +14,38 @@ const PRIORITY_OPTS: { key: Priority; label: string; color: string }[] = [
   { key: 'critical', label: 'Critical', color: '#EF4444' },
 ];
 
+const STATUS_COLORS: Record<TaskStatus, string> = {
+  not_started: '#6B7280',
+  in_progress: '#3B82F6',
+  waiting: '#F59E0B',
+  needs_review: '#A855F7',
+  completed: '#10B981',
+};
+
 export default function TasksTab() {
   const { plan, addTask, updateTask, deleteTask } = usePlan();
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
-  const [desc, setDesc] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [filterStatus, setFilterStatus] = useState<string | null>(null);
-  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
 
   const tasks = plan?.tasks || [];
-  const filtered = filterStatus
-    ? tasks.filter(t => t.status === filterStatus)
-    : tasks;
+  const completed = tasks.filter(t => t.status === 'completed').length;
 
   const handleAdd = () => {
     if (!title.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    addTask({ title: title.trim(), description: desc.trim(), priority });
-    setTitle(''); setDesc(''); setPriority('medium'); setShowForm(false);
+    addTask({ title: title.trim(), priority });
+    setTitle('');
+    setPriority('medium');
+    setShowForm(false);
   };
 
-  const handleStatusChange = (taskId: string, status: TaskStatus) => {
+  const handleToggle = (task: TaskItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    updateTask(taskId, { status });
+    const isCompleted = task.status === 'completed';
+    updateTask(task.id, {
+      status: isCompleted ? 'not_started' : 'completed',
+    });
   };
 
   const handleDelete = (taskId: string) => {
@@ -53,38 +53,19 @@ export default function TasksTab() {
     deleteTask(taskId);
   };
 
-  const statusCounts = STATUS_OPTS.map(s => ({
-    ...s, count: tasks.filter(t => t.status === s.key).length,
-  }));
-
   return (
     <View style={styles.container}>
-      {/* Status Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={{ gap: 6, paddingHorizontal: 12 }}
-      >
-        <TouchableOpacity
-          style={[styles.filterChip, !filterStatus && styles.filterChipActive]}
-          onPress={() => setFilterStatus(null)}
-        >
-          <Text style={[styles.filterText, !filterStatus && styles.filterTextActive]}>
-            All ({tasks.length})
-          </Text>
-        </TouchableOpacity>
-        {statusCounts.map(s => (
-          <TouchableOpacity
-            key={s.key}
-            style={[styles.filterChip, filterStatus === s.key && { borderColor: s.color }]}
-            onPress={() => setFilterStatus(filterStatus === s.key ? null : s.key)}
-          >
-            <Circle size={8} color={s.color} fill={s.color} />
-            <Text style={styles.filterText}>{s.label} ({s.count})</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Summary bar */}
+      <View style={styles.summary}>
+        <Text style={styles.summaryText}>
+          {completed}/{tasks.length} done
+        </Text>
+        {tasks.length > 0 && (
+          <View style={styles.miniBar}>
+            <View style={[styles.miniFill, { width: `${tasks.length > 0 ? (completed / tasks.length) * 100 : 0}%` }]} />
+          </View>
+        )}
+      </View>
 
       {/* Add Button */}
       {!showForm && (
@@ -106,15 +87,7 @@ export default function TasksTab() {
             onChangeText={setTitle}
             placeholder="Task title"
             placeholderTextColor="#6B7280"
-          />
-          <TextInput
-            style={[styles.formInput, styles.formTextarea]}
-            value={desc}
-            onChangeText={setDesc}
-            placeholder="Description (optional)"
-            placeholderTextColor="#6B7280"
-            multiline numberOfLines={2}
-            textAlignVertical="top"
+            autoFocus
           />
           <View style={styles.priorityRow}>
             {PRIORITY_OPTS.map(p => (
@@ -131,14 +104,18 @@ export default function TasksTab() {
             ))}
           </View>
           <View style={styles.formActions}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowForm(false)}>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => { setShowForm(false); setTitle(''); }}
+            >
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.submitBtn, !title.trim() && { opacity: 0.5 }]}
               onPress={handleAdd}
+              disabled={!title.trim()}
             >
-              <Text style={styles.submitText}>Add Task</Text>
+              <Text style={styles.submitText}>Add</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -146,124 +123,41 @@ export default function TasksTab() {
 
       {/* Task List */}
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 ? (
+        {tasks.length === 0 ? (
           <View style={styles.empty}>
             <Check size={36} color="#4B5563" />
-            <Text style={styles.emptyTitle}>
-              {filterStatus ? `No ${STATUS_OPTS.find(s => s.key === filterStatus)?.label} tasks` : 'No tasks yet'}
-            </Text>
-            <Text style={styles.emptySub}>Add tasks to start tracking progress</Text>
+            <Text style={styles.emptyTitle}>No tasks yet</Text>
+            <Text style={styles.emptySub}>Add your first task above</Text>
           </View>
         ) : (
-          filtered.map(task => {
-            const status = STATUS_OPTS.find(s => s.key === task.status);
-            const priorityMeta = PRIORITY_OPTS.find(p => p.key === task.priority);
+          tasks.map(task => {
             const isCompleted = task.status === 'completed';
+            const priorityMeta = PRIORITY_OPTS.find(p => p.key === task.priority);
             return (
-              <TouchableOpacity
-                key={task.id}
-                style={[styles.taskCard, isCompleted && styles.taskCardDone]}
-                onPress={() => setEditingTask(task)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.taskHeader}>
-                  <TouchableOpacity
-                    style={[styles.checkbox, isCompleted && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                    onPress={() => handleStatusChange(task.id, isCompleted ? 'not_started' : 'completed')}
-                  >
-                    {isCompleted && <Check size={12} color="#FFF" />}
-                  </TouchableOpacity>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.taskTitle, isCompleted && styles.taskTitleDone]}>
-                      {task.title}
-                    </Text>
-                    {task.description ? (
-                      <Text style={[styles.taskDesc, isCompleted && styles.taskDescDone]} numberOfLines={2}>
-                        {task.description}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <TouchableOpacity
-                    style={styles.deleteBtn}
-                    onPress={() => handleDelete(task.id)}
-                  >
-                    <Trash2 size={14} color="#6B7280" />
-                  </TouchableOpacity>
+              <View key={task.id} style={[styles.taskCard, isCompleted && styles.taskCardDone]}>
+                <TouchableOpacity
+                  style={[styles.checkbox, isCompleted && { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                  onPress={() => handleToggle(task)}
+                >
+                  {isCompleted && <Check size={12} color="#FFF" />}
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.taskTitle, isCompleted && styles.taskTitleDone]}>
+                    {task.title}
+                  </Text>
                 </View>
-
-                <View style={styles.taskMeta}>
-                  {priorityMeta && (
-                    <View style={[styles.metaChip, { backgroundColor: priorityMeta.color + '20' }]}>
-                      <Text style={[styles.metaText, { color: priorityMeta.color }]}>{priorityMeta.label}</Text>
-                    </View>
-                  )}
-                  {status && (
-                    <View style={[styles.metaChip, { backgroundColor: status.color + '20' }]}>
-                      <Circle size={6} color={status.color} fill={status.color} />
-                      <Text style={[styles.metaText, { color: status.color }]}>{status.label}</Text>
-                    </View>
-                  )}
-                  {task.assignedTo && (
-                    <View style={styles.metaChip}>
-                      <User size={10} color="#9CA3AF" />
-                      <Text style={styles.metaText}>{task.assignedTo}</Text>
-                    </View>
-                  )}
-                  {task.dueDate && (
-                    <View style={styles.metaChip}>
-                      <Clock size={10} color="#F59E0B" />
-                      <Text style={styles.metaText}>{task.dueDate}</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Quick status change buttons */}
-                {editingTask?.id === task.id && (
-                  <View style={styles.editPanel}>
-                    <Text style={styles.editPanelLabel}>Change status:</Text>
-                    <View style={styles.statusRow}>
-                      {STATUS_OPTS.map(s => (
-                        <TouchableOpacity
-                          key={s.key}
-                          style={[
-                            styles.statusChip,
-                            task.status === s.key && { backgroundColor: s.color + '30', borderColor: s.color },
-                          ]}
-                          onPress={() => handleStatusChange(task.id, s.key)}
-                        >
-                          <Text style={[styles.statusText, { color: s.color }]}>{s.label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <View style={styles.field}>
-                      <Text style={styles.fieldLabel}>Assigned To</Text>
-                      <TextInput
-                        style={styles.fieldInput}
-                        value={task.assignedTo || ''}
-                        onChangeText={(v) => updateTask(task.id, { assignedTo: v })}
-                        placeholder="Name"
-                        placeholderTextColor="#6B7280"
-                      />
-                    </View>
-                    <View style={styles.field}>
-                      <Text style={styles.fieldLabel}>Due Date</Text>
-                      <TextInput
-                        style={styles.fieldInput}
-                        value={task.dueDate || ''}
-                        onChangeText={(v) => updateTask(task.id, { dueDate: v })}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor="#6B7280"
-                      />
-                    </View>
-                    <TouchableOpacity
-                      style={styles.doneEditBtn}
-                      onPress={() => setEditingTask(null)}
-                    >
-                      <Text style={styles.doneEditText}>Done</Text>
-                    </TouchableOpacity>
+                {priorityMeta && (
+                  <View style={[styles.priorityBadge, { backgroundColor: priorityMeta.color + '20' }]}>
+                    <Circle size={6} color={priorityMeta.color} fill={priorityMeta.color} />
                   </View>
                 )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => handleDelete(task.id)}
+                >
+                  <Trash2 size={14} color="#4B5563" />
+                </TouchableOpacity>
+              </View>
             );
           })
         )}
@@ -275,17 +169,21 @@ export default function TasksTab() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  // Filter
-  filterScroll: { paddingVertical: 10 },
-  filterChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 16, backgroundColor: '#1F2937', borderWidth: 1,
-    borderColor: 'transparent',
+  // Summary
+  summary: {
+    paddingHorizontal: 16, paddingVertical: 10, gap: 6,
   },
-  filterChipActive: { backgroundColor: '#8B5CF6' },
-  filterText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-  filterTextActive: { color: '#FFF' },
+  summaryText: {
+    color: '#9CA3AF', fontSize: 13, fontWeight: '600',
+    textAlign: 'center',
+  },
+  miniBar: {
+    height: 3, borderRadius: 2, backgroundColor: '#1F2937',
+    marginHorizontal: 40,
+  },
+  miniFill: {
+    height: 3, borderRadius: 2, backgroundColor: '#10B981',
+  },
   // Add
   addBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -297,13 +195,12 @@ const styles = StyleSheet.create({
   // Form
   formCard: {
     backgroundColor: '#1F2937', borderRadius: 14, padding: 14,
-    gap: 10, marginHorizontal: 12, marginBottom: 8,
+    gap: 10, marginHorizontal: 14, marginBottom: 8,
   },
   formInput: {
     backgroundColor: '#111827', color: '#FFF', fontSize: 15,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
   },
-  formTextarea: { minHeight: 60 },
   priorityRow: { flexDirection: 'row', gap: 6 },
   priorityChip: {
     paddingHorizontal: 10, paddingVertical: 5,
@@ -326,50 +223,20 @@ const styles = StyleSheet.create({
   emptySub: { color: '#6B7280', fontSize: 13 },
   // Task Card
   taskCard: {
-    backgroundColor: '#1F2937', borderRadius: 14, padding: 14,
-    marginHorizontal: 12, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#1F2937', borderRadius: 12, padding: 12,
+    marginHorizontal: 14, marginBottom: 6,
   },
-  taskCardDone: { opacity: 0.6 },
-  taskHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  taskCardDone: { opacity: 0.5 },
   checkbox: {
     width: 22, height: 22, borderRadius: 6, borderWidth: 2,
     borderColor: '#4B5563', alignItems: 'center', justifyContent: 'center',
-    marginTop: 2,
   },
-  taskTitle: { color: '#FFF', fontSize: 15, fontWeight: '600', flex: 1 },
+  taskTitle: { color: '#FFF', fontSize: 14, fontWeight: '500', flex: 1 },
   taskTitleDone: { textDecorationLine: 'line-through', color: '#6B7280' },
-  taskDesc: { color: '#9CA3AF', fontSize: 13, marginTop: 3 },
-  taskDescDone: { color: '#4B5563' },
+  priorityBadge: {
+    width: 22, height: 22, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center',
+  },
   deleteBtn: { padding: 4 },
-  taskMeta: { flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' },
-  metaChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#374151', paddingHorizontal: 8,
-    paddingVertical: 3, borderRadius: 8,
-  },
-  metaText: { color: '#9CA3AF', fontSize: 11, fontWeight: '500' },
-  // Edit panel
-  editPanel: {
-    marginTop: 12, paddingTop: 12,
-    borderTopWidth: 1, borderTopColor: '#374151', gap: 8,
-  },
-  editPanelLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-  statusRow: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' },
-  statusChip: {
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 8, borderWidth: 1, borderColor: 'transparent',
-    backgroundColor: '#374151',
-  },
-  statusText: { fontSize: 11, fontWeight: '600' },
-  field: { gap: 4 },
-  fieldLabel: { color: '#6B7280', fontSize: 11, fontWeight: '600' },
-  fieldInput: {
-    backgroundColor: '#111827', color: '#FFF', fontSize: 14,
-    paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8,
-  },
-  doneEditBtn: {
-    backgroundColor: '#8B5CF6', paddingVertical: 8,
-    borderRadius: 10, alignItems: 'center',
-  },
-  doneEditText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
 });

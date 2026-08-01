@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  ScrollView, Dimensions,
+  ScrollView, Dimensions, Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
   CheckCircle2, Clock, AlertTriangle, TrendingUp, TrendingDown,
   Users, Calendar, Target, Flag, BarChart3, Edit2, DollarSign,
-  ListTodo, Paperclip, ArrowRight, ChevronRight,
+  ListTodo, Paperclip, ArrowRight, ChevronRight, Crown, Mic, Video,
 } from 'lucide-react-native';
 import { usePlan, PlanStage } from '@/contexts/PlanContext';
+import { useRoom } from '@/contexts/RoomContext';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_GAP = 10;
@@ -40,7 +41,17 @@ function statusColor(status: string): string {
 
 export default function OverviewTab() {
   const { plan, updatePlan } = usePlan();
+  const { rooms } = useRoom();
   const [editing, setEditing] = useState(false);
+
+  // Find current room from context (roomId comes from route, match by plan's room association)
+  // rooms are keyed by their id; we find the active room by checking which one has been joined
+  const room = rooms.find(r => r.participants.length > 0) || null;
+  const hostCreatorId = room?.creatorId;
+  const host = room?.participants?.find(p => p.userId === hostCreatorId) || room?.participants?.[0] || null;
+  const participants = room?.participants || [];
+  const speakingCount = participants.filter(p => p.isSpeaking).length;
+  const cameraCount = participants.filter(p => p.hasCamera).length;
   const [title, setTitle] = useState(plan?.title || '');
   const [goal, setGoal] = useState(plan?.goal || '');
   const [desc, setDesc] = useState(plan?.description || '');
@@ -129,6 +140,93 @@ export default function OverviewTab() {
           </View>
         ) : null}
       </LinearGradient>
+
+      {/* ── Live Room ── */}
+      {room && (
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Live Room</Text>
+            <View style={styles.livePill}>
+              <View style={styles.livePillDot} />
+              <Text style={styles.livePillText}>LIVE</Text>
+            </View>
+          </View>
+
+          {/* Host */}
+          {host && (
+            <View style={styles.hostRow}>
+              <Image
+                source={{
+                  uri: host.avatar
+                    || `https://ui-avatars.com/api/?name=${encodeURIComponent(host.fullName)}&background=8B5CF6&color=fff&size=80`,
+                }}
+                style={styles.hostAvatar}
+              />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={styles.hostName}>{host.fullName}</Text>
+                  <Crown size={12} color="#F59E0B" />
+                </View>
+                <Text style={styles.hostLabel}>Room Host</Text>
+              </View>
+              <View style={styles.roomStats}>
+                <View style={styles.roomStat}>
+                  <Users size={12} color="#9CA3AF" />
+                  <Text style={styles.roomStatVal}>{participants.length}</Text>
+                </View>
+                {speakingCount > 0 && (
+                  <View style={styles.roomStat}>
+                    <Mic size={12} color="#A78BFA" />
+                    <Text style={[styles.roomStatVal, { color: '#A78BFA' }]}>{speakingCount}</Text>
+                  </View>
+                )}
+                {cameraCount > 0 && (
+                  <View style={styles.roomStat}>
+                    <Video size={12} color="#10B981" />
+                    <Text style={[styles.roomStatVal, { color: '#10B981' }]}>{cameraCount}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Participant strip */}
+          {participants.length > 1 && (
+            <View style={styles.pStrip}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {participants.map(p => (
+                  <View key={p.userId} style={styles.pStripItem}>
+                    <View style={{ position: 'relative' }}>
+                      <Image
+                        source={{
+                          uri: p.avatar
+                            || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=80`,
+                        }}
+                        style={[
+                          styles.pStripAvatar,
+                          p.isSpeaking && { borderColor: '#A78BFA', borderWidth: 2 },
+                          p.hasCamera && { borderColor: '#10B981', borderWidth: 2 },
+                        ]}
+                      />
+                      {p.isSpeaking && (
+                        <View style={styles.pStripRing} />
+                      )}
+                      {p.hasCamera && (
+                        <View style={styles.pStripCamBadge}>
+                          <Video size={8} color="#FFF" />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.pStripName} numberOfLines={1}>
+                      {p.fullName.split(' ')[0]}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* ── Stage Tracker ── */}
       <View style={styles.trackerCard}>
@@ -557,4 +655,44 @@ const styles = StyleSheet.create({
   },
   milestoneTitle: { color: '#D1D5DB', fontSize: 13, fontWeight: '600' },
   milestoneDate: { color: '#6B7280', fontSize: 11, fontWeight: '500', marginTop: 2 },
+
+  // Live Room
+  livePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(16,185,129,0.12)', paddingHorizontal: 8,
+    paddingVertical: 3, borderRadius: 10,
+  },
+  livePillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
+  livePillText: { color: '#10B981', fontSize: 10, fontWeight: '700' },
+  hostRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#1A1A24', borderRadius: 12, padding: 12,
+    marginBottom: 12,
+  },
+  hostAvatar: { width: 44, height: 44, borderRadius: 22 },
+  hostName: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  hostLabel: { color: '#6B7280', fontSize: 12, fontWeight: '500', marginTop: 2 },
+  roomStats: { flexDirection: 'row', gap: 10 },
+  roomStat: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  roomStatVal: { color: '#9CA3AF', fontSize: 13, fontWeight: '700' },
+  pStrip: { paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1F2937' },
+  pStripItem: {
+    alignItems: 'center', gap: 4,
+    marginRight: 14,
+  },
+  pStripAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  pStripRing: {
+    position: 'absolute', width: 48, height: 48,
+    borderRadius: 24, borderWidth: 1.5, borderColor: '#A78BFA',
+    top: -4, left: -4, opacity: 0.5,
+  },
+  pStripCamBadge: {
+    position: 'absolute', bottom: -2, right: -2,
+    width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center',
+  },
+  pStripName: { color: '#9CA3AF', fontSize: 10, fontWeight: '500', maxWidth: 44, textAlign: 'center' },
 });
