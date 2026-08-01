@@ -163,6 +163,33 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
+  // ── Realtime subscription ──
+  useEffect(() => {
+    if (!plan?.roomId) return;
+    const channel = supabase
+      .channel(`plan-realtime-${plan.roomId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'plans',
+        filter: `room_id=eq.${plan.roomId}`,
+      }, (payload: any) => {
+        const remote = payload.new?.data;
+        if (!remote) return;
+        const parsed = typeof remote === 'string' ? JSON.parse(remote) : remote;
+        // Don't overwrite if we're the ones who made the change
+        if (parsed.id !== plan?.id) return;
+        setPlan(prev => {
+          if (!prev) return prev;
+          // Merge: use remote timestamp to avoid stale writes
+          if (parsed.updatedAt <= prev.updatedAt) return prev;
+          return { ...prev, ...parsed, updatedAt: parsed.updatedAt };
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [plan?.roomId]);
+
   const createPlan = useCallback(async (roomId: string, data: Partial<PlanData>) => {
     const newPlan: PlanData = { ...defaultPlan(roomId, user?.id), ...data, id: nextId(), updatedAt: new Date().toISOString() };
     setPlan(newPlan);

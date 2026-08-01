@@ -7,7 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
-  MessageCircle, Sparkles, Share2, X,
+  MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -144,10 +144,11 @@ function CameraBubble({ onClose, participant }: {
 }
 
 // ── Animated Participant Circle ──
-function ParticipantCircle({ p, size, showName }: {
-  p: RoomParticipant; size?: number; showName?: boolean;
+function ParticipantCircle({ p, size, showName, showRole }: {
+  p: RoomParticipant; size?: number; showName?: boolean; showRole?: boolean;
 }) {
   const s = size || 44;
+  const roleIcon = p.role === 'host' ? '👑' : p.role === 'co_host' ? '⭐' : null;
   return (
     <View style={[styles.participantWrap, { width: s + 20, height: s + 50 }]}>
       <View style={{ width: s, height: s }}>
@@ -168,6 +169,11 @@ function ParticipantCircle({ p, size, showName }: {
         {p.hasCamera && (
           <View style={styles.cameraBadge}>
             <Camera size={10} color="#FFF" fill="#FFF" />
+          </View>
+        )}
+        {showRole && roleIcon && (
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleBadgeText}>{roleIcon}</Text>
           </View>
         )}
       </View>
@@ -196,6 +202,9 @@ function RoomContent() {
   const {
     rooms, joinRoom, leaveRoom,
     startSpeaking, stopSpeaking, toggleCamera,
+    startPresenting, stopPresenting,
+    isHost, isCoHostOrAbove, getUserRole,
+    enterFollowMode, leaveFollowMode, returnToLivePresentation,
   } = useRoom();
   const { plan, createPlan, loadPlan } = usePlan();
   const glowAnim = useRef(new Animated.Value(0)).current;
@@ -206,6 +215,15 @@ function RoomContent() {
   const speakingParticipants = participants.filter(p => p.isSpeaking);
   const cameraParticipants = participants.filter(p => p.hasCamera);
   const currentUserP = participants.find(p => p.userId === user?.id);
+  const isPresenting = room?.presentationState === 'presenting';
+  const isUserPresenting = room?.presenterId === user?.id;
+  const isUserFollowing = currentUserP?.followMode === true;
+  const presenterParticipant = room?.presenterId
+    ? participants.find(p => p.userId === room.presenterId)
+    : null;
+  const userRole = getUserRole();
+  const userIsHost = isHost();
+  const userIsHostOrAbove = isCoHostOrAbove();
 
   // ── Mount / Unmount ──
   useEffect(() => {
@@ -316,6 +334,15 @@ function RoomContent() {
             </View>
           </View>
           <View style={styles.headerActions}>
+            {!isPresenting && userIsHostOrAbove && (
+              <TouchableOpacity
+                style={styles.presentBtn}
+                onPress={() => { startPresenting(); }}
+              >
+                <Monitor size={14} color="#FFF" />
+                <Text style={styles.presentBtnText}>Present</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.headerBtn}>
               <Share2 size={16} color="#9CA3AF" />
             </TouchableOpacity>
@@ -331,6 +358,32 @@ function RoomContent() {
         )}
       </View>
 
+      {/* ── Presenter Bar ── */}
+      {isPresenting && room?.presenterName && (
+        <View style={styles.presenterBar}>
+          <View style={styles.presenterBadge}>
+            <Monitor size={13} color="#10B981" />
+            <Text style={styles.presenterText}>{room.presenterName} is presenting</Text>
+          </View>
+          {userIsHostOrAbove && !isUserPresenting && (
+            <TouchableOpacity
+              style={styles.presenterAction}
+              onPress={() => { stopPresenting(); }}
+            >
+              <Text style={styles.presenterActionText}>End</Text>
+            </TouchableOpacity>
+          )}
+          {isUserPresenting && (
+            <TouchableOpacity
+              style={[styles.presenterAction, { backgroundColor: '#EF4444' }]}
+              onPress={() => { stopPresenting(); }}
+            >
+              <Text style={styles.presenterActionText}>Stop</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* ── Participant Bar ── */}
       <View style={styles.pBar}>
         <FlatList
@@ -340,7 +393,7 @@ function RoomContent() {
           keyExtractor={p => p.userId}
           contentContainerStyle={styles.pBarContent}
           renderItem={({ item }) => (
-            <ParticipantCircle p={item} size={38} showName />
+            <ParticipantCircle p={item} size={38} showName showRole />
           )}
         />
       </View>
@@ -371,6 +424,38 @@ function RoomContent() {
           }}
         />
       </View>
+
+      {/* ── Follow Mode Banner ── */}
+      {isPresenting && isUserFollowing && !isUserPresenting && (
+        <View style={styles.followBanner}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Eye size={14} color="#A78BFA" />
+            <Text style={styles.followBannerText}>
+              Following {room?.presenterName}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.followReturnBtn}
+            onPress={() => { leaveFollowMode(); }}
+          >
+            <Text style={styles.followReturnText}>Browse freely</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {isPresenting && !isUserFollowing && !isUserPresenting && (
+        <TouchableOpacity
+          style={styles.followBanner}
+          onPress={() => { enterFollowMode(); }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Eye size={14} color="#6B7280" />
+            <Text style={[styles.followBannerText, { color: '#9CA3AF' }]}>
+              {room?.presenterName} is presenting — tap to follow
+            </Text>
+          </View>
+          <Text style={styles.followReturnText}>Follow →</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ── Plan Content ── */}
       <View style={styles.content}>
@@ -654,4 +739,46 @@ const styles = StyleSheet.create({
   },
   glowBar: { position: 'absolute', bottom: 80, left: 0, right: 0, height: 3 },
   glowGradient: { flex: 1 },
+
+  // Presenter Bar
+  presenterBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(16,185,129,0.08)', paddingHorizontal: 12,
+    paddingVertical: 8, borderBottomWidth: 1,
+    borderBottomColor: 'rgba(16,185,129,0.12)',
+  },
+  presenterBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  presenterText: { color: '#10B981', fontSize: 12, fontWeight: '600' },
+  presenterAction: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    paddingHorizontal: 14, paddingVertical: 5, borderRadius: 10,
+  },
+  presenterActionText: { color: '#10B981', fontSize: 11, fontWeight: '700' },
+  presentBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#8B5CF6', paddingHorizontal: 12,
+    paddingVertical: 7, borderRadius: 17,
+  },
+  presentBtnText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+
+  // Follow Banner
+  followBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(139,92,246,0.06)', paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  followBannerText: { color: '#A78BFA', fontSize: 11, fontWeight: '600' },
+  followReturnBtn: {
+    backgroundColor: 'rgba(139,92,246,0.15)',
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+  },
+  followReturnText: { color: '#A78BFA', fontSize: 10, fontWeight: '600' },
+
+  // Role Badge
+  roleBadge: {
+    position: 'absolute', top: -2, right: -2,
+    width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+  },
+  roleBadgeText: { fontSize: 9 },
 });
