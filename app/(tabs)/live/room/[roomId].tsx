@@ -1,13 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, ScrollView, Image, FlatList,
+  Animated, ScrollView, Image, FlatList, PanResponder,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
-  MessageCircle, Sparkles, Share2, Smile,
+  MessageCircle, Sparkles, Share2, X,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,7 +23,7 @@ import BudgetTab from './plan/BudgetTab';
 import TimelineTab from './plan/TimelineTab';
 import FilesTab from './plan/FilesTab';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -45,6 +45,142 @@ const TAB_CONTENT: Record<string, React.FC> = {
   files: FilesTab,
 };
 
+// ── Animated Speaking Ring ──
+function SpeakingRing({ size = 52, color = '#A78BFA', pulseSpeed = 600 }: {
+  size?: number; color?: string; pulseSpeed?: number;
+}) {
+  const anim = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: pulseSpeed, useNativeDriver: false }),
+        Animated.timing(anim, { toValue: 0.3, duration: pulseSpeed, useNativeDriver: false }),
+      ]),
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseSpeed]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: color,
+        opacity: anim,
+        transform: [{
+          scale: anim.interpolate({ inputRange: [0.3, 1], outputRange: [1, 1.25] }),
+        }],
+      }}
+    />
+  );
+}
+
+// ── Draggable Camera Bubble ──
+function CameraBubble({ onClose, participant }: {
+  onClose: () => void; participant: { fullName: string; avatar: string | null };
+}) {
+  const pan = useRef(new Animated.ValueXY({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 })).current;
+  const scale = useRef(new Animated.Value(1)).current;
+  const positionRef = useRef({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 });
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      pan.setOffset({ x: positionRef.current.x, y: positionRef.current.y });
+      pan.setValue({ x: 0, y: 0 });
+      Animated.spring(scale, { toValue: 1.08, useNativeDriver: false }).start();
+    },
+    onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
+    onPanResponderRelease: (_, gesture) => {
+      pan.flattenOffset();
+      positionRef.current = {
+        x: positionRef.current.x + gesture.dx,
+        y: positionRef.current.y + gesture.dy,
+      };
+      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
+    },
+  }), []);
+
+  return (
+    <Animated.View
+      style={[
+        styles.cameraBubble,
+        { transform: [...pan.getTranslateTransform(), { scale }] },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      {/* Camera preview placeholder */}
+      <View style={styles.cameraPreview}>
+        <Image
+          source={{
+            uri: participant.avatar
+              || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=374151&color=fff&size=160`,
+          }}
+          style={styles.cameraImg}
+        />
+        <LinearGradient
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)']}
+          style={styles.cameraGradient}
+        >
+          <Text style={styles.cameraName} numberOfLines={1}>{participant.fullName}</Text>
+        </LinearGradient>
+      </View>
+      {/* Close button */}
+      <TouchableOpacity style={styles.cameraClose} onPress={onClose}>
+        <X size={14} color="#FFF" />
+      </TouchableOpacity>
+      {/* Drag hint */}
+      <View style={styles.dragHandle}>
+        <View style={styles.dragHandleBar} />
+      </View>
+    </Animated.View>
+  );
+}
+
+// ── Animated Participant Circle ──
+function ParticipantCircle({ p, size, showName }: {
+  p: RoomParticipant; size?: number; showName?: boolean;
+}) {
+  const s = size || 44;
+  return (
+    <View style={[styles.participantWrap, { width: s + 20, height: s + 50 }]}>
+      <View style={{ width: s, height: s }}>
+        <Image
+          source={{
+            uri: p.avatar
+              || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=8B5CF6&color=fff&size=${s * 2}`,
+          }}
+          style={[styles.participantImg, {
+            width: s, height: s, borderRadius: s / 2,
+            borderWidth: p.isSpeaking ? 2 : 1,
+            borderColor: p.isSpeaking ? '#A78BFA' : 'rgba(255,255,255,0.1)',
+          }]}
+        />
+        {p.isSpeaking && (
+          <SpeakingRing size={s + 10} color="#A78BFA" pulseSpeed={600} />
+        )}
+        {p.hasCamera && (
+          <View style={styles.cameraBadge}>
+            <Camera size={10} color="#FFF" fill="#FFF" />
+          </View>
+        )}
+      </View>
+      {showName && (
+        <Text style={styles.participantNameText} numberOfLines={1}>
+          {p.isSpeaking ? '🔊 ' : ''}{p.fullName.split(' ')[0]}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+// ── Main Room Content ──
 function RoomContent() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const [loading, setLoading] = useState(true);
@@ -63,10 +199,13 @@ function RoomContent() {
   } = useRoom();
   const { plan, createPlan, loadPlan } = usePlan();
   const glowAnim = useRef(new Animated.Value(0)).current;
+  const micScale = useRef(new Animated.Value(1)).current;
 
   const room = rooms.find((r) => r.id === roomId);
   const participants = room?.participants || [];
   const speakingParticipants = participants.filter(p => p.isSpeaking);
+  const cameraParticipants = participants.filter(p => p.hasCamera);
+  const currentUserP = participants.find(p => p.userId === user?.id);
 
   // ── Mount / Unmount ──
   useEffect(() => {
@@ -75,7 +214,7 @@ function RoomContent() {
       joinRoom(roomId);
       loadPlan(roomId);
       createPlan(roomId, { title: room?.name || 'New Plan' });
-      const t = setTimeout(() => setLoading(false), 500);
+      const t = setTimeout(() => setLoading(false), 600);
       return () => {
         clearTimeout(t);
         showTabBar();
@@ -84,19 +223,26 @@ function RoomContent() {
     }
   }, [roomId]);
 
-  // ── Speaking glow ──
+  // ── Mic glow pulse ──
   useEffect(() => {
     if (isSpeaking) {
       const pulse = Animated.loop(
         Animated.sequence([
-          Animated.timing(glowAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
-          Animated.timing(glowAnim, { toValue: 0.3, duration: 500, useNativeDriver: false }),
+          Animated.timing(glowAnim, { toValue: 1, duration: 400, useNativeDriver: false }),
+          Animated.timing(glowAnim, { toValue: 0.2, duration: 400, useNativeDriver: false }),
         ]),
       );
+      Animated.loop(
+        Animated.sequence([
+          Animated.spring(micScale, { toValue: 1.15, useNativeDriver: false, speed: 12 }),
+          Animated.spring(micScale, { toValue: 1, useNativeDriver: false, speed: 12 }),
+        ]),
+      ).start();
       pulse.start();
       return () => pulse.stop();
     }
     glowAnim.setValue(0);
+    micScale.setValue(1);
   }, [isSpeaking]);
 
   const handlePressIn = useCallback(() => {
@@ -127,7 +273,9 @@ function RoomContent() {
     return (
       <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
         <View style={styles.connecting}>
-          <Animated.View style={styles.connectingPulse} />
+          <Animated.View style={styles.connectingRing}>
+            <View style={styles.connectingDot} />
+          </Animated.View>
           <Text style={styles.connectingText}>Entering room...</Text>
         </View>
       </View>
@@ -139,7 +287,7 @@ function RoomContent() {
   return (
     <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
       <LinearGradient
-        colors={['rgba(139,92,246,0.10)', 'rgba(99,102,241,0.04)', '#0A0A0F']}
+        colors={['rgba(139,92,246,0.08)', 'rgba(99,102,241,0.03)', '#0A0A0F']}
         style={styles.ambient}
       />
 
@@ -160,6 +308,11 @@ function RoomContent() {
                 <Users size={11} color="#9CA3AF" />
                 <Text style={styles.pCountText}>{participants.length}</Text>
               </View>
+              {speakingParticipants.length > 0 && (
+                <Text style={styles.speakingCount}>
+                  {speakingParticipants.length} speaking
+                </Text>
+              )}
             </View>
           </View>
           <View style={styles.headerActions}>
@@ -178,31 +331,19 @@ function RoomContent() {
         )}
       </View>
 
-      {/* ── Floating speaking participants ── */}
-      {speakingParticipants.length > 0 && (
-        <View style={styles.floatingParticipants} pointerEvents="none">
-          {speakingParticipants.slice(0, 4).map((p, i) => (
-            <View
-              key={p.userId}
-              style={[
-                styles.floatingCircle,
-                {
-                  top: 80 + i * 70,
-                  right: 10,
-                },
-              ]}
-            >
-              <Image
-                source={{
-                  uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=8B5CF6&color=fff&size=80`,
-                }}
-                style={styles.floatingAvatar}
-              />
-              <View style={styles.speakingRing} />
-            </View>
-          ))}
-        </View>
-      )}
+      {/* ── Participant Bar ── */}
+      <View style={styles.pBar}>
+        <FlatList
+          horizontal
+          data={participants}
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={p => p.userId}
+          contentContainerStyle={styles.pBarContent}
+          renderItem={({ item }) => (
+            <ParticipantCircle p={item} size={38} showName />
+          )}
+        />
+      </View>
 
       {/* ── Tab Bar ── */}
       <View style={[styles.tabBar, { borderBottomColor: '#1F2937' }]}>
@@ -244,19 +385,19 @@ function RoomContent() {
         ) : activeTab === 'people' ? (
           <View style={styles.placeholder}>
             <Users size={36} color="#4B5563" />
-            <Text style={styles.placeholderTitle}>People</Text>
-            <Text style={styles.placeholderSub}>
-              {participants.length} participant{participants.length !== 1 ? 's' : ''} in this room
-            </Text>
+            <Text style={styles.placeholderTitle}>People ({participants.length})</Text>
             <ScrollView style={{ width: '100%', marginTop: 12 }}>
               {participants.map(p => (
                 <View key={p.userId} style={styles.personRow}>
-                  <Image
-                    source={{
-                      uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=60`,
-                    }}
-                    style={styles.personAvatar}
-                  />
+                  <View style={{ width: 36, height: 36 }}>
+                    <Image
+                      source={{
+                        uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=72`,
+                      }}
+                      style={styles.personAvatar}
+                    />
+                    {p.isSpeaking && <SpeakingRing size={44} color="#A78BFA" pulseSpeed={500} />}
+                  </View>
                   <Text style={styles.personName}>{p.fullName}</Text>
                   {p.isSpeaking && <Text style={styles.speakingLabel}>🔊</Text>}
                   {p.hasCamera && <Text style={styles.speakingLabel}>📹</Text>}
@@ -267,11 +408,31 @@ function RoomContent() {
         ) : null}
       </View>
 
+      {/* ── Draggable Camera Bubbles ── */}
+      {cameraParticipants.map(p => {
+        if (p.userId !== user?.id && !cameraOn) {
+          return (
+            <CameraBubble
+              key={`cam-${p.userId}`}
+              participant={p}
+              onClose={() => {}}
+            />
+          );
+        }
+        return null;
+      })}
+      {cameraOn && currentUserP && (
+        <CameraBubble
+          participant={currentUserP}
+          onClose={handleCamera}
+        />
+      )}
+
       {/* ── Controls ── */}
       <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
         {/* Raise Hand */}
         <TouchableOpacity
-          style={[styles.smallBtn, handRaised && { backgroundColor: '#F59E0B' }]}
+          style={[styles.smallBtn, handRaised && styles.raiseActive]}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             setHandRaised(prev => !prev);
@@ -282,39 +443,59 @@ function RoomContent() {
 
         {/* Hold to Talk */}
         <TouchableOpacity
-          style={[styles.micBtn, isSpeaking && styles.micBtnActive]}
+          style={[styles.micBtn]}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           activeOpacity={0.7}
         >
           <Animated.View style={[
-            styles.micInner,
-            isSpeaking && { transform: [{ scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) }] },
+            styles.micOuter,
+            isSpeaking && {
+              backgroundColor: 'rgba(139,92,246,0.3)',
+              borderColor: 'rgba(139,92,246,0.6)',
+            },
           ]}>
-            {isSpeaking ? (
-              <Mic size={26} color="#FFF" />
-            ) : (
-              <MicOff size={26} color="#FFF" />
-            )}
+            <Animated.View style={[
+              styles.micInner,
+              isSpeaking && { backgroundColor: '#8B5CF6', borderColor: '#A78BFA' },
+              { transform: [{ scale: micScale }] },
+            ]}>
+              {isSpeaking ? (
+                <Mic size={24} color="#FFF" />
+              ) : (
+                <MicOff size={24} color="#FFF" />
+              )}
+            </Animated.View>
           </Animated.View>
           <Text style={styles.controlLabel}>
-            {isSpeaking ? 'Speaking...' : 'Hold to Talk'}
+            {isSpeaking ? 'You\'re live' : 'Hold to Talk'}
           </Text>
         </TouchableOpacity>
 
-        {/* Hold for Camera */}
+        {/* Camera */}
         <TouchableOpacity
-          style={[styles.micBtn, cameraOn && { backgroundColor: '#8B5CF6' }]}
+          style={[styles.micBtn]}
           onPress={handleCamera}
           activeOpacity={0.7}
         >
-          <Animated.View style={styles.micInner}>
-            {cameraOn ? (
-              <Camera size={26} color="#FFF" />
-            ) : (
-              <CameraOff size={26} color="#FFF" />
-            )}
-          </Animated.View>
+          <View style={[
+            styles.micOuter,
+            cameraOn && {
+              backgroundColor: 'rgba(16,185,129,0.3)',
+              borderColor: 'rgba(16,185,129,0.6)',
+            },
+          ]}>
+            <View style={[
+              styles.micInner,
+              cameraOn && { backgroundColor: '#10B981' },
+            ]}>
+              {cameraOn ? (
+                <Camera size={24} color="#FFF" />
+              ) : (
+                <CameraOff size={24} color="#FFF" />
+              )}
+            </View>
+          </View>
           <Text style={styles.controlLabel}>
             {cameraOn ? 'On Camera' : 'Camera'}
           </Text>
@@ -326,11 +507,11 @@ function RoomContent() {
         </TouchableOpacity>
       </View>
 
-      {/* Speaking indicator */}
+      {/* Speaking glow at bottom */}
       {isSpeaking && (
         <Animated.View style={[styles.glowBar, { opacity: glowAnim }]} pointerEvents="none">
           <LinearGradient
-            colors={['rgba(139,92,246,0)', 'rgba(139,92,246,0.5)', 'rgba(99,102,241,0.6)', 'rgba(139,92,246,0.5)', 'rgba(139,92,246,0)']}
+            colors={['rgba(139,92,246,0)', 'rgba(139,92,246,0.6)', '#8B5CF6', 'rgba(99,102,241,0.6)', 'rgba(139,92,246,0)']}
             style={styles.glowGradient}
             start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
           />
@@ -353,11 +534,19 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   ambient: { ...StyleSheet.absoluteFillObject },
   connecting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  connectingPulse: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(139,92,246,0.2)' },
+  connectingRing: {
+    width: 60, height: 60, borderRadius: 30,
+    borderWidth: 2, borderColor: 'rgba(139,92,246,0.3)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  connectingDot: {
+    width: 12, height: 12, borderRadius: 6,
+    backgroundColor: '#8B5CF6',
+  },
   connectingText: { color: '#9CA3AF', fontSize: 15 },
 
   // Header
-  header: { paddingHorizontal: 14, paddingBottom: 10 },
+  header: { paddingHorizontal: 14, paddingBottom: 6 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
   roomName: { color: '#FFF', fontSize: 20, fontWeight: '700' },
   headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' },
@@ -367,15 +556,22 @@ const styles = StyleSheet.create({
   hostText: { color: '#9CA3AF', fontSize: 12, fontWeight: '500' },
   pCountRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   pCountText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  speakingCount: { color: '#A78BFA', fontSize: 11, fontWeight: '600' },
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
   goalText: { color: '#8B5CF6', fontSize: 13, fontWeight: '500', marginTop: 6 },
 
-  // Floating
-  floatingParticipants: { position: 'absolute', top: 0, right: 0, zIndex: 10 },
-  floatingCircle: { position: 'absolute', alignItems: 'center' },
-  floatingAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#8B5CF6' },
-  speakingRing: { position: 'absolute', width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: '#A78BFA', opacity: 0.5 },
+  // Participant Bar
+  pBar: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
+  pBarContent: { paddingHorizontal: 10, gap: 2 },
+  participantWrap: { alignItems: 'center', justifyContent: 'center' },
+  participantImg: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  participantNameText: { color: '#9CA3AF', fontSize: 9, fontWeight: '600', marginTop: 4, textAlign: 'center', maxWidth: 50 },
+  cameraBadge: {
+    position: 'absolute', bottom: -2, right: -2,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center',
+  },
 
   // Tab Bar
   tabBar: { borderBottomWidth: 1, paddingVertical: 8 },
@@ -391,37 +587,71 @@ const styles = StyleSheet.create({
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 8 },
   placeholderTitle: { color: '#9CA3AF', fontSize: 16, fontWeight: '600' },
   placeholderSub: { color: '#6B7280', fontSize: 14 },
-  personRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 16 },
-  personAvatar: { width: 32, height: 32, borderRadius: 16 },
+  personRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 16 },
+  personAvatar: { width: 36, height: 36, borderRadius: 18 },
   personName: { color: '#D1D5DB', fontSize: 14, fontWeight: '500', flex: 1 },
   speakingLabel: { fontSize: 14 },
+
+  // Camera Bubble
+  cameraBubble: {
+    position: 'absolute', zIndex: 100, elevation: 10,
+    width: 110, alignItems: 'center',
+  },
+  cameraPreview: {
+    width: 110, height: 110, borderRadius: 55, overflow: 'hidden',
+    borderWidth: 2, borderColor: '#10B981',
+  },
+  cameraImg: { width: 110, height: 110, borderRadius: 55 },
+  cameraGradient: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 36, justifyContent: 'flex-end', paddingHorizontal: 10, paddingBottom: 6,
+  },
+  cameraName: { color: '#FFF', fontSize: 10, fontWeight: '600' },
+  cameraClose: {
+    position: 'absolute', top: -4, right: -4,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
+  },
+  dragHandle: {
+    marginTop: 6, width: 30, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center',
+  },
+  dragHandleBar: {
+    width: 18, height: 3, borderRadius: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+  },
 
   // Controls
   controls: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 14, paddingVertical: 12, paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    gap: 16, paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.75)',
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
   },
   smallBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
   },
+  raiseActive: { backgroundColor: '#F59E0B' },
   micBtn: {
-    width: 66, height: 66, borderRadius: 33,
-    backgroundColor: 'rgba(139,92,246,0.25)',
+    width: 72, height: 72, borderRadius: 36,
     alignItems: 'center', justifyContent: 'center',
   },
-  micBtnActive: { backgroundColor: '#8B5CF6' },
+  micOuter: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: 'rgba(55,65,81,0.6)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   micInner: {
     width: 50, height: 50, borderRadius: 25,
-    backgroundColor: '#8B5CF6', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#4B5563', alignItems: 'center', justifyContent: 'center',
   },
-  controlLabel: { color: '#9CA3AF', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
+  controlLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
   leaveBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
   },
-  glowBar: { position: 'absolute', bottom: 72, left: 0, right: 0, height: 3 },
+  glowBar: { position: 'absolute', bottom: 80, left: 0, right: 0, height: 3 },
   glowGradient: { flex: 1 },
 });
