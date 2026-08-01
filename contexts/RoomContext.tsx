@@ -56,6 +56,7 @@ export interface LiveRoom {
   presentationState: 'idle' | 'presenting' | 'paused';
   presenterId: string | null;
   presenterName: string | null;
+  presenterTab?: string;
   openDiscussion: boolean;
   // Activity
   activityLog: ActivityEntry[];
@@ -98,6 +99,8 @@ interface RoomContextValue {
   // Presentation
   startPresenting: () => void;
   stopPresenting: () => void;
+  setPresenterTab: (tab: string) => void;
+  presenterTab: string | null;
   requestControl: () => void;
   giveControl: (userId: string) => void;
   takeBackControl: () => void;
@@ -250,6 +253,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       presentationState: 'idle',
       presenterId: null,
       presenterName: null,
+      presenterTab: undefined,
       openDiscussion: true,
       activityLog: [{
         id: seededId(), userId: user?.id || '', userName: user?.fullName || 'Anonymous',
@@ -473,6 +477,17 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   // ── Presentation ──
+  const setPresenterTab = useCallback((tab: string) => {
+    if (!user || !currentRoom) return;
+    setCurrentRoom(prev => prev ? { ...prev, presenterTab: tab } : prev);
+    // Broadcast to supabase realtime for followers
+    supabase.channel(`room:${currentRoom.id}`).send({
+      type: 'broadcast',
+      event: 'presenter_tab_change',
+      payload: { tab, presenterId: user.id },
+    }).then(() => {}, () => {});
+  }, [user, currentRoom]);
+
   const startPresenting = useCallback(() => {
     if (!user) return;
     setCurrentRoom(prev => {
@@ -678,13 +693,19 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     syncActivityToSupabase(latest);
   }, [currentRoom?.activityLog[0]?.id]);
 
+  // Derived: presenter's current tab (for context consumers + followers)
+  const presenterTab = currentRoom?.presenterTab ?? null;
+
   const value: RoomContextValue = {
     rooms, currentRoom, isLoading,
     fetchRooms, createRoom, joinRoom, leaveRoom, isInRoom,
     startSpeaking, stopSpeaking, toggleCamera,
+    toggleRaiseHand,
     muteParticipant, unmuteParticipant, muteAllExceptHosts, toggleOpenDiscussion,
     removeParticipant, changeRole,
-    startPresenting, stopPresenting, requestControl, giveControl,
+    startPresenting, stopPresenting,
+    setPresenterTab, presenterTab,
+    requestControl, giveControl,
     takeBackControl, approveControlRequest, lockPresentationToHost,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
     addActivity, setEditIndicator, clearEditIndicator,

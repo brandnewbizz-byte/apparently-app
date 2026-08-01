@@ -10,6 +10,7 @@ import {
   MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { supabase } from '@/lib/supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -213,8 +214,8 @@ function RoomContent() {
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraPermission, setCameraPermission] = useState(false);
   const [cameraPermDenied, setCameraPermDenied] = useState(false);
-  // unused: handRaised / setHandRaised replaced by RoomContext toggleRaiseHand
-  const [presenterTab, setPresenterTab] = useState<string>('Overview');
+  // handRaised/setHandRaised removed — using RoomContext toggleRaiseHand
+  // presenterTab/setPresenterTab from RoomContext — syncs via supabase realtime
   const [activeTab, setActiveTab] = useState('overview');
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -235,6 +236,7 @@ function RoomContent() {
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
     startPresenting, stopPresenting,
+    setPresenterTab, presenterTab,
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
     viewMode, setViewMode, currentRoom, addActivity,
@@ -286,6 +288,20 @@ function RoomContent() {
       };
     }
   }, [roomId]);
+
+  // 🗂 Follow presenter tab navigation 🗂
+  useEffect(() => {
+    if (!roomId || !isUserFollowing || isUserPresenting) return;
+    const channel = supabase.channel(`room:${roomId}`);
+    channel.on(
+      'broadcast',
+      { event: 'presenter_tab_change' },
+      (payload: any) => {
+        if (payload?.payload?.tab) setActiveTab(payload.payload.tab);
+      }
+    ).subscribe();
+    return () => { supabase.removeChannel(channel).then(() => {}, () => {}); };
+  }, [roomId, isUserFollowing, isUserPresenting]);
 
   // ── Mic glow pulse ──
   useEffect(() => {
@@ -509,6 +525,9 @@ function RoomContent() {
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setActiveTab(item.key);
+                  if (isPresenting && isUserPresenting) {
+                    setPresenterTab(item.key);
+                  }
                 }}
               >
                 <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
