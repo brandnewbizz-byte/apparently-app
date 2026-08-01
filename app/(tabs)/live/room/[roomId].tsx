@@ -18,8 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
 import { usePlan, PlanProvider } from '@/contexts/PlanContext';
-import { VirtualRoomProvider } from '@/contexts/VirtualRoomContext';
-import type { EnvironmentType } from '@/types/virtual-room';
+
 import { useLiveAudio } from '@/hooks/useLiveAudio';
 import { useRoomHistory } from '@/hooks/useRoomHistory';
 import { useRoomRoles, useRolePermissionsSafe } from '@/hooks/useRoomRoles';
@@ -62,20 +61,7 @@ const TAB_CONTENT: Record<string, React.FC> = {
 
 // ── Virtual Tab Wrapper ──
 function VirtualTab() {
-  const { roomId } = useLocalSearchParams<{ roomId: string }>();
-  const { user } = useAuth();
-  const { currentRoom } = useRoom();
-
-  return (
-    <VirtualRoomProvider
-      roomId={roomId || ''}
-      userId={user?.id || 'unknown'}
-      userName={user?.fullName || user?.username || 'Anonymous'}
-      initialEnvironment={(currentRoom?.environment || 'generic') as EnvironmentType}
-    >
-      <VirtualRoomScreen />
-    </VirtualRoomProvider>
-  );
+  return <VirtualRoomScreen />;
 }
 
 // ── Animated Speaking Ring ──
