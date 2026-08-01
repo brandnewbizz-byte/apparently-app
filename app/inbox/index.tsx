@@ -39,6 +39,18 @@ export default function InboxScreen() {
 
   const [activeTab, setActiveTab] = useState<'messages' | 'requests'>('messages');
   const [refreshing, setRefreshing] = useState(false);
+  // Direct Supabase conversation fetch — bridges the AsyncStorage/Supabase disconnection
+  const [supabaseConvs, setSupabaseConvs] = useState<any[]>([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchConvs = async () => {
+      const { data } = await supabase.from('conversations').select('*')
+        .or(`participant_one.eq.${user.id},participant_two.eq.${user.id}`)
+        .order('last_message_at', { ascending: false }).limit(30);
+      if (data) setSupabaseConvs(data);
+    };
+    fetchConvs();
+  }, [user?.id, messaging.conversations.length]);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -95,10 +107,19 @@ export default function InboxScreen() {
     return () => { sub.unsubscribe(); };
   }, [user?.id]);
 
+  const fetchSupabaseConvs = useCallback(async () => {
+    if (!user?.id) return;
+    const { data } = await supabase.from('conversations').select('*')
+      .or(`participant_one.eq.${user.id},participant_two.eq.${user.id}`)
+      .order('last_message_at', { ascending: false }).limit(30);
+    if (data) setSupabaseConvs(data);
+  }, [user?.id]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.all([
+        fetchSupabaseConvs(),
         (connections as any).refresh?.() || Promise.resolve(),
         (messaging as any).refresh?.() || Promise.resolve(),
       ]);
@@ -106,7 +127,7 @@ export default function InboxScreen() {
       // contexts may not expose refresh methods — fall through
     }
     setRefreshing(false);
-  }, [connections, messaging]);
+  }, [connections, messaging, fetchSupabaseConvs]);
 
   const formatTimeAgo = (timestamp: string) => {
     const now = new Date();
@@ -122,9 +143,31 @@ export default function InboxScreen() {
 
   // ─── Messages Tab ───
 
+  // Merge Supabase conversations with AsyncStorage ones (dedup by id)
+  const allConversations = React.useMemo(() => {
+    const seen = new Set(messaging.conversations.map(c => c.id));
+    const extras: any[] = [];
+    for (const cv of supabaseConvs) {
+      if (!seen.has(cv.id)) {
+        const otherId = cv.participant_one === user?.id ? cv.participant_two : cv.participant_one;
+        extras.push({
+          id: cv.id,
+          participantId: otherId,
+          participantName: otherId?.slice(0, 8) || 'User',
+          participantAvatar: '',
+          participantUsername: 'user',
+          messages: [{ content: 'Tap to view conversation' }],
+          lastMessageAt: cv.last_message_at || cv.created_at,
+          unreadCount: 0,
+        });
+      }
+    }
+    return [...messaging.conversations, ...extras];
+  }, [messaging.conversations, supabaseConvs, user?.id]);
+
   const renderMessages = () => {
     const hasNotifs = notifs.length > 0;
-    const hasConversations = messaging.conversations.length > 0;
+    const hasConversations = allConversations.length > 0;
 
     if (!hasNotifs && !hasConversations) {
       return (
@@ -175,7 +218,7 @@ export default function InboxScreen() {
             )}
           </TouchableOpacity>
         ))}
-        {messaging.conversations.map((conv) => {
+        {allConversations.map((conv) => {
       const lastMsg = conv.messages[conv.messages.length - 1];
       return (
         <TouchableOpacity
