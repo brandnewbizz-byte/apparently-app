@@ -147,7 +147,7 @@ function CameraBubble({ onClose, participant, isLocal, onPress, facing, onFlip, 
           <Image
             source={{
               uri: participant.avatar
-                || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=374151&color=fff&size=160`,
+                || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=E5E5E5&color=333&size=160`,
             }}
             style={styles.cameraImg}
           />
@@ -390,7 +390,7 @@ function RoomContent() {
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
+      <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
         <View style={styles.connecting}>
           <Animated.View style={styles.connectingRing}>
             <View style={styles.connectingDot} />
@@ -404,14 +404,14 @@ function RoomContent() {
   const ActiveTabContent = TAB_CONTENT[activeTab];
 
   return (
-    <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
+    <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
       <LinearGradient
-        colors={['rgba(139,92,246,0.08)', 'rgba(99,102,241,0.03)', '#0A0A0F']}
+        colors={['rgba(139,92,246,0.06)', 'rgba(99,102,241,0.02)', '#FFFFFF']}
         style={styles.ambient}
       />
 
       {/* ── Tab Bar (sticky at top) ── */}
-      <View style={[styles.tabBar, { borderBottomColor: '#1F2937', paddingTop: insets.top + 4 }]}>
+      <View style={[styles.tabBar, { borderBottomColor: '#EFEFEF', paddingTop: insets.top + 4 }]}>
         <FlatList
           horizontal
           data={TABS}
@@ -455,18 +455,18 @@ function RoomContent() {
             <View style={styles.headerMeta}>
               <View style={[
                 styles.headerBadge,
-                room?.status === 'draft' && { backgroundColor: '#F59E0B20' },
-                room?.status === 'ended' && { backgroundColor: '#6B728020' },
+                room?.status === 'draft' && { backgroundColor: 'rgba(245,158,11,0.12)' },
+                room?.status === 'ended' && { backgroundColor: 'rgba(107,114,128,0.12)' },
               ]}>
                 <View style={[
                   styles.liveDot,
-                  room?.status === 'draft' && { backgroundColor: '#FBBF24' },
-                  room?.status === 'ended' && { backgroundColor: '#9CA3AF' },
+                  room?.status === 'draft' && { backgroundColor: '#D97706' },
+                  room?.status === 'ended' && { backgroundColor: '#6B7280' },
                 ]} />
                 <Text style={[
                   styles.liveText,
-                  room?.status === 'draft' && { color: '#FBBF24' },
-                  room?.status === 'ended' && { color: '#D1D5DB' },
+                  room?.status === 'draft' && { color: '#D97706' },
+                  room?.status === 'ended' && { color: '#6B7280' },
                 ]}>
                   {room?.status === 'draft' ? 'SETUP' : room?.status === 'ended' ? 'ENDED' : 'LIVE'}
                 </Text>
@@ -475,7 +475,7 @@ function RoomContent() {
                 <Text style={styles.hostText}>Host: {room.creatorName}</Text>
               )}
               <View style={styles.pCountRow}>
-                <Users size={11} color="#9CA3AF" />
+                <Users size={11} color="#737373" />
                 <Text style={styles.pCountText}>{participants.length}</Text>
               </View>
               {speakingParticipants.length > 0 && (
@@ -488,7 +488,7 @@ function RoomContent() {
           <View style={styles.headerActions}>
             {room?.status === 'draft' && userIsHostOrAbove && (
               <TouchableOpacity
-                style={[styles.manageBtn, { backgroundColor: '#10B98120' }]}
+                style={[styles.manageBtn, { backgroundColor: 'rgba(16,185,129,0.12)' }]}
                 onPress={() => {
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   goLive(roomId || '');
@@ -528,10 +528,10 @@ function RoomContent() {
                 Share.share({ message: `Join my live room on Apparently: ${link}`, url: link }).catch(() => {});
               }}
             >
-              <Share2 size={16} color="#9CA3AF" />
+              <Share2 size={16} color="#737373" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerBtn}>
-              <Sparkles size={16} color="#9CA3AF" />
+              <Sparkles size={16} color="#737373" />
             </TouchableOpacity>
           </View>
         </View>
@@ -635,7 +635,7 @@ function RoomContent() {
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Eye size={14} color="#6B7280" />
-            <Text style={[styles.followBannerText, { color: '#9CA3AF' }]}>
+            <Text style={[styles.followBannerText, { color: '#737373' }]}>
               {room?.presenterName} is presenting — tap to follow
             </Text>
           </View>
@@ -669,7 +669,7 @@ function RoomContent() {
                   <View style={{ width: 36, height: 36 }}>
                     <Image
                       source={{
-                        uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=72`,
+                        uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=E5E5E5&color=333&size=72`,
                       }}
                       style={styles.personAvatar}
                     />
@@ -723,7 +723,7 @@ function RoomContent() {
             <CameraView style={styles.expandedCamera} facing={facing} mirror={facing === 'front'} />
           ) : (
             <Image
-              source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(expandedCamera.fullName)}&background=374151&color=fff&size=400` }}
+              source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(expandedCamera.fullName)}&background=E5E5E5&color=333&size=400` }}
               style={styles.expandedCamera}
             />
           )}
@@ -750,7 +750,7 @@ function RoomContent() {
               <Crown size={20} color="#F59E0B" />
               <Text style={styles.adminTitle}>Room Management</Text>
               <TouchableOpacity onPress={() => setShowAdminPanel(false)}>
-                <X size={20} color="#9CA3AF" />
+                <X size={20} color="#737373" />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.adminList}>
@@ -758,7 +758,7 @@ function RoomContent() {
                 <View key={p.userId} style={styles.adminRow}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                     <Image
-                      source={{ uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=48` }}
+                      source={{ uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=E5E5E5&color=333&size=48` }}
                       style={{ width: 32, height: 32, borderRadius: 16 }}
                     />
                     <View>
@@ -826,7 +826,7 @@ function RoomContent() {
             toggleRaiseHand(roomId || '');
           }}
         >
-          <Hand size={18} color={currentUserP?.handRaised ? '#FFF' : '#9CA3AF'} />
+          <Hand size={18} color={currentUserP?.handRaised ? '#FFF' : '#737373'} />
         </TouchableOpacity>
 
         {/* Hold to Talk */}
@@ -926,37 +926,37 @@ const styles = StyleSheet.create({
   connecting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   connectingRing: {
     width: 60, height: 60, borderRadius: 30,
-    borderWidth: 2, borderColor: 'rgba(139,92,246,0.3)',
+    borderWidth: 2, borderColor: 'rgba(139,92,246,0.25)',
     alignItems: 'center', justifyContent: 'center',
   },
   connectingDot: {
     width: 12, height: 12, borderRadius: 6,
     backgroundColor: '#8B5CF6',
   },
-  connectingText: { color: '#9CA3AF', fontSize: 15 },
+  connectingText: { color: '#737373', fontSize: 15 },
 
   // Header
   header: { paddingHorizontal: 14, paddingBottom: 6 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  roomName: { color: '#FFF', fontSize: 20, fontWeight: '700' },
+  roomName: { color: '#262626', fontSize: 20, fontWeight: '700' },
   headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' },
-  headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.12)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
   liveText: { color: '#10B981', fontSize: 10, fontWeight: '700' },
-  hostText: { color: '#9CA3AF', fontSize: 12, fontWeight: '500' },
+  hostText: { color: '#737373', fontSize: 12, fontWeight: '500' },
   pCountRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  pCountText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-  speakingCount: { color: '#A78BFA', fontSize: 11, fontWeight: '600' },
+  pCountText: { color: '#737373', fontSize: 12, fontWeight: '600' },
+  speakingCount: { color: '#8B5CF6', fontSize: 11, fontWeight: '600' },
   headerActions: { flexDirection: 'row', gap: 8 },
-  headerBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
   goalText: { color: '#8B5CF6', fontSize: 13, fontWeight: '500', marginTop: 6 },
 
   // Participant Bar
-  pBar: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
+  pBar: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#EFEFEF' },
   pBarContent: { paddingHorizontal: 10, gap: 2 },
   participantWrap: { alignItems: 'center', justifyContent: 'center' },
-  participantImg: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  participantNameText: { color: '#9CA3AF', fontSize: 9, fontWeight: '600', marginTop: 4, textAlign: 'center', maxWidth: 50 },
+  participantImg: { borderWidth: 1, borderColor: '#DBDBDB' },
+  participantNameText: { color: '#737373', fontSize: 9, fontWeight: '600', marginTop: 4, textAlign: 'center', maxWidth: 50 },
   cameraBadge: {
     position: 'absolute', bottom: -2, right: -2,
     width: 18, height: 18, borderRadius: 9,
@@ -964,10 +964,10 @@ const styles = StyleSheet.create({
   },
 
   // Tab Bar
-  tabBar: { borderBottomWidth: 1, paddingVertical: 8 },
+  tabBar: { borderBottomWidth: 1, borderBottomColor: '#EFEFEF', paddingVertical: 8 },
   tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
   tabActive: { backgroundColor: '#8B5CF6' },
-  tabLabel: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  tabLabel: { color: '#8E8E8E', fontSize: 13, fontWeight: '600' },
   tabLabelActive: { color: '#FFF' },
 
   // Content
@@ -975,12 +975,12 @@ const styles = StyleSheet.create({
 
   // Placeholder
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 8 },
-  placeholderTitle: { color: '#9CA3AF', fontSize: 16, fontWeight: '600' },
-  placeholderSub: { color: '#6B7280', fontSize: 14 },
+  placeholderTitle: { color: '#737373', fontSize: 16, fontWeight: '600' },
+  placeholderSub: { color: '#8E8E8E', fontSize: 14 },
   personRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 16 },
   personAvatar: { width: 36, height: 36, borderRadius: 18 },
-  personName: { color: '#D1D5DB', fontSize: 14, fontWeight: '500', flex: 1 },
-  speakingLabel: { fontSize: 14 },
+  personName: { color: '#262626', fontSize: 14, fontWeight: '500', flex: 1 },
+  speakingLabel: { fontSize: 14, color: '#262626' },
 
   // Camera Bubble
   cameraBubble: {
@@ -1004,23 +1004,23 @@ const styles = StyleSheet.create({
   },
   dragHandle: {
     marginTop: 6, width: 30, height: 4, borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'center',
   },
   dragHandleBar: {
     width: 18, height: 3, borderRadius: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
 
   // Controls
   controls: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 16, paddingVertical: 10, paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#FAFAFA',
+    borderTopWidth: 1, borderTopColor: '#EFEFEF',
   },
   smallBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
   },
   raiseActive: { backgroundColor: '#F59E0B' },
   micBtn: {
@@ -1029,15 +1029,15 @@ const styles = StyleSheet.create({
   },
   micOuter: {
     width: 64, height: 64, borderRadius: 32,
-    backgroundColor: 'rgba(55,65,81,0.6)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1, borderColor: '#DBDBDB',
     alignItems: 'center', justifyContent: 'center',
   },
   micInner: {
     width: 50, height: 50, borderRadius: 25,
-    backgroundColor: '#4B5563', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E5E5E5', alignItems: 'center', justifyContent: 'center',
   },
-  controlLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
+  controlLabel: { color: '#8E8E8E', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
   leaveBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
@@ -1048,14 +1048,14 @@ const styles = StyleSheet.create({
   // Presenter Bar
   presenterBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: 'rgba(16,185,129,0.08)', paddingHorizontal: 12,
+    backgroundColor: 'rgba(16,185,129,0.06)', paddingHorizontal: 12,
     paddingVertical: 8, borderBottomWidth: 1,
-    borderBottomColor: 'rgba(16,185,129,0.12)',
+    borderBottomColor: 'rgba(16,185,129,0.1)',
   },
   presenterBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   presenterText: { color: '#10B981', fontSize: 12, fontWeight: '600' },
   presenterAction: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(16,185,129,0.12)',
     paddingHorizontal: 14, paddingVertical: 5, borderRadius: 10,
   },
   presenterActionText: { color: '#10B981', fontSize: 11, fontWeight: '700' },
@@ -1069,21 +1069,22 @@ const styles = StyleSheet.create({
   // Follow Banner
   followBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: 'rgba(139,92,246,0.06)', paddingHorizontal: 12,
+    backgroundColor: 'rgba(139,92,246,0.04)', paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  followBannerText: { color: '#A78BFA', fontSize: 11, fontWeight: '600' },
+  followBannerText: { color: '#8B5CF6', fontSize: 11, fontWeight: '600' },
   followReturnBtn: {
-    backgroundColor: 'rgba(139,92,246,0.15)',
+    backgroundColor: 'rgba(139,92,246,0.1)',
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
   },
-  followReturnText: { color: '#A78BFA', fontSize: 10, fontWeight: '600' },
+  followReturnText: { color: '#8B5CF6', fontSize: 10, fontWeight: '600' },
 
   // Role Badge
   roleBadge: {
     position: 'absolute', top: -2, right: -2,
     width: 16, height: 16, borderRadius: 8,
-    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#DBDBDB',
   },
   roleBadgeText: { fontSize: 9 },
 
@@ -1091,18 +1092,18 @@ const styles = StyleSheet.create({
   flipBtn: {
     position: 'absolute', top: 6, right: 30,
     width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center',
   },
   flipBtnText: { fontSize: 14 },
 
   // ── Manage Button ──
   manageBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(245,158,11,0.15)', paddingHorizontal: 10,
+    backgroundColor: 'rgba(245,158,11,0.12)', paddingHorizontal: 10,
     paddingVertical: 7, borderRadius: 17, borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
+    borderColor: 'rgba(245,158,11,0.25)',
   },
-  manageBtnText: { color: '#F59E0B', fontSize: 11, fontWeight: '700' },
+  manageBtnText: { color: '#D97706', fontSize: 11, fontWeight: '700' },
 
   // ── Expanded Camera Overlay ──
   expandedCameraOverlay: {
@@ -1114,11 +1115,11 @@ const styles = StyleSheet.create({
   },
   expandedCameraBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 20, paddingVertical: 14,
+    backgroundColor: 'rgba(0,0,0,0.85)', paddingHorizontal: 20, paddingVertical: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
   expandedCameraName: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  expandedCameraHint: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  expandedCameraHint: { color: '#A8A8A8', fontSize: 12, marginTop: 2 },
   expandedClose: {
     position: 'absolute', top: 50, right: 16,
     width: 40, height: 40, borderRadius: 20,
@@ -1128,28 +1129,30 @@ const styles = StyleSheet.create({
   // ── Admin Panel ──
   adminOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 99,
+    backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99,
     justifyContent: 'flex-end',
   },
   adminPanel: {
-    backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
     maxHeight: SCREEN_H * 0.6, paddingBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1, shadowRadius: 16, elevation: 20,
   },
   adminHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    borderBottomColor: '#EFEFEF',
   },
-  adminTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', flex: 1 },
+  adminTitle: { color: '#262626', fontSize: 16, fontWeight: '700', flex: 1 },
   adminList: { paddingHorizontal: 20, paddingTop: 8 },
   adminRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1F2937',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EFEFEF',
   },
-  adminRowName: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  adminRowName: { color: '#262626', fontSize: 13, fontWeight: '600' },
   adminActionBtn: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
   },
-  adminActionDanger: { backgroundColor: 'rgba(239,68,68,0.15)' },
+  adminActionDanger: { backgroundColor: 'rgba(239,68,68,0.1)' },
 });
