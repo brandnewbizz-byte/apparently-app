@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 
@@ -35,7 +36,7 @@ export interface UserBundle {
   tags: string[];
   creatorId?: string;
   creator: { name: string; avatar: string; rating: number; reviews: number };
-  status: 'available' | 'grabbed' | 'fulfilled';
+  status: 'available' | 'grabbed' | 'fulfilled' | 'active' | 'draft' | 'published';
   grabCount: number;
   createdAt: string;
   availableCount: number;
@@ -67,69 +68,71 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const { user } = useAuth();
 
-  // Load bundles from Supabase on mount (live backend)
+  // Load bundles: backend API (bypasses RLS) → Supabase → AsyncStorage
   useEffect(() => {
     let cancelled = false;
+    const mapRow = (row: any): UserBundle => ({
+      id: row.id,
+      title: row.title || '',
+      description: row.description || '',
+      price: row.bundle_price ?? row.price ?? 0,
+      items: row.items || row.services || [],
+      imageUrl: row.image || row.cover_image || '',
+      category: row.category || '',
+      location: row.location || '',
+      dateRange: row.expires_at || '',
+      tags: row.tags || [],
+      creatorId: row.user_id || row.creator_id || '',
+      creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
+      status: row.status || 'available',
+      grabCount: row.grabs ?? row.grab_count ?? 0,
+      createdAt: row.created_at || new Date().toISOString(),
+      availableCount: row.available_count || 1,
+    });
+
     const loadBundles = async () => {
       try {
-        const { data, error } = await supabase
-          .from('bundles')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50);
+        let liveBundles: UserBundle[] = [];
+
+        // 1. Try backend API (service key bypasses RLS)
+        try {
+          const res = await fetch(`${getApiUrl()}/api/home-feed`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.bundles?.length) {
+              liveBundles = json.bundles.map(mapRow);
+            }
+          }
+        } catch { /* fall through to Supabase */ }
+
+        // 2. Fallback: direct Supabase (anon key, may be RLS-blocked)
+        if (liveBundles.length === 0) {
+          const { data, error } = await supabase
+            .from('bundles')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!error && data?.length) liveBundles = data.map(mapRow);
+        }
 
         if (cancelled) return;
 
-        if (error) {
-          logger.error('BundleContext', 'Failed to fetch bundles from Supabase', { error });
-          // Fall back to local cache if Supabase is down
-          const stored = await AsyncStorage.getItem(STORAGE_KEY);
-          if (stored) setBundles(JSON.parse(stored));
-          return;
-        }
-
-        const liveBundles: UserBundle[] = (data || []).map((row: any) => ({
-          id: row.id,
-          title: row.title || '',
-          description: row.description || '',
-          price: row.bundle_price ?? row.price ?? 0,
-          items: row.items || row.services || [],
-          imageUrl: row.image || row.cover_image || '',
-          category: row.category || '',
-          location: row.location || '',
-          dateRange: row.expires_at || '',
-          tags: row.tags || [],
-          creatorId: row.user_id || row.creator_id || '',
-          creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
-          status: row.status || 'available',
-          grabCount: row.grabs ?? row.grab_count ?? 0,
-          createdAt: row.created_at || new Date().toISOString(),
-          availableCount: row.available_count || 1,
-        }));
-
-        // If Supabase returns empty (table schema mismatch or no rows),
-        // fall back to AsyncStorage — don't wipe local data with empty array
+        // 3. Final fallback: AsyncStorage
         if (liveBundles.length === 0) {
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) {
             const cached = JSON.parse(stored);
             setBundles(cached);
-            // Show all cached bundles as user's own (AsyncStorage is already user-scoped)
             setMyBundles(cached);
           }
-          setIsLoaded(true);
-          return;
+        } else {
+          setBundles(liveBundles);
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          setMyBundles(liveBundles.filter((b) => b.creatorId === (authUser?.id || '')));
+          try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveBundles)); } catch {}
         }
-        setBundles(liveBundles);
-        // Only show user's own bundles on their profile
-        const { data: { user: authUser2 } } = await supabase.auth.getUser();
-        const myId2 = authUser2?.id || '';
-        setMyBundles(liveBundles.filter((b) => b.creatorId === myId2));
-        // Cache to AsyncStorage for offline fallback
-        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveBundles)); } catch {}
       } catch (e) {
         logger.error('BundleContext', 'Failed to load bundles', { e });
-        // Fall back to local cache
         try {
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) setBundles(JSON.parse(stored));

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, createContext, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 
@@ -82,54 +83,60 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load requests from Supabase on mount (live backend)
+  // Load requests: backend API (bypasses RLS) → Supabase → AsyncStorage
   useEffect(() => {
     let cancelled = false;
+    const mapRow = (row: any): ServiceRequest => ({
+      id: row.id,
+      title: row.title || '',
+      description: row.description || '',
+      category: row.category || 'other',
+      location: row.location || '',
+      date: row.date || '',
+      time: row.time || undefined,
+      budgetMin: row.budget_min || 0,
+      budgetMax: row.budget_max || 0,
+      status: row.status || 'open',
+      tags: row.tags || [],
+      createdAt: row.created_at || new Date().toISOString(),
+      creatorId: row.requester_id || row.creator_id || '',
+      createdBy: { name: 'Unknown', avatar: '' },
+      responders: 0,
+      image: row.image_url || undefined,
+    });
+
     const loadRequests = async () => {
       try {
-        const { data, error } = await supabase
-          .from('service_requests')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50);
+        let liveRequests: ServiceRequest[] = [];
+
+        // 1. Backend API (service key bypasses RLS)
+        try {
+          const res = await fetch(`${getApiUrl()}/api/home-feed`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.serviceRequests?.length) liveRequests = json.serviceRequests.map(mapRow);
+          }
+        } catch { /* fall through */ }
+
+        // 2. Fallback: direct Supabase
+        if (liveRequests.length === 0) {
+          const { data, error } = await supabase
+            .from('service_requests')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!error && data?.length) liveRequests = data.map(mapRow);
+        }
 
         if (cancelled) return;
 
-        if (error) {
-          logger.error('ServiceRequestContext', 'Failed to fetch from Supabase', { error });
-          const stored = await AsyncStorage.getItem(STORAGE_KEY);
-          if (stored) setRequests(JSON.parse(stored));
-          return;
-        }
-
-        const liveRequests: ServiceRequest[] = (data || []).map((row: any) => ({
-          id: row.id,
-          title: row.title || '',
-          description: row.description || '',
-          category: row.category || 'other',
-          location: row.location || '',
-          date: row.date || '',
-          time: row.time || undefined,
-          budgetMin: row.budget_min || 0,
-          budgetMax: row.budget_max || 0,
-          status: row.status || 'open',
-          tags: row.tags || [],
-          createdAt: row.created_at || new Date().toISOString(),
-          creatorId: row.requester_id || row.creator_id || '',
-          createdBy: { name: 'Unknown', avatar: '' },
-          responders: 0,
-          image: row.image_url || undefined,
-        }));
-
-        // If Supabase returns empty (schema mismatch), fall back to AsyncStorage
         if (liveRequests.length === 0) {
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) setRequests(JSON.parse(stored));
-          setIsLoaded(true);
-          return;
+        } else {
+          setRequests(liveRequests);
+          try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveRequests)); } catch {}
         }
-        setRequests(liveRequests);
-        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveRequests)); } catch {}
       } catch (e) {
         logger.error('ServiceRequestContext', 'Failed to load requests', { e });
         try {

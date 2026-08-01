@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -20,7 +21,7 @@ export interface UserSkill {
   tags: string[];
   creatorId?: string;
   creator: { name: string; avatar: string; rating: number; reviews: number };
-  status: 'available' | 'grabbed' | 'fulfilled';
+  status: 'available' | 'grabbed' | 'fulfilled' | 'active' | 'draft' | 'published';
   grabCount: number;
   createdAt: string;
   availableCount: number;
@@ -57,60 +58,62 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const mapRow = (row: any): UserSkill => ({
+      id: row.id,
+      title: row.service || '',
+      description: row.description || '',
+      icon: row.icon || '🛠️',
+      price: Number(row.price) || 0,
+      originalPrice: Number(row.price) || 0,
+      imageUrl: row.featured_image || '',
+      category: row.category || '',
+      tags: row.tags || [],
+      creatorId: row.user_id || '',
+      creator: { name: 'Unknown', avatar: '', rating: 0, reviews: 0 },
+      status: row.status || 'available',
+      grabCount: row.grabs || 0,
+      createdAt: row.created_at || new Date().toISOString(),
+      availableCount: 1,
+    });
+
     const loadSkills = async () => {
       try {
-        // Use skill_deals table (the actual DB table – not 'skills' which doesn't exist)
-        const { data, error } = await supabase
-          .from('skill_deals')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50);
+        let liveSkills: UserSkill[] = [];
+
+        // 1. Backend API (service key bypasses RLS)
+        try {
+          const res = await fetch(`${getApiUrl()}/api/home-feed`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.skillDeals?.length) liveSkills = json.skillDeals.map(mapRow);
+          }
+        } catch { /* fall through */ }
+
+        // 2. Fallback: direct Supabase
+        if (liveSkills.length === 0) {
+          const { data, error } = await supabase
+            .from('skill_deals')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!error && data?.length) liveSkills = data.map(mapRow);
+        }
 
         if (cancelled) return;
 
-        if (error) {
-          logger.error('SkillContext', 'Failed to fetch skill_deals from Supabase', { error });
-          const stored = await AsyncStorage.getItem(STORAGE_KEY);
-          if (stored) setSkills(JSON.parse(stored));
-          return;
-        }
-
-        const liveSkills: UserSkill[] = (data || []).map((row: any) => ({
-          id: row.id,
-          title: row.service || '',
-          description: row.description || '',
-          icon: row.icon || '🛠️',
-          price: Number(row.price) || 0,
-          originalPrice: Number(row.price) || 0,
-          imageUrl: row.featured_image || '',
-          category: row.category || '',
-          tags: row.tags || [],
-          creatorId: row.user_id || '',
-          creator: { name: 'Unknown', avatar: '', rating: 0, reviews: 0 },
-          status: row.status || 'available',
-          grabCount: row.grabs || 0,
-          createdAt: row.created_at || new Date().toISOString(),
-          availableCount: 1,
-        }));
-
-        // If Supabase returns empty (table schema mismatch), fall back to AsyncStorage
         if (liveSkills.length === 0) {
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) {
             const cached = JSON.parse(stored);
             setSkills(cached);
-            // Show all cached skills as user's own (AsyncStorage is already user-scoped)
             setMySkills(cached);
           }
-          setIsLoaded(true);
-          return;
+        } else {
+          setSkills(liveSkills);
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          setMySkills(liveSkills.filter((s) => s.creatorId === (authUser?.id || '')));
+          try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveSkills)); } catch {}
         }
-        setSkills(liveSkills);
-        // Only show user's own skills on their profile
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        const myId = authUser?.id || '';
-        setMySkills(liveSkills.filter((s) => s.creatorId === myId));
-        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(liveSkills)); } catch {}
       } catch (e) {
         logger.error('SkillContext', 'Failed to load skills', { e });
         try {

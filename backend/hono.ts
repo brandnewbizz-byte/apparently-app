@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { cors } from "hono/cors";
+import { createClient } from "@supabase/supabase-js";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import {
@@ -12,6 +13,12 @@ import {
 } from "./webrtc/signaling-server";
 
 const app = new Hono();
+
+// Supabase admin client (service role key — bypasses RLS for data reads)
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL || "https://inejlmksbzujgpwvnnch.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+);
 
 app.use("*", cors());
 
@@ -28,6 +35,30 @@ app.use(
 // REST health
 app.get("/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Home feed — reads via service key to bypass RLS
+app.get("/api/home-feed", async (c) => {
+  try {
+    const [bundlesRes, skillsRes, requestsRes] = await Promise.all([
+      supabaseAdmin.from("bundles").select("*").order("created_at", { ascending: false }).limit(50),
+      supabaseAdmin.from("skill_deals").select("*").order("created_at", { ascending: false }).limit(50),
+      supabaseAdmin.from("service_requests").select("*").order("created_at", { ascending: false }).limit(50),
+    ]);
+
+    return c.json({
+      bundles: bundlesRes.data || [],
+      skillDeals: skillsRes.data || [],
+      serviceRequests: requestsRes.data || [],
+      _errors: {
+        bundles: bundlesRes.error?.message || null,
+        skillDeals: skillsRes.error?.message || null,
+        serviceRequests: requestsRes.error?.message || null,
+      },
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message, bundles: [], skillDeals: [], serviceRequests: [] }, 500);
+  }
 });
 
 // WebRTC signaling + audio relay WebSocket
