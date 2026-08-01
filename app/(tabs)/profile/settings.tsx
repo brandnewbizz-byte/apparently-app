@@ -60,7 +60,7 @@ export default function SettingsScreen() {
           finalAvatar = urlData?.publicUrl || editingAvatar;
         }
       }
-      const profileUpdates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar_url: finalAvatar, updated_at: new Date().toISOString() };
+      const profileUpdates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar: finalAvatar, updated_at: new Date().toISOString() };
       const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates });
       if (saveErr) {
         Alert.alert('Error', saveErr.message);
