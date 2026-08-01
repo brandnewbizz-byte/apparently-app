@@ -1,8 +1,11 @@
 import React, {
   createContext, useContext, useState, useCallback, useEffect, useRef,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+
+const ROOMS_STORAGE_KEY = '@apparently_rooms_v1';
 
 // ── Types ──
 
@@ -161,15 +164,37 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const controlRequestsRef = useRef<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'browse' | 'presenting'>('browse');
 
-  // ── Init ──
+  // ── Init: load from AsyncStorage first, then try Supabase ──
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
-    async function check() {
+    async function init() {
+      setIsLoading(true);
+      // 1. Load from AsyncStorage (always works, no network needed)
+      try {
+        const stored = await AsyncStorage.getItem(ROOMS_STORAGE_KEY);
+        if (stored) {
+          const parsed: LiveRoom[] = JSON.parse(stored);
+          if (parsed.length > 0) {
+            setRooms(parsed);
+          }
+        }
+      } catch (e) {
+        console.warn('[RoomContext] AsyncStorage load failed:', e);
+      }
+
+      // 2. Check if Supabase table exists (for future migration)
       try {
         const { error } = await supabase.from('rooms').select('id').limit(1);
         isTableReady.current = !error;
-      } catch { isTableReady.current = false; }
+      } catch {
+        isTableReady.current = false;
+      }
+
+      initialLoadDone.current = true;
+      setIsLoading(false);
     }
-    check();
+    init();
   }, []);
 
   // ── Helpers ──
@@ -213,6 +238,12 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     return !p?.isMuted;
   }, [currentRoom]);
 
+  // ── Persist to AsyncStorage whenever rooms change ──
+  useEffect(() => {
+    if (!initialLoadDone.current) return; // Skip initial empty state
+    AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(rooms)).catch(() => {});
+  }, [rooms]);
+
   // ── Fetch ──
   const fetchRooms = useCallback(async () => {
     setIsLoading(true);
@@ -224,7 +255,9 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
           .order('created_at', { ascending: false })
           .limit(50);
         if (!error && data) {
-          setRooms(data as LiveRoom[]);
+          const mapped = data.map(mapFromDB);
+          setRooms(mapped);
+          AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(mapped)).catch(() => {});
           setIsLoading(false);
           return;
         }
