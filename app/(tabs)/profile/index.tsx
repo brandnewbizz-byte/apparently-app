@@ -49,7 +49,6 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -184,135 +183,6 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
   );
 }
 
-function EditProfileModal({
-  visible, onClose, colors,
-}: { visible: boolean; onClose: () => void; colors: any }) {
-  const { user, updateAvatar, refreshProfile } = useAuth();
-  const [name, setName] = useState(user?.fullName || '');
-  const [bio, setBio] = useState(user?.bio || '');
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
-  const [mediaPerm, requestMediaPerm] = ImagePicker.useMediaLibraryPermissions();
-  const [saving, setSaving] = useState(false);
-
-  const handlePickPhoto = async () => {
-    const { status } = mediaPerm || {};
-    if (status !== 'granted') {
-      const result = await requestMediaPerm();
-      if (!result.granted) {
-        Alert.alert('Permission Required', 'We need access to your photos to change your avatar.');
-        return;
-      }
-    }
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        setAvatarUrl(result.assets[0].uri);
-      }
-    } catch {
-      Alert.alert('Error', 'Could not open photo library.');
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (avatarUrl && avatarUrl !== user?.avatar) {
-        const result = await updateAvatar(avatarUrl);
-        if (!result.success) {
-          Alert.alert('Error', result.error || 'Failed to update avatar.');
-          setSaving(false);
-          return;
-        }
-      }
-      // Save name and bio to BOTH tables
-      if (user?.id) {
-        const profileUpdates: any = {};
-        const userUpdates: any = {};
-        if (name.trim() && name !== user?.fullName) {
-          profileUpdates.full_name = name.trim();
-          userUpdates.name = name.trim();
-        }
-        if (bio.trim() !== (user?.bio || '')) profileUpdates.bio = bio.trim();
-        if (Object.keys(profileUpdates).length > 0) {
-          const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates, updated_at: new Date().toISOString() });
-          if (saveErr) {
-            Alert.alert('Error', saveErr.message);
-            setSaving(false);
-            return;
-          }
-          // Sync to users table
-          if (Object.keys(userUpdates).length > 0) {
-            await supabase.from('users').upsert({ id: user.id, ...userUpdates }, { onConflict: 'id' });
-          }
-          await refreshProfile();
-        }
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onClose();
-    } catch (e: any) {
-      console.log('[EditProfile] Exception:', e);
-      Alert.alert('Error', e.message || 'Something went wrong while saving.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.editModal, { backgroundColor: colors.background }]}>
-        <View style={[styles.editHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
-          <Text style={[styles.editTitle, { color: colors.text }]}>Edit Profile</Text>
-          <TouchableOpacity
-            style={[styles.editSaveBtn, { backgroundColor: colors.accent }]}
-            onPress={handleSave}
-          >
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }}>
-          {/* Avatar */}
-          <View style={{ alignItems: 'center' }}>
-            <View style={styles.editAvatarWrap}>
-              <Image
-                source={{ uri: avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200' }}
-                style={styles.editAvatar}
-              />
-              <View style={[styles.editAvatarBadge, { backgroundColor: colors.accent }]}>
-                <Camera size={12} color="#FFF" />
-              </View>
-            </View>
-            <TouchableOpacity onPress={handlePickPhoto}>
-              <Text style={[styles.editAvatarHint, { color: colors.accent }]}>Change photo</Text>
-            </TouchableOpacity>
-          </View>
-          {/* Name */}
-          <View>
-            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Display Name</Text>
-            <TextInput
-              style={[styles.editInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              value={name} onChangeText={setName}
-            />
-          </View>
-          {/* Bio */}
-          <View>
-            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Bio</Text>
-            <TextInput
-              style={[styles.editInput, styles.editBio, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              value={bio} onChangeText={setBio} multiline textAlignVertical="top"
-            />
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -328,7 +198,6 @@ export default function ProfileScreen() {
   const [avgRating, setAvgRating] = useState(0);
   const [grabbedBundles, setGrabbedBundles] = useState<GrabbedBundle[]>([]);
   const [loadingBundles, setLoadingBundles] = useState(true);
-  const [showEditProfile, setShowEditProfile] = useState(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
@@ -665,7 +534,7 @@ export default function ProfileScreen() {
               <View style={styles.avatarSection}>
                 <View style={styles.avatarContainer}>
                   <Image source={{ uri: userAvatar }} style={styles.avatar} />
-                  <TouchableOpacity style={styles.editAvatarButton} onPress={() => setShowEditProfile(true)}>
+                  <TouchableOpacity style={styles.editAvatarButton} onPress={() => router.push('/profile/settings' as any)}>
                     <Edit3 size={14} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
@@ -893,11 +762,6 @@ export default function ProfileScreen() {
       />
 
       {/* Edit Profile Modal */}
-      <EditProfileModal
-        visible={showEditProfile}
-        onClose={() => setShowEditProfile(false)}
-        colors={colors}
-      />
 
       {/* Detail Modal — for bundles, skills, service requests */}
       <Modal visible={detailModalVisible} animationType="slide" transparent onRequestClose={() => setDetailModalVisible(false)}>
@@ -1633,17 +1497,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   // ── Edit Profile Modal ──
-  editModal: { flex: 1 },
-  editHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
-  editTitle: { fontSize: 17, fontWeight: '700' },
-  editSaveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
-  editAvatarWrap: { position: 'relative', marginBottom: 8 },
-  editAvatar: { width: 80, height: 80, borderRadius: 40 },
-  editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF' },
-  editAvatarHint: { fontSize: 13, fontWeight: '600' },
-  editLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  editInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  editBio: { minHeight: 80 },
+
   // ── Detail Modal ──
   detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   detailSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%', paddingBottom: 40 },
