@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
   MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck, Radio,
+  Repeat2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
@@ -171,7 +172,7 @@ function CameraBubble({ onClose, participant, isLocal, onPress, facing, onFlip, 
       {/* Flip camera button (local only) */}
       {isLocal && onFlip && (
         <TouchableOpacity style={styles.flipBtn} onPress={onFlip}>
-          <Text style={styles.flipBtnText}>🔄</Text>
+          <Repeat2 size={14} color="#FFF" strokeWidth={1.5} />
         </TouchableOpacity>
       )}
       {/* Close button */}
