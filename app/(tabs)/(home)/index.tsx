@@ -1356,7 +1356,7 @@ export default function HomeScreen() {
 
   // Compute bundle sets from context
   const bundleSets = useMemo(() => {
-    const availableBundles = contextBundles.filter((b) => b.status === 'available');
+    const availableBundles = contextBundles.filter((b) => b.status === 'available' || b.status === 'draft' || b.status === 'published');
     const forYou = availableBundles.map(userBundleToPlan);
     const hot = [...availableBundles].sort((a, b) => b.grabCount - a.grabCount).map(userBundleToPlan);
     return [
@@ -1534,7 +1534,7 @@ export default function HomeScreen() {
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])
-      .filter((s) => s?.status === 'available')
+      .filter((s) => s?.status === 'available' || s?.status === 'active' || s?.status === 'draft')
       .map((s) => ({
         id: s.id || '',
         title: s.title || '',
