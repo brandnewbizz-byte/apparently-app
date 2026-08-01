@@ -116,25 +116,33 @@ export default function ConversationScreen() {
         });
       }
 
-      // Fetch messages between current user and participant
+      // Fetch messages — messages table uses conversation_id (NOT recipient_id)
       if (user?.id) {
-        const { data: msgData } = await supabase
-          .from('messages')
-          .select('*')
-          .or(
-            `and(sender_id.eq.${user.id},recipient_id.eq.${notificationId}),and(sender_id.eq.${notificationId},recipient_id.eq.${user.id})`,
-          )
-          .order('created_at', { ascending: true })
-          .limit(100);
-        if (msgData) {
-          setMessages(
-            (msgData || []).map((m: any) => ({
-              id: m.id,
-              text: m.text || '',
-              userId: m.sender_id === user.id ? 'me' : notificationId,
-              timestamp: formatTimeAgo(m.created_at),
-            })),
-          );
+        // Find conversation between these two users
+        const [a, b] = [user.id, notificationId].sort();
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('participant_one', a as string)
+          .eq('participant_two', b as string)
+          .maybeSingle();
+        if (conv?.id) {
+          const { data: msgData } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', conv.id)
+            .order('created_at', { ascending: true })
+            .limit(100);
+          if (msgData) {
+            setMessages(
+              (msgData || []).map((m: any) => ({
+                id: m.id,
+                text: m.content || '',
+                userId: m.sender_id === user.id ? 'me' : notificationId,
+                timestamp: formatTimeAgo(m.created_at),
+              })),
+            );
+          }
         }
       }
       setIsLoadingMessages(false);
@@ -172,11 +180,31 @@ export default function ConversationScreen() {
     }, 100);
 
     try {
+      // Find or create conversation, then send with conversation_id + content (real column names)
+      const [a, b] = [user.id, notificationId].sort();
+      let { data: conv } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('participant_one', a as string)
+        .eq('participant_two', b as string)
+        .maybeSingle();
+      if (!conv?.id) {
+        const { data: created } = await supabase
+          .from('conversations')
+          .insert({ participant_one: a, participant_two: b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .select('id')
+          .single();
+        if (created) conv = created;
+      }
+      if (!conv?.id) throw new Error('No conversation');
+
       const { data, error } = await supabase.from('messages').insert({
+        conversation_id: conv.id,
         sender_id: user.id,
-        recipient_id: notificationId,
-        text,
+        content: text,
         mentions: mentions.length ? mentions : null,
+        created_at: new Date().toISOString(),
+        read: false,
       }).select('id, created_at').single();
 
       if (error) throw error;
@@ -240,9 +268,21 @@ export default function ConversationScreen() {
         const prev = messages;
         setMessages(p => [...p, { id: tempId, text: '', userId: 'me', timestamp: 'Just now', audioUrl, audioDuration: dur }]);
         setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+        // Find/create conversation, then send voice as content (correct column names)
+        const [va, vb] = [user.id, notificationId].sort();
+        const { data: vConvData } = await supabase.from('conversations').select('id').eq('participant_one', va).eq('participant_two', vb).maybeSingle();
+        let vConvId = vConvData?.id;
+        if (!vConvId) {
+          const { data: vCreated } = await supabase.from('conversations').insert({ participant_one: va, participant_two: vb, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select('id').single();
+          vConvId = vCreated?.id;
+        }
+        if (!vConvId) throw new Error('No conversation for voice');
         const { data, error } = await supabase.from('messages').insert({
-          sender_id: user.id, recipient_id: notificationId,
-          text: JSON.stringify({ type: 'voice', audio_url: audioUrl, duration: dur }),
+          conversation_id: vConvId,
+          sender_id: user.id,
+          content: JSON.stringify({ type: 'voice', audio_url: audioUrl, duration: dur }),
+          created_at: new Date().toISOString(),
+          read: false,
         }).select('id, created_at').single();
         if (!error && data) {
           setMessages(p => p.map(m => m.id === tempId ? { ...m, id: data.id, timestamp: formatTimeAgo(data.created_at) } : m));

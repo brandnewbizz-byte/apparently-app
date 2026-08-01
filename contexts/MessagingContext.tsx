@@ -16,6 +16,7 @@ export interface SharedPost {
 export interface Message {
   id: string;
   text: string;
+  content?: string;
   senderId: string;
   receiverId: string;
   timestamp: string;

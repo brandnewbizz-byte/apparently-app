@@ -201,7 +201,7 @@ export default function InboxScreen() {
               </Text>
             </View>
             <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-              {lastMsg?.text || 'No messages'}
+              {lastMsg?.content || lastMsg?.text || 'No messages'}
             </Text>
           </View>
           {conv.unreadCount > 0 && (

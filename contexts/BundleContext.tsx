@@ -216,7 +216,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
       const grabMessage = `👋 I grabbed your bundle "${bundle.title}" — let's chat!`;
-      // 1. Notification
+      // 1. Notification (notifications table — notifications use recipient_id column)
       supabase.from('notifications').insert({
         recipient_id: bundle.creatorId,
         sender_id: user.id,
@@ -232,15 +232,46 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       }).then(({ error }) => {
         if (error) logger.warn('BundleContext', 'Notification insert failed', { error });
       });
-      // 2. Auto-create the first DM message so the conversation is ready
-      supabase.from('messages').insert({
-        sender_id: user.id,
-        recipient_id: bundle.creatorId,
-        text: grabMessage,
-        created_at: new Date().toISOString(),
-      }).then(({ error }) => {
-        if (error) logger.warn('BundleContext', 'Grab DM message insert failed', { error });
-      });
+      // 2. Find or create a conversation between these two users
+      //    messages table uses conversation_id + content (NOT recipient_id + text)
+      (async () => {
+        const [a, b] = [user.id, bundle.creatorId].sort();
+        // Look for existing conversation
+        const { data: existing } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('participant_one', a)
+          .eq('participant_two', b)
+          .maybeSingle();
+        let conversationId = existing?.id;
+        if (!conversationId) {
+          // Create new conversation
+          const { data: created, error: createErr } = await supabase
+            .from('conversations')
+            .insert({
+              participant_one: a,
+              participant_two: b,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+          if (createErr) {
+            logger.warn('BundleContext', 'Conversation create failed', { error: createErr });
+            return;
+          }
+          conversationId = created.id;
+        }
+        // 3. Insert the grab message into the conversation (correct columns: conversation_id + content)
+        const { error: msgErr } = await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          content: grabMessage,
+          created_at: new Date().toISOString(),
+          read: false,
+        });
+        if (msgErr) logger.warn('BundleContext', 'Grab DM message insert failed', { error: msgErr });
+      })();
     }
   }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, bundles]);
 
