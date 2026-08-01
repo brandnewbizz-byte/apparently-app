@@ -670,31 +670,35 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const STORAGE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB
 
   const uploadFile = useCallback(async (uri: string, name: string, mimeType: string, fileType: string): Promise<boolean> => {
-    if (!plan?.roomId) return false;
-    const currentUsed = plan?.storageUsedBytes || 0;
+    const roomId = plan?.roomId;
+    if (!roomId) return false;
 
+    // 1. Get file size
+    let fileSize = 1_000_000; // default 1MB if unknown
     try {
-      // Get file size from headers (non-blocking, estimate from URI)
       const resp = await fetch(uri, { method: 'HEAD' });
       const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
-      const fileSize = contentLength > 0 ? contentLength : 1_000_000; // default 1MB if unknown
+      if (contentLength > 0) fileSize = contentLength;
+    } catch {}
 
-      if (currentUsed + fileSize > STORAGE_LIMIT) {
-        Alert.alert('Storage Full', `Upload would exceed the 5 GB limit. (${(currentUsed / 1e9).toFixed(1)} GB used)`);
-        return false;
-      }
+    // 2. Check storage limit (use latest state via state snapshot)
+    const currentUsed = plan?.storageUsedBytes || 0;
+    if (currentUsed + fileSize > STORAGE_LIMIT) {
+      Alert.alert('Storage Full', `Upload would exceed the 5 GB limit. (${(currentUsed / 1e9).toFixed(1)} GB used)`);
+      return false;
+    }
 
-      // Fetch file as blob, convert to base64
+    // 3. Fetch file as blob, convert to base64
+    try {
       const fileResp = await fetch(uri);
       const blob = await fileResp.blob();
       const base64 = await blobToBase64(blob);
 
-      // Generate storage path
       const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const fileId = nextId();
-      const storagePath = `${plan.roomId}/${fileId}-${safeName}`;
+      const storagePath = `${roomId}/${fileId}-${safeName}`;
 
-      // Upload to Supabase Storage
+      // 4. Upload to Supabase Storage (non-negotiable — no local fallback)
       const { error: uploadErr } = await supabase.storage
         .from('room-files')
         .upload(storagePath, decodeBase64(base64), {
@@ -702,19 +706,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           cacheControl: '3600',
         });
 
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) {
+        console.log('[uploadFile] Supabase storage upload failed:', uploadErr.message);
+        Alert.alert('Upload Failed', `Could not upload "${name}" to cloud storage. Check your connection and try again.`);
+        return false;
+      }
 
-      // Get public URL
+      // 5. Get public URL
       const { data: urlData } = supabase.storage.from('room-files').getPublicUrl(storagePath);
       const publicUrl = urlData?.publicUrl || '';
 
-      // Add file ref to plan
+      if (!publicUrl) {
+        Alert.alert('Upload Failed', 'Could not retrieve file URL from cloud storage. Please try again.');
+        return false;
+      }
+
+      // 6. Build file reference
       const newFile: FileRef = {
         id: fileId, name, type: fileType, url: publicUrl, sizeBytes: fileSize,
         uploadedBy: user?.id || '', uploadedAt: new Date().toISOString(),
         attachedTo: { type: 'section', id: '' },
       };
 
+      // 7. Update plan state AND immediately sync to Supabase (no debounce)
       setPlan(prev => {
         if (!prev) return prev;
         const updated = {
@@ -723,31 +737,45 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           storageUsedBytes: (prev.storageUsedBytes || 0) + fileSize,
           updatedAt: new Date().toISOString(),
         };
-        savePlan(updated);
+        // Immediately upsert to plans table — file references must survive app restarts/updates
+        supabase.from('plans').upsert({
+          id: updated.id, room_id: updated.roomId, title: updated.title, goal: updated.goal,
+          description: updated.description, project_type: updated.projectType,
+          start_date: updated.startDate, target_date: updated.targetDate,
+          stage: updated.stage, progress: updated.progress, owner_id: updated.ownerId,
+          data: JSON.stringify(updated), updated_at: updated.updatedAt,
+        }).then(({ error }) => {
+          if (error) console.log('[uploadFile] plan upsert error:', error.message);
+        });
+        // Also log a version snapshot
+        supabase.from('plan_sync').insert({
+          id: `v_${updated.id}_file_${fileId}`,
+          room_id: updated.roomId, plan_id: updated.id,
+          section: 'full', field: 'data',
+          value: JSON.stringify(updated),
+          version: Date.now(),
+          edited_by: user?.id || '',
+          edited_by_name: user?.fullName || '',
+          created_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.log('[uploadFile] plan_sync insert error:', error.message);
+        });
         return updated;
       });
 
-      // Update quota in Supabase
-      try { await supabase.from('room_storage_quota').upsert({ room_id: plan.roomId, bytes_used: currentUsed + fileSize, updated_at: new Date().toISOString() }, { onConflict: 'room_id' }); } catch {}
+      // 8. Update storage quota
+      try {
+        await supabase.from('room_storage_quota').upsert({
+          room_id: roomId, bytes_used: currentUsed + fileSize,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'room_id' });
+      } catch {}
+
       return true;
     } catch (e: any) {
-      console.log('Upload to Supabase failed:', e?.message);
-      // Fallback: store locally via fetch cache
-      try {
-        const fileId = nextId();
-        const localFile: FileRef = {
-          id: fileId, name, type: fileType, url: uri, sizeBytes: 0,
-          uploadedBy: user?.id || '', uploadedAt: new Date().toISOString(),
-          attachedTo: { type: 'section', id: '' },
-        };
-        setPlan(prev => {
-          if (!prev) return prev;
-          const updated = { ...prev, files: [...prev.files, localFile], updatedAt: new Date().toISOString() };
-          savePlan(updated);
-          return updated;
-        });
-        return true;
-      } catch { return false; }
+      console.log('[uploadFile] Upload failed:', e?.message);
+      Alert.alert('Upload Failed', 'Could not upload the file. Please check your connection and try again.');
+      return false;
     }
   }, [plan?.roomId, plan?.storageUsedBytes, user]);
 
