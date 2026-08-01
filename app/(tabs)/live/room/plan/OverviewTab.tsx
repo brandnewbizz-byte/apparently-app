@@ -11,6 +11,7 @@ import {
   ListTodo, Paperclip, ArrowRight, ChevronRight,
 } from 'lucide-react-native';
 import { usePlan, PlanStage } from '@/contexts/PlanContext';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_GAP = 10;
@@ -40,6 +41,34 @@ function statusColor(status: string): string {
 
 export default function OverviewTab() {
   const { plan, updatePlan } = usePlan();
+  const theme = useTheme();
+  const isLight = theme.colors.background === '#FFFFFF';
+
+  const colors = {
+    bg: theme.colors.background,
+    surface: theme.colors.surface || theme.colors.backgroundSecondary,
+    surfaceAlt: theme.colors.backgroundTertiary,
+    text: theme.colors.text,
+    textSecondary: theme.colors.textSecondary,
+    textTertiary: theme.colors.textTertiary,
+    border: theme.colors.border,
+    inputBg: theme.colors.backgroundTertiary,
+    accent: theme.colors.accent,
+    // Live-specific shades (not in theme, so compute from mode)
+    bannerGradient: (isLight ? ['#F8F9FA', '#F0F0F0'] : ['#1F2937', '#111827']) as readonly [string, string, ...string[]],
+    bannerBorder: isLight ? '#E5E5E5' : '#1F2937',
+    bannerTitle: isLight ? '#1A1A1A' : '#FFF',
+    stageCircleInactive: isLight ? '#E5E5E5' : '#1F2937',
+    stageCircleBorder: isLight ? '#D1D5DB' : '#374151',
+    stageLabelActive: isLight ? '#1A1A1A' : '#FFF',
+    stageBridgeInactive: isLight ? '#E5E5E5' : '#1F2937',
+    stageBridgeDone: isLight ? '#D1D5DB' : '#1F2937',
+    progressBg: isLight ? '#E5E5E5' : '#1F2937',
+    statDotTodo: isLight ? '#9CA3AF' : '#6B7280',
+    textMuted: isLight ? '#8E8E8E' : '#6B7280',
+    tabTextInactive: isLight ? '#9CA3AF' : '#4B5563',
+  };
+
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(plan?.title || '');
   const [goal, setGoal] = useState(plan?.goal || '');
@@ -77,9 +106,9 @@ export default function OverviewTab() {
   if (!plan) {
     return (
       <View style={styles.emptyContainer}>
-        <BarChart3 size={48} color="#374151" />
-        <Text style={styles.emptyText}>No plan dashboard available</Text>
-        <Text style={styles.emptySub}>Create a plan from the room to get started</Text>
+        <BarChart3 size={48} color={colors.textTertiary} />
+        <Text style={[styles.emptyText, { color: colors.textTertiary }]}>No plan dashboard available</Text>
+        <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Create a plan from the room to get started</Text>
       </View>
     );
   }
@@ -107,8 +136,8 @@ export default function OverviewTab() {
 
       {/* ── Stage Banner ── */}
       <LinearGradient
-        colors={['#1F2937', '#111827']}
-        style={styles.stageBanner}
+        colors={colors.bannerGradient}
+        style={[styles.stageBanner, { borderColor: colors.bannerBorder }]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
       >
         <View style={styles.stageRow}>
@@ -121,18 +150,18 @@ export default function OverviewTab() {
             <Text style={[styles.healthText, { color: h.color }]}>{h.label}</Text>
           </View>
         </View>
-        <Text style={styles.bannerTitle}>{plan.title || 'Untitled Plan'}</Text>
+        <Text style={[styles.bannerTitle, { color: colors.bannerTitle }]}>{plan.title || 'Untitled Plan'}</Text>
         {plan.goal ? (
           <View style={styles.goalRow}>
             <Target size={13} color="#8B5CF6" />
-            <Text style={styles.goalText} numberOfLines={2}>{plan.goal}</Text>
+            <Text style={[styles.goalText, { color: isLight ? '#6B7280' : '#A78BFA' }]} numberOfLines={2}>{plan.goal}</Text>
           </View>
         ) : null}
       </LinearGradient>
 
       {/* ── Stage Tracker ── */}
-      <View style={styles.trackerCard}>
-        <Text style={styles.cardLabel}>STAGE PROGRESS</Text>
+      <View style={[styles.trackerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.cardLabel, { color: colors.textMuted }]}>STAGE PROGRESS</Text>
         <View style={styles.stageTracker}>
           {STAGES.map((s, i) => {
             const done = i < (m.stageIdx ?? 0);
@@ -144,7 +173,7 @@ export default function OverviewTab() {
                     styles.stageCircle,
                     done && { backgroundColor: s.color, borderColor: s.color },
                     active && { backgroundColor: s.color + '20', borderColor: s.color, borderWidth: 2 },
-                    !done && !active && { backgroundColor: '#1F2937', borderColor: '#374151' },
+                    !done && !active && { backgroundColor: colors.stageCircleInactive, borderColor: colors.stageCircleBorder },
                   ]}>
                     {done ? (
                       <CheckCircle2 size={16} color="#FFF" />
@@ -155,14 +184,14 @@ export default function OverviewTab() {
                   <Text style={[
                     styles.stageLabel,
                     done && { color: s.color },
-                    active && { color: '#FFF', fontWeight: '700' },
-                    !done && !active && { color: '#4B5563' },
+                    active && { color: colors.stageLabelActive, fontWeight: '700' },
+                    !done && !active && { color: colors.tabTextInactive },
                   ]}>
                     {s.label}
                   </Text>
                 </View>
                 {i < 3 && (
-                  <View style={[styles.stageBridge, { backgroundColor: done ? s.color : '#1F2937' }]} />
+                  <View style={[styles.stageBridge, { backgroundColor: done ? s.color : colors.stageBridgeInactive }]} />
                 )}
               </React.Fragment>
             );
@@ -172,110 +201,110 @@ export default function OverviewTab() {
 
       {/* ── KPI Grid ── */}
       <View style={styles.kpiGrid}>
-        <View style={styles.kpiCard}>
+        <View style={[styles.kpiCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
             <ListTodo size={17} color="#3B82F6" />
           </View>
-          <Text style={styles.kpiValue}>
+          <Text style={[styles.kpiValue, { color: colors.text }]}>
             <Text style={{ color: '#3B82F6' }}>{m.completed}</Text>
-            <Text style={{ color: '#4B5563', fontSize: 16 }}>/{m.total}</Text>
+            <Text style={{ color: colors.textTertiary, fontSize: 16 }}>/{m.total}</Text>
           </Text>
-          <Text style={styles.kpiLabel}>Tasks Done</Text>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Tasks Done</Text>
         </View>
-        <View style={styles.kpiCard}>
+        <View style={[styles.kpiCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
             <DollarSign size={17} color="#8B5CF6" />
           </View>
-          <Text style={styles.kpiValue}>
+          <Text style={[styles.kpiValue, { color: colors.text }]}>
             <Text style={{ color: m.budgetVariance > 0 ? '#EF4444' : '#8B5CF6' }}>
               ${m.totalSpent.toLocaleString()}
             </Text>
           </Text>
-          <Text style={styles.kpiLabel}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
             of ${m.totalBudget.toLocaleString() || '0'}
           </Text>
         </View>
-        <View style={styles.kpiCard}>
+        <View style={[styles.kpiCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
             <Calendar size={17} color="#10B981" />
           </View>
-          <Text style={styles.kpiValue}>
+          <Text style={[styles.kpiValue, { color: colors.text }]}>
             <Text style={{ color: m.daysRemaining !== null && m.daysRemaining < 0 ? '#EF4444' : '#10B981' }}>
               {m.daysRemaining !== null ? Math.abs(m.daysRemaining) : '—'}
             </Text>
           </Text>
-          <Text style={styles.kpiLabel}>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
             {m.daysRemaining !== null ? (m.daysRemaining >= 0 ? 'Days Left' : 'Days Overdue') : 'No deadline'}
           </Text>
         </View>
-        <View style={styles.kpiCard}>
+        <View style={[styles.kpiCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
             <AlertTriangle size={17} color="#F59E0B" />
           </View>
-          <Text style={styles.kpiValue}>
-            <Text style={{ color: m.overdue > 0 ? '#EF4444' : '#4B5563' }}>{m.overdue}</Text>
+          <Text style={[styles.kpiValue, { color: colors.text }]}>
+            <Text style={{ color: m.overdue > 0 ? '#EF4444' : colors.textTertiary }}>{m.overdue}</Text>
           </Text>
-          <Text style={styles.kpiLabel}>Overdue</Text>
+          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Overdue</Text>
         </View>
       </View>
 
       {/* ── Progress Bar ── */}
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Task Completion</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Task Completion</Text>
           <Text style={[styles.cardPct, { color: '#8B5CF6' }]}>{plan.progress}%</Text>
         </View>
-        <View style={styles.progressBar}>
+        <View style={[styles.progressBar, { backgroundColor: colors.progressBg }]}>
           <LinearGradient
             colors={['#8B5CF6', '#6366F1']}
             style={[styles.progressFill, { width: `${plan.progress}%` }]}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           />
         </View>
-        <View style={styles.progressStats}>
+        <View style={[styles.progressStats, { borderTopColor: colors.border }]}>
           <View style={styles.progressStat}>
             <View style={[styles.statDot, { backgroundColor: '#10B981' }]} />
-            <Text style={styles.progressStatText}>{m.completed} Done</Text>
+            <Text style={[styles.progressStatText, { color: colors.textSecondary }]}>{m.completed} Done</Text>
           </View>
           <View style={styles.progressStat}>
             <View style={[styles.statDot, { backgroundColor: '#3B82F6' }]} />
-            <Text style={styles.progressStatText}>{m.inProgress} Active</Text>
+            <Text style={[styles.progressStatText, { color: colors.textSecondary }]}>{m.inProgress} Active</Text>
           </View>
           <View style={styles.progressStat}>
-            <View style={[styles.statDot, { backgroundColor: '#6B7280' }]} />
-            <Text style={styles.progressStatText}>{m.total - m.completed - m.inProgress} Todo</Text>
+            <View style={[styles.statDot, { backgroundColor: colors.statDotTodo }]} />
+            <Text style={[styles.progressStatText, { color: colors.textSecondary }]}>{m.total - m.completed - m.inProgress} Todo</Text>
           </View>
         </View>
       </View>
 
       {/* ── Quick Stats Row ── */}
       <View style={styles.quickStats}>
-        <View style={styles.quickStatCard}>
-          <Users size={15} color="#9CA3AF" />
-          <Text style={styles.quickStatVal}>{plan.members.length || 1}</Text>
-          <Text style={styles.quickStatLabel}>Members</Text>
+        <View style={[styles.quickStatCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Users size={15} color={colors.textTertiary} />
+          <Text style={[styles.quickStatVal, { color: colors.text }]}>{plan.members.length || 1}</Text>
+          <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Members</Text>
         </View>
-        <View style={styles.quickStatCard}>
-          <Flag size={15} color="#9CA3AF" />
-          <Text style={styles.quickStatVal}>{m.milestones.length}</Text>
-          <Text style={styles.quickStatLabel}>Milestones</Text>
+        <View style={[styles.quickStatCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Flag size={15} color={colors.textTertiary} />
+          <Text style={[styles.quickStatVal, { color: colors.text }]}>{m.milestones.length}</Text>
+          <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Milestones</Text>
         </View>
-        <View style={styles.quickStatCard}>
-          <Paperclip size={15} color="#9CA3AF" />
-          <Text style={styles.quickStatVal}>{m.files}</Text>
-          <Text style={styles.quickStatLabel}>Files</Text>
+        <View style={[styles.quickStatCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Paperclip size={15} color={colors.textTertiary} />
+          <Text style={[styles.quickStatVal, { color: colors.text }]}>{m.files}</Text>
+          <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Files</Text>
         </View>
-        <View style={styles.quickStatCard}>
-          <Target size={15} color="#9CA3AF" />
-          <Text style={styles.quickStatVal}>{m.ideas}</Text>
-          <Text style={styles.quickStatLabel}>Ideas</Text>
+        <View style={[styles.quickStatCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Target size={15} color={colors.textTertiary} />
+          <Text style={[styles.quickStatVal, { color: colors.text }]}>{m.ideas}</Text>
+          <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Ideas</Text>
         </View>
       </View>
 
       {/* ── Plan Details ── */}
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Plan Details</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Plan Details</Text>
           <TouchableOpacity
             style={styles.editButton}
             onPress={() => {
@@ -295,51 +324,51 @@ export default function OverviewTab() {
         {editing ? (
           <View style={styles.editForm}>
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>TITLE</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>TITLE</Text>
               <TextInput
-                style={styles.fieldInput}
+                style={[styles.fieldInput, { backgroundColor: isLight ? '#F5F5F5' : '#1F2937', color: colors.text, borderColor: colors.border }]}
                 value={title} onChangeText={setTitle}
-                placeholderTextColor="#6B7280" placeholder="Project title"
+                placeholderTextColor={colors.textTertiary} placeholder="Project title"
               />
             </View>
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>GOAL</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>GOAL</Text>
               <TextInput
-                style={styles.fieldInput}
+                style={[styles.fieldInput, { backgroundColor: isLight ? '#F5F5F5' : '#1F2937', color: colors.text, borderColor: colors.border }]}
                 value={goal} onChangeText={setGoal}
-                placeholderTextColor="#6B7280" placeholder="What are we building?"
+                placeholderTextColor={colors.textTertiary} placeholder="What are we building?"
               />
             </View>
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>DESCRIPTION</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>DESCRIPTION</Text>
               <TextInput
-                style={[styles.fieldInput, styles.fieldTextarea]}
+                style={[styles.fieldInput, styles.fieldTextarea, { backgroundColor: isLight ? '#F5F5F5' : '#1F2937', color: colors.text, borderColor: colors.border }]}
                 value={desc} onChangeText={setDesc}
-                placeholderTextColor="#6B7280" placeholder="Describe the project scope and objectives..."
+                placeholderTextColor={colors.textTertiary} placeholder="Describe the project scope and objectives..."
                 multiline numberOfLines={3} textAlignVertical="top"
               />
             </View>
             <View style={styles.fieldRow}>
               <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.fieldLabel}>TYPE</Text>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>TYPE</Text>
                 <TextInput
-                  style={styles.fieldInput}
+                  style={[styles.fieldInput, { backgroundColor: isLight ? '#F5F5F5' : '#1F2937', color: colors.text, borderColor: colors.border }]}
                   value={projectType} onChangeText={setProjectType}
-                  placeholderTextColor="#6B7280" placeholder="Product Launch"
+                  placeholderTextColor={colors.textTertiary} placeholder="Product Launch"
                 />
               </View>
               <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.fieldLabel}>TARGET DATE</Text>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>TARGET DATE</Text>
                 <TextInput
-                  style={styles.fieldInput}
+                  style={[styles.fieldInput, { backgroundColor: isLight ? '#F5F5F5' : '#1F2937', color: colors.text, borderColor: colors.border }]}
                   value={targetDate} onChangeText={setTargetDate}
-                  placeholderTextColor="#6B7280" placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textTertiary} placeholder="YYYY-MM-DD"
                 />
               </View>
             </View>
             <View style={styles.editActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
+                <Text style={[styles.cancelText, { color: isLight ? '#737373' : '#9CA3AF' }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
                 <Text style={styles.saveBtnText}>Save Changes</Text>
@@ -351,13 +380,13 @@ export default function OverviewTab() {
             {plan.goal ? (
               <View style={styles.detailItem}>
                 <Text style={styles.detailKey}>Goal</Text>
-                <Text style={styles.detailVal}>{plan.goal}</Text>
+                <Text style={[styles.detailVal, { color: colors.text }]}>{plan.goal}</Text>
               </View>
             ) : null}
             {plan.description ? (
               <View style={styles.detailItem}>
                 <Text style={styles.detailKey}>Description</Text>
-                <Text style={styles.detailVal}>{plan.description}</Text>
+                <Text style={[styles.detailVal, { color: colors.text }]}>{plan.description}</Text>
               </View>
             ) : null}
             <View style={styles.detailRow}>
@@ -387,7 +416,7 @@ export default function OverviewTab() {
             ) : (
               <TrendingDown size={18} color="#10B981" />
             )}
-            <Text style={[styles.alertText, { color: m.budgetVariance > 0 ? '#FCA5A5' : '#6EE7B7' }]}>
+            <Text style={[styles.alertText, { color: m.budgetVariance > 0 ? (isLight ? '#DC2626' : '#FCA5A5') : (isLight ? '#059669' : '#6EE7B7') }]}>
               Budget is {m.budgetVariance > 0 ? 'over' : 'under'} by {Math.abs(m.budgetVariance)}%
               {m.budgetVariance > 0 ? ' — review expenses' : ' — great job!'}
             </Text>
@@ -397,19 +426,19 @@ export default function OverviewTab() {
 
       {/* ── Upcoming Milestones ── */}
       {m.milestones.length > 0 && (
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Upcoming Milestones</Text>
-            <ChevronRight size={16} color="#6B7280" />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Upcoming Milestones</Text>
+            <ChevronRight size={16} color={colors.textTertiary} />
           </View>
           {m.milestones.filter(t => !t.completed).slice(0, 3).map(item => (
-            <View key={item.id} style={styles.milestoneRow}>
+            <View key={item.id} style={[styles.milestoneRow, { borderTopColor: colors.border }]}>
               <Flag size={14} color="#F59E0B" />
               <View style={{ flex: 1 }}>
-                <Text style={styles.milestoneTitle}>{item.title}</Text>
-                {item.date && <Text style={styles.milestoneDate}>{item.date}</Text>}
+                <Text style={[styles.milestoneTitle, { color: colors.text }]}>{item.title}</Text>
+                {item.date && <Text style={[styles.milestoneDate, { color: colors.textSecondary }]}>{item.date}</Text>}
               </View>
-              <ArrowRight size={14} color="#4B5563" />
+              <ArrowRight size={14} color={colors.textTertiary} />
             </View>
           ))}
         </View>
@@ -424,13 +453,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 14, gap: CARD_GAP },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 10 },
-  emptyText: { color: '#9CA3AF', fontSize: 16, fontWeight: '600' },
-  emptySub: { color: '#6B7280', fontSize: 13 },
+  emptyText: { fontSize: 16, fontWeight: '600' },
+  emptySub: { fontSize: 13 },
 
   // Stage Banner
   stageBanner: {
     borderRadius: 16, padding: 18, gap: 10,
-    borderWidth: 1, borderColor: '#1F2937',
+    borderWidth: 1,
   },
   stageRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   stageBadge: {
@@ -445,16 +474,15 @@ const styles = StyleSheet.create({
   },
   healthDot: { width: 7, height: 7, borderRadius: 4 },
   healthText: { fontSize: 12, fontWeight: '700' },
-  bannerTitle: { color: '#FFF', fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  bannerTitle: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
   goalRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-  goalText: { color: '#A78BFA', fontSize: 13, fontWeight: '500', flex: 1, lineHeight: 18 },
+  goalText: { fontSize: 13, fontWeight: '500', flex: 1, lineHeight: 18 },
 
   // Stage Tracker
   trackerCard: {
-    backgroundColor: '#111827', borderRadius: 14, borderWidth: 1,
-    borderColor: '#1F2937', padding: 16,
+    borderRadius: 14, borderWidth: 1, padding: 16,
   },
-  cardLabel: { color: '#6B7280', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 14 },
+  cardLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 14 },
   stageTracker: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   stageItem: { alignItems: 'center', gap: 6 },
   stageCircle: {
@@ -468,58 +496,58 @@ const styles = StyleSheet.create({
   // KPI Grid
   kpiGrid: { flexDirection: 'row', gap: CARD_GAP },
   kpiCard: {
-    flex: 1, backgroundColor: '#111827', borderRadius: 14,
-    borderWidth: 1, borderColor: '#1F2937', padding: 12, gap: 6,
+    flex: 1, borderRadius: 14,
+    borderWidth: 1, padding: 12, gap: 6,
   },
   kpiIconBox: {
     width: 32, height: 32, borderRadius: 10,
     alignItems: 'center', justifyContent: 'center',
   },
   kpiValue: { fontSize: 18, fontWeight: '800' },
-  kpiLabel: { color: '#6B7280', fontSize: 10, fontWeight: '600' },
+  kpiLabel: { fontSize: 10, fontWeight: '600' },
 
   // Card
   card: {
-    backgroundColor: '#111827', borderRadius: 14,
-    borderWidth: 1, borderColor: '#1F2937', padding: 16,
+    borderRadius: 14,
+    borderWidth: 1, padding: 16,
   },
   cardHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 12,
   },
-  cardTitle: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  cardTitle: { fontSize: 15, fontWeight: '700' },
   cardPct: { fontSize: 18, fontWeight: '800' },
 
   // Progress
   progressBar: {
-    height: 10, borderRadius: 5, backgroundColor: '#1F2937',
+    height: 10, borderRadius: 5,
     overflow: 'hidden',
   },
   progressFill: { height: 10, borderRadius: 5 },
   progressStats: {
     flexDirection: 'row', gap: 16, marginTop: 12,
-    paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1F2937',
+    paddingTop: 12, borderTopWidth: 1,
   },
   progressStat: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statDot: { width: 8, height: 8, borderRadius: 4 },
-  progressStatText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  progressStatText: { fontSize: 12, fontWeight: '600' },
 
   // Quick Stats
   quickStats: { flexDirection: 'row', gap: CARD_GAP },
   quickStatCard: {
-    flex: 1, backgroundColor: '#111827', borderRadius: 14,
-    borderWidth: 1, borderColor: '#1F2937', padding: 12,
+    flex: 1, borderRadius: 14,
+    borderWidth: 1, padding: 12,
     alignItems: 'center', gap: 4,
   },
-  quickStatVal: { color: '#D1D5DB', fontSize: 16, fontWeight: '700' },
-  quickStatLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600' },
+  quickStatVal: { fontSize: 16, fontWeight: '700' },
+  quickStatLabel: { fontSize: 9, fontWeight: '600' },
 
   // Details
   detailGrid: { gap: 12 },
   detailItem: { gap: 4 },
   detailRow: { flexDirection: 'row', gap: 16 },
   detailKey: { color: '#6B7280', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
-  detailVal: { color: '#D1D5DB', fontSize: 14, fontWeight: '500', lineHeight: 20 },
+  detailVal: { fontSize: 14, fontWeight: '500', lineHeight: 20 },
 
   // Edit
   editButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -527,16 +555,16 @@ const styles = StyleSheet.create({
   editForm: { gap: 10 },
   field: { gap: 4 },
   fieldRow: { flexDirection: 'row', gap: 10 },
-  fieldLabel: { color: '#6B7280', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
+  fieldLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
   fieldInput: {
-    backgroundColor: '#1F2937', color: '#FFF', fontSize: 14,
+    fontSize: 14,
     paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1, borderColor: '#374151',
+    borderWidth: 1,
   },
   fieldTextarea: { minHeight: 80 },
   editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10 },
-  cancelText: { color: '#9CA3AF', fontSize: 14, fontWeight: '600' },
+  cancelText: { fontSize: 14, fontWeight: '600' },
   saveBtn: {
     backgroundColor: '#8B5CF6', paddingVertical: 10,
     paddingHorizontal: 20, borderRadius: 10,
@@ -553,8 +581,8 @@ const styles = StyleSheet.create({
   // Milestones
   milestoneRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#1F2937',
+    paddingVertical: 10, borderTopWidth: 1,
   },
-  milestoneTitle: { color: '#D1D5DB', fontSize: 13, fontWeight: '600' },
-  milestoneDate: { color: '#6B7280', fontSize: 11, fontWeight: '500', marginTop: 2 },
+  milestoneTitle: { fontSize: 13, fontWeight: '600' },
+  milestoneDate: { fontSize: 11, fontWeight: '500', marginTop: 2 },
 });
