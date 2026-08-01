@@ -15,6 +15,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRoom, LiveRoom } from '@/contexts/RoomContext';
+import { ENVIRONMENT_OPTIONS } from '@/types/virtual-room';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -30,6 +31,7 @@ export default function LiveScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [roomName, setRoomName] = useState('');
   const [roomTopic, setRoomTopic] = useState('');
+  const [roomEnvironment, setRoomEnvironment] = useState('generic');
   const [isCreating, setIsCreating] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -53,9 +55,10 @@ export default function LiveScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsCreating(true);
     try {
-      const room = await createRoom(roomName.trim(), roomTopic.trim());
+      const room = await createRoom(roomName.trim(), roomTopic.trim(), { environment: roomEnvironment });
       setRoomName('');
       setRoomTopic('');
+      setRoomEnvironment('generic');
       setShowCreateModal(false);
       if (room) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -354,9 +357,29 @@ export default function LiveScreen() {
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-                  Suggestions
-                </Text>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Virtual Room</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {ENVIRONMENT_OPTIONS.map((env) => {
+                    const active = roomEnvironment === env.key;
+                    return (
+                      <TouchableOpacity
+                        key={env.key}
+                        style={[
+                          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, marginBottom: 4 },
+                          { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border },
+                        ]}
+                        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setRoomEnvironment(env.key); }}
+                      >
+                        <Text style={{ fontSize: 16 }}>{env.emoji} </Text>
+                        <Text style={[{ fontSize: 13, fontWeight: active ? '600' : '400' }, { color: active ? '#FFF' : colors.textSecondary }]}>{env.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Suggestions</Text>
                 <View style={styles.topicRow}>
                   {SUGGESTED_TOPICS.map((topic) => {
                     const active = roomTopic === topic;

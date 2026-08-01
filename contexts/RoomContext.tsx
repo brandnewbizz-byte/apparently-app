@@ -63,6 +63,7 @@ export interface LiveRoom {
   presenterName: string | null;
   presenterTab?: string;
   openDiscussion: boolean;
+  environment?: string;
   // Activity
   activityLog: ActivityEntry[];
   editIndicators: EditIndicator[];
@@ -80,6 +81,7 @@ interface RoomContextValue {
     category?: string;
     visibility?: 'public' | 'private' | 'invite_only';
     maxParticipants?: number;
+    environment?: string;
   }) => Promise<LiveRoom | null>;
   joinRoom: (roomId: string) => void;
   leaveRoom: (roomId: string) => void;
@@ -246,7 +248,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
 
   // ── Create room ──
   const createRoom = useCallback(async (name: string, topic: string, opts?: {
-    goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number;
+    goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number; environment?: string;
   }) => {
     const roomId = `room_${seededId()}`;
     const inviteLink = `apparently://live/room/${roomId}`;
@@ -267,6 +269,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       presenterName: null,
       presenterTab: undefined,
       openDiscussion: true,
+      environment: opts?.environment || 'generic',
       activityLog: [{
         id: seededId(), userId: user?.id || '', userName: user?.fullName || 'Anonymous',
         action: 'room_created', detail: `Room "${name}" created — setup mode`, timestamp: new Date().toISOString(),

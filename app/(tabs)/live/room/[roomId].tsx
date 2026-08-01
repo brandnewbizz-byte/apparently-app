@@ -18,6 +18,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
 import { usePlan, PlanProvider } from '@/contexts/PlanContext';
+import { VirtualRoomProvider } from '@/contexts/VirtualRoomContext';
+import type { EnvironmentType } from '@/types/virtual-room';
 import { useLiveAudio } from '@/hooks/useLiveAudio';
 import { useRoomHistory } from '@/hooks/useRoomHistory';
 import { useRoomRoles, useRolePermissionsSafe } from '@/hooks/useRoomRoles';
@@ -31,6 +33,7 @@ import TasksTab from './plan/TasksTab';
 import BudgetTab from './plan/BudgetTab';
 import TimelineTab from './plan/TimelineTab';
 import FilesTab from './plan/FilesTab';
+import VirtualRoomScreen from './virtual';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -43,6 +46,7 @@ const TABS = [
   { key: 'files', label: 'Files' },
   { key: 'history', label: 'History' },
   { key: 'chat', label: 'Chat' },
+  { key: 'virtual', label: 'Virtual' },
   { key: 'people', label: 'People' },
 ];
 
@@ -53,7 +57,26 @@ const TAB_CONTENT: Record<string, React.FC> = {
   budget: BudgetTab,
   timeline: TimelineTab,
   files: FilesTab,
+  virtual: VirtualTab,
 };
+
+// ── Virtual Tab Wrapper ──
+function VirtualTab() {
+  const { roomId } = useLocalSearchParams<{ roomId: string }>();
+  const { user } = useAuth();
+  const { currentRoom } = useRoom();
+
+  return (
+    <VirtualRoomProvider
+      roomId={roomId || ''}
+      userId={user?.id || 'unknown'}
+      userName={user?.fullName || user?.username || 'Anonymous'}
+      initialEnvironment={(currentRoom?.environment || 'generic') as EnvironmentType}
+    >
+      <VirtualRoomScreen />
+    </VirtualRoomProvider>
+  );
+}
 
 // ── Animated Speaking Ring ──
 function SpeakingRing({ size = 52, color = '#A78BFA', pulseSpeed = 600 }: {
