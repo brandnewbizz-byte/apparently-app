@@ -91,10 +91,13 @@ function SpeakingRing({ size = 52, color = '#A78BFA', pulseSpeed = 600 }: {
 }
 
 // ── Draggable Camera Bubble (real CameraView for local, avatar for remote) ──
-function CameraBubble({ onClose, participant, isLocal }: {
+function CameraBubble({ onClose, participant, isLocal, onPress, facing, onFlip, }: {
   onClose: () => void;
-  participant: { fullName: string; avatar: string | null };
+  participant: { fullName: string; avatar: string | null; userId?: string };
   isLocal?: boolean;
+  onPress?: () => void;
+  facing?: 'front' | 'back';
+  onFlip?: () => void;
 }) {
   const pan = useRef(new Animated.ValueXY({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 })).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -127,13 +130,18 @@ function CameraBubble({ onClose, participant, isLocal }: {
       ]}
       {...panResponder.panHandlers}
     >
-      {/* Real camera for local user, avatar for remote */}
-      <View style={styles.cameraPreview}>
+      {/* Tap to expand (remote cameras) */}
+      <TouchableOpacity
+        style={styles.cameraPreview}
+        onPress={onPress}
+        activeOpacity={onPress ? 0.7 : 1}
+        disabled={!onPress}
+      >
         {isLocal ? (
           <CameraView
             style={styles.cameraImg}
-            facing="front"
-            mirror
+            facing={facing || 'front'}
+            mirror={facing === 'front' || !facing}
           />
         ) : (
           <Image
@@ -150,7 +158,13 @@ function CameraBubble({ onClose, participant, isLocal }: {
         >
           <Text style={styles.cameraName} numberOfLines={1}>{participant.fullName}</Text>
         </LinearGradient>
-      </View>
+      </TouchableOpacity>
+      {/* Flip camera button (local only) */}
+      {isLocal && onFlip && (
+        <TouchableOpacity style={styles.flipBtn} onPress={onFlip}>
+          <Text style={styles.flipBtnText}>🔄</Text>
+        </TouchableOpacity>
+      )}
       {/* Close button */}
       <TouchableOpacity style={styles.cameraClose} onPress={onClose}>
         <X size={14} color="#FFF" />
@@ -214,6 +228,9 @@ function RoomContent() {
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraPermission, setCameraPermission] = useState(false);
   const [cameraPermDenied, setCameraPermDenied] = useState(false);
+  const [facing, setFacing] = useState<'front' | 'back'>('front');
+  const [expandedCamera, setExpandedCamera] = useState<{ userId: string; fullName: string; isLocal: boolean } | null>(null);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   // handRaised/setHandRaised removed — using RoomContext toggleRaiseHand
   // presenterTab/setPresenterTab from RoomContext — syncs via supabase realtime
   const [activeTab, setActiveTab] = useState('overview');
@@ -236,6 +253,7 @@ function RoomContent() {
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
     startPresenting, stopPresenting,
+    muteParticipant, unmuteParticipant, removeParticipant, changeRole,
     setPresenterTab, presenterTab,
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
@@ -416,6 +434,15 @@ function RoomContent() {
             </View>
           </View>
           <View style={styles.headerActions}>
+            {userIsHostOrAbove && (
+              <TouchableOpacity
+                style={styles.manageBtn}
+                onPress={() => setShowAdminPanel(true)}
+              >
+                <Crown size={14} color="#F59E0B" />
+                <Text style={styles.manageBtnText}>Manage</Text>
+              </TouchableOpacity>
+            )}
             {!isPresenting && userIsHostOrAbove && (
               <TouchableOpacity
                 style={styles.presentBtn}
@@ -626,6 +653,7 @@ function RoomContent() {
               key={`cam-${p.userId}`}
               participant={p}
               onClose={() => {}}
+              onPress={() => setExpandedCamera({ userId: p.userId, fullName: p.fullName, isLocal: false })}
             />
           );
         }
@@ -636,13 +664,116 @@ function RoomContent() {
           participant={currentUserP}
           onClose={handleCamera}
           isLocal
+          facing={facing}
+          onFlip={() => setFacing(prev => prev === 'front' ? 'back' : 'front')}
+          onPress={() => setExpandedCamera({ userId: user?.id || '', fullName: currentUserP.fullName, isLocal: true })}
         />
+      )}
+
+      {/* ── Expanded Camera Overlay ── */}
+      {expandedCamera && (
+        <View style={styles.expandedCameraOverlay}>
+          {expandedCamera.isLocal ? (
+            <CameraView style={styles.expandedCamera} facing={facing} mirror={facing === 'front'} />
+          ) : (
+            <Image
+              source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(expandedCamera.fullName)}&background=374151&color=fff&size=400` }}
+              style={styles.expandedCamera}
+            />
+          )}
+          <View style={styles.expandedCameraBar}>
+            <Text style={styles.expandedCameraName}>{expandedCamera.fullName}</Text>
+            <Text style={styles.expandedCameraHint}>
+              {expandedCamera.isLocal ? 'Your camera' : 'Viewing camera'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.expandedClose}
+            onPress={() => setExpandedCamera(null)}
+          >
+            <X size={20} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Admin Panel ── */}
+      {showAdminPanel && (
+        <View style={styles.adminOverlay}>
+          <View style={styles.adminPanel}>
+            <View style={styles.adminHeader}>
+              <Crown size={20} color="#F59E0B" />
+              <Text style={styles.adminTitle}>Room Management</Text>
+              <TouchableOpacity onPress={() => setShowAdminPanel(false)}>
+                <X size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.adminList}>
+              {participants.map(p => (
+                <View key={p.userId} style={styles.adminRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Image
+                      source={{ uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=48` }}
+                      style={{ width: 32, height: 32, borderRadius: 16 }}
+                    />
+                    <View>
+                      <Text style={styles.adminRowName}>{p.fullName}</Text>
+                      <RoleBadge role={p.role} isCreator={currentRoom?.creatorId === p.userId} size="sm" />
+                    </View>
+                  </View>
+                  {p.userId !== user?.id && (
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <TouchableOpacity
+                        style={styles.adminActionBtn}
+                        onPress={() => {
+                          if (p.isMuted) unmuteParticipant(roomId || '', p.userId);
+                          else muteParticipant(roomId || '', p.userId);
+                        }}
+                      >
+                        {p.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.adminActionBtn, styles.adminActionDanger]}
+                        onPress={() => removeParticipant(roomId || '', p.userId)}
+                      >
+                        <X size={14} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
       )}
 
       {/* ── Camera Permission Alert ── */}
       <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
-        {/* Raise Hand */}
-        <TouchableOpacity
+        {/* Stop Presenting — replaces controls when user is presenting */}
+        {isUserPresenting ? (
+          <TouchableOpacity
+            style={[styles.micBtn, { maxWidth: SCREEN_W - 60 }]}
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              stopPresenting();
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[
+              styles.micOuter,
+              { backgroundColor: 'rgba(239,68,68,0.3)', borderColor: 'rgba(239,68,68,0.6)' },
+            ]}>
+              <View style={[styles.micInner, { backgroundColor: '#EF4444' }]}>
+                <Monitor size={24} color="#FFF" />
+              </View>
+            </View>
+            <Text style={[styles.controlLabel, { color: '#EF4444' }]}>
+              Stop Presenting
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            {/* Raise Hand */}
+            <TouchableOpacity
           style={[styles.smallBtn, currentUserP?.handRaised && styles.raiseActive]}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -716,6 +847,8 @@ function RoomContent() {
         <TouchableOpacity style={styles.leaveBtn} onPress={handleLeave}>
           <PhoneOff size={18} color="#FFF" />
         </TouchableOpacity>
+          </>
+        )}
       </View>
 
       {/* Speaking glow at bottom */}
@@ -907,4 +1040,70 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
   },
   roleBadgeText: { fontSize: 9 },
+
+  // ── Camera Flip ──
+  flipBtn: {
+    position: 'absolute', top: 6, right: 30,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+  },
+  flipBtnText: { fontSize: 14 },
+
+  // ── Manage Button ──
+  manageBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(245,158,11,0.15)', paddingHorizontal: 10,
+    paddingVertical: 7, borderRadius: 17, borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+  },
+  manageBtnText: { color: '#F59E0B', fontSize: 11, fontWeight: '700' },
+
+  // ── Expanded Camera Overlay ──
+  expandedCameraOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000', zIndex: 100, justifyContent: 'center', alignItems: 'center',
+  },
+  expandedCamera: {
+    width: SCREEN_W, height: SCREEN_H * 0.75, position: 'absolute', top: 0,
+  },
+  expandedCameraBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  expandedCameraName: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  expandedCameraHint: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  expandedClose: {
+    position: 'absolute', top: 50, right: 16,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
+  },
+
+  // ── Admin Panel ──
+  adminOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 99,
+    justifyContent: 'flex-end',
+  },
+  adminPanel: {
+    backgroundColor: '#111827', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: SCREEN_H * 0.6, paddingBottom: 20,
+  },
+  adminHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  adminTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', flex: 1 },
+  adminList: { paddingHorizontal: 20, paddingTop: 8 },
+  adminRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#1F2937',
+  },
+  adminRowName: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  adminActionBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+  },
+  adminActionDanger: { backgroundColor: 'rgba(239,68,68,0.15)' },
 });
