@@ -16,11 +16,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
-import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
+import { useRoom, RoomParticipant, type ActivityEntry } from '@/contexts/RoomContext';
 import { usePlan, PlanProvider } from '@/contexts/PlanContext';
 
 import { useLiveAudio } from '@/hooks/useLiveAudio';
-import { useRoomHistory } from '@/hooks/useRoomHistory';
+import { useRoomHistory, type HistoryEntry, type HistoryAction } from '@/hooks/useRoomHistory';
 import { useRoomRoles, useRolePermissionsSafe } from '@/hooks/useRoomRoles';
 import { EditIndicator } from '@/components/live/EditIndicator';
 import { RoleBadge } from '@/components/live/RoleBadge';
@@ -284,6 +284,25 @@ function RoomContent() {
   const micScale = useRef(new Animated.Value(1)).current;
 
   const room = rooms.find((r) => r.id === roomId);
+
+  // Merge local activityLog + Supabase room_history (deduped by id)
+  const mergedHistoryEntries = useMemo(() => {
+    const localEntries: HistoryEntry[] = (room?.activityLog || []).map((a: ActivityEntry) => ({
+      id: a.id,
+      roomId: room?.id || '',
+      userId: a.userId,
+      userName: a.userName,
+      action: a.action as HistoryAction,
+      detail: a.detail,
+      timestamp: a.timestamp,
+    }));
+    // Dedupe: prefer Supabase entries (they may have richer data)
+    const serverIds = new Set(history.entries.map(e => e.id));
+    const uniqueLocal = localEntries.filter(e => !serverIds.has(e.id));
+    return [...history.entries, ...uniqueLocal].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [room?.activityLog, history.entries, room?.id]);
   const participants = room?.participants || [];
   const speakingParticipants = participants.filter(p => p.isSpeaking);
   const cameraParticipants = participants.filter(p => p.hasCamera);
@@ -664,7 +683,7 @@ function RoomContent() {
           </View>
         ) : activeTab === 'history' ? (
           <HistoryFeed
-            entries={history.entries}
+            entries={mergedHistoryEntries}
             isLoading={history.isLoading}
             onRefresh={history.refresh}
           />
