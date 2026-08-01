@@ -409,6 +409,43 @@ function RoomContent() {
         style={styles.ambient}
       />
 
+      {/* ── Tab Bar (sticky at top) ── */}
+      <View style={[styles.tabBar, { borderBottomColor: '#1F2937', paddingTop: insets.top + 4 }]}>
+        <FlatList
+          horizontal
+          data={TABS}
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={t => t.key}
+          contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}
+          renderItem={({ item }) => {
+            const isActive = activeTab === item.key;
+            return (
+              <TouchableOpacity
+                style={[styles.tab, isActive && styles.tabActive]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setActiveTab(item.key);
+                  if (isPresenting && isUserPresenting) {
+                    setPresenterTab(item.key);
+                  }
+                }}
+              >
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+
+      {/* ── Scrollable Content (header, participants, plan content) ── */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        nestedScrollEnabled={true}
+        showsVerticalScrollIndicator={false}
+      >
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerRow}>
@@ -536,36 +573,6 @@ function RoomContent() {
         canPresent={isHost() || isCoHostOrAbove()}
       />
 
-      {/* ── Tab Bar ── */}
-      <View style={[styles.tabBar, { borderBottomColor: '#1F2937' }]}>
-        <FlatList
-          horizontal
-          data={TABS}
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={t => t.key}
-          contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}
-          renderItem={({ item }) => {
-            const isActive = activeTab === item.key;
-            return (
-              <TouchableOpacity
-                style={[styles.tab, isActive && styles.tabActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveTab(item.key);
-                  if (isPresenting && isUserPresenting) {
-                    setPresenterTab(item.key);
-                  }
-                }}
-              >
-                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-
       {/* ── Follow Mode Banner ── */}
       {isPresenting && isUserFollowing && !isUserPresenting && (
         <View style={styles.followBanner}>
@@ -644,6 +651,7 @@ function RoomContent() {
           </View>
         ) : null}
       </View>
+      </ScrollView>
 
       {/* ── Draggable Camera Bubbles ── */}
       {cameraParticipants.map(p => {
@@ -925,7 +933,7 @@ const styles = StyleSheet.create({
   tabLabelActive: { color: '#FFF' },
 
   // Content
-  content: { flex: 1 },
+  content: { minHeight: SCREEN_H * 0.85 },
 
   // Placeholder
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 8 },
