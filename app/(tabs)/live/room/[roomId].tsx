@@ -213,7 +213,8 @@ function RoomContent() {
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraPermission, setCameraPermission] = useState(false);
   const [cameraPermDenied, setCameraPermDenied] = useState(false);
-  const [handRaised, setHandRaised] = useState(false);
+  // unused: handRaised / setHandRaised replaced by RoomContext toggleRaiseHand
+  const [presenterTab, setPresenterTab] = useState<string>('Overview');
   const [activeTab, setActiveTab] = useState('overview');
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -232,6 +233,7 @@ function RoomContent() {
   const {
     rooms, joinRoom, leaveRoom,
     startSpeaking, stopSpeaking, toggleCamera,
+    toggleRaiseHand,
     startPresenting, stopPresenting,
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
@@ -622,13 +624,13 @@ function RoomContent() {
       <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
         {/* Raise Hand */}
         <TouchableOpacity
-          style={[styles.smallBtn, handRaised && styles.raiseActive]}
+          style={[styles.smallBtn, currentUserP?.handRaised && styles.raiseActive]}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            setHandRaised(prev => !prev);
+            toggleRaiseHand(roomId || '');
           }}
         >
-          <Hand size={18} color={handRaised ? '#FFF' : '#9CA3AF'} />
+          <Hand size={18} color={currentUserP?.handRaised ? '#FFF' : '#9CA3AF'} />
         </TouchableOpacity>
 
         {/* Hold to Talk */}

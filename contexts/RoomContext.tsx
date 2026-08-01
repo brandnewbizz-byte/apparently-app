@@ -17,6 +17,7 @@ export interface RoomParticipant {
   role: RoomRole;
   isMuted: boolean;
   followMode: boolean;
+  handRaised: boolean;
 }
 
 export interface ActivityEntry {
@@ -77,6 +78,9 @@ interface RoomContextValue {
   joinRoom: (roomId: string) => void;
   leaveRoom: (roomId: string) => void;
   isInRoom: (roomId: string) => boolean;
+
+  // Gestures
+  toggleRaiseHand: (roomId: string) => void;
 
   // Audio / Camera
   startSpeaking: (roomId: string) => void;
@@ -225,6 +229,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     role: role || 'contributor',
     isMuted: false,
     followMode: false,
+    handRaised: false,
   });
 
   // ── Create room ──
@@ -441,6 +446,26 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         ),
         activityLog: [
           { id: seededId(), userId: user?.id || '', userName: user?.fullName || '', action: 'role_changed', detail: `${changed?.fullName} role changed to ${role}`, timestamp: new Date().toISOString() },
+          ...prev.activityLog,
+        ],
+      };
+    });
+  }, [user]);
+
+  // ── Raise Hand ──
+  const toggleRaiseHand = useCallback((roomId: string) => {
+    if (!user) return;
+    setCurrentRoom(prev => {
+      if (!prev) return prev;
+      const p = prev.participants.find(p => p.userId === user.id);
+      const wasRaised = p?.handRaised;
+      return {
+        ...prev,
+        participants: prev.participants.map(p =>
+          p.userId === user.id ? { ...p, handRaised: !wasRaised } : p
+        ),
+        activityLog: [
+          { id: seededId(), userId: user.id, userName: user.fullName || '', action: wasRaised ? 'hand_lowered' : 'hand_raised', detail: wasRaised ? `${user.fullName} lowered their hand` : `✋ ${user.fullName} raised their hand`, timestamp: new Date().toISOString() },
           ...prev.activityLog,
         ],
       };
