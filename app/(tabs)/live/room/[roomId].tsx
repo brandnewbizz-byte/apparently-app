@@ -10,6 +10,7 @@ import {
   MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -88,9 +89,11 @@ function SpeakingRing({ size = 52, color = '#A78BFA', pulseSpeed = 600 }: {
   );
 }
 
-// ── Draggable Camera Bubble ──
-function CameraBubble({ onClose, participant }: {
-  onClose: () => void; participant: { fullName: string; avatar: string | null };
+// ── Draggable Camera Bubble (real CameraView for local, avatar for remote) ──
+function CameraBubble({ onClose, participant, isLocal }: {
+  onClose: () => void;
+  participant: { fullName: string; avatar: string | null };
+  isLocal?: boolean;
 }) {
   const pan = useRef(new Animated.ValueXY({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 })).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -123,15 +126,23 @@ function CameraBubble({ onClose, participant }: {
       ]}
       {...panResponder.panHandlers}
     >
-      {/* Camera preview placeholder */}
+      {/* Real camera for local user, avatar for remote */}
       <View style={styles.cameraPreview}>
-        <Image
-          source={{
-            uri: participant.avatar
-              || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=374151&color=fff&size=160`,
-          }}
-          style={styles.cameraImg}
-        />
+        {isLocal ? (
+          <CameraView
+            style={styles.cameraImg}
+            facing="front"
+            mirror
+          />
+        ) : (
+          <Image
+            source={{
+              uri: participant.avatar
+                || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=374151&color=fff&size=160`,
+            }}
+            style={styles.cameraImg}
+          />
+        )}
         <LinearGradient
           colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)']}
           style={styles.cameraGradient}
@@ -200,6 +211,8 @@ function RoomContent() {
   const [loading, setLoading] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [cameraPermission, setCameraPermission] = useState(false);
+  const [cameraPermDenied, setCameraPermDenied] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const insets = useSafeAreaInsets();
@@ -310,11 +323,27 @@ function RoomContent() {
     audio.micPressOut();
   }, [roomId, stopSpeaking, audio]);
 
-  const handleCamera = useCallback(() => {
+  // ── Camera Permissions ──
+  const [camPerm, requestCamPerm] = useCameraPermissions();
+
+  const handleCamera = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (!cameraOn) {
+      // Turning ON: request camera permission first
+      const perm = camPerm?.granted ? camPerm : await requestCamPerm();
+      if (!perm?.granted) {
+        setCameraPermDenied(true);
+        return;
+      }
+      setCameraPermission(true);
+      setCameraPermDenied(false);
+    } else {
+      // Turning OFF: release camera
+      setCameraPermission(false);
+    }
     setCameraOn(prev => !prev);
     toggleCamera(roomId || '');
-  }, [roomId, toggleCamera]);
+  }, [roomId, toggleCamera, cameraOn, camPerm, requestCamPerm]);
 
   const handleLeave = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -585,10 +614,11 @@ function RoomContent() {
         <CameraBubble
           participant={currentUserP}
           onClose={handleCamera}
+          isLocal
         />
       )}
 
-      {/* ── Controls ── */}
+      {/* ── Camera Permission Alert ── */}
       <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
         {/* Raise Hand */}
         <TouchableOpacity
