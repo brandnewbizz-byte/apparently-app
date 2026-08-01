@@ -9,6 +9,12 @@ export interface LiveRoom {
   id: string;
   name: string;
   topic: string;
+  goal: string;
+  category: string;
+  visibility: 'public' | 'private' | 'invite_only';
+  maxParticipants: number;
+  scheduledDate: string | null;
+  coverImage: string | null;
   creatorId: string;
   creatorName: string;
   creatorAvatar: string | null;
@@ -92,12 +98,18 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ── Create room ──
-  const createRoom = useCallback(async (name: string, topic: string) => {
+  const createRoom = useCallback(async (name: string, topic: string, opts?: { goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number }) => {
     const roomId = `room_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const newRoom: LiveRoom = {
       id: roomId,
       name,
       topic,
+      goal: opts?.goal || '',
+      category: opts?.category || 'General',
+      visibility: opts?.visibility || 'public',
+      maxParticipants: opts?.maxParticipants || 25,
+      scheduledDate: null,
+      coverImage: null,
       creatorId: user?.id || '',
       creatorName: user?.fullName || 'Anonymous',
       creatorAvatar: user?.avatar || null,
@@ -132,6 +144,12 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
             id: data.id,
             name: data.name,
             topic: data.topic || '',
+            goal: data.goal || '',
+            category: data.category || 'General',
+            visibility: data.visibility || 'public',
+            maxParticipants: data.max_participants || 25,
+            scheduledDate: data.scheduled_date || null,
+            coverImage: data.cover_image || null,
             creatorId: data.creator_id,
             creatorName: data.creator_name,
             creatorAvatar: data.creator_avatar,

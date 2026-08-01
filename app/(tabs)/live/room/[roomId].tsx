@@ -1,27 +1,57 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, ScrollView, Image,
+  Animated, ScrollView, Image, FlatList,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Phone, PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Zap } from 'lucide-react-native';
+import {
+  PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
+  MessageCircle, Sparkles, Share2, Smile,
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useRoom, RoomParticipant } from '@/contexts/RoomContext';
+import { usePlan, PlanProvider } from '@/contexts/PlanContext';
+import OverviewTab from './plan/OverviewTab';
+import IdeasTab from './plan/IdeasTab';
+import TasksTab from './plan/TasksTab';
+import BudgetTab from './plan/BudgetTab';
+import TimelineTab from './plan/TimelineTab';
+import FilesTab from './plan/FilesTab';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const CIRCLE_SIZE = 90;
-const GRID_GAP = 14;
 
-export default function RoomScreen() {
+const TABS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'ideas', label: 'Ideas' },
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'budget', label: 'Budget' },
+  { key: 'timeline', label: 'Timeline' },
+  { key: 'files', label: 'Files' },
+  { key: 'chat', label: 'Chat' },
+  { key: 'people', label: 'People' },
+];
+
+const TAB_CONTENT: Record<string, React.FC> = {
+  overview: OverviewTab,
+  ideas: IdeasTab,
+  tasks: TasksTab,
+  budget: BudgetTab,
+  timeline: TimelineTab,
+  files: FilesTab,
+};
+
+function RoomContent() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const [loading, setLoading] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
@@ -31,16 +61,21 @@ export default function RoomScreen() {
     rooms, joinRoom, leaveRoom,
     startSpeaking, stopSpeaking, toggleCamera,
   } = useRoom();
+  const { plan, createPlan, loadPlan } = usePlan();
+  const glowAnim = useRef(new Animated.Value(0)).current;
 
   const room = rooms.find((r) => r.id === roomId);
   const participants = room?.participants || [];
-  const glowAnim = useRef(new Animated.Value(0)).current;
+  const speakingParticipants = participants.filter(p => p.isSpeaking);
 
+  // ── Mount / Unmount ──
   useEffect(() => {
     if (roomId) {
       hideTabBar();
       joinRoom(roomId);
-      const t = setTimeout(() => setLoading(false), 600);
+      loadPlan(roomId);
+      createPlan(roomId, { title: room?.name || 'New Plan' });
+      const t = setTimeout(() => setLoading(false), 500);
       return () => {
         clearTimeout(t);
         showTabBar();
@@ -49,13 +84,13 @@ export default function RoomScreen() {
     }
   }, [roomId]);
 
-  // Speaking glow pulse
+  // ── Speaking glow ──
   useEffect(() => {
     if (isSpeaking) {
       const pulse = Animated.loop(
         Animated.sequence([
-          Animated.timing(glowAnim, { toValue: 1, duration: 520, useNativeDriver: false }),
-          Animated.timing(glowAnim, { toValue: 0.3, duration: 520, useNativeDriver: false }),
+          Animated.timing(glowAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
+          Animated.timing(glowAnim, { toValue: 0.3, duration: 500, useNativeDriver: false }),
         ]),
       );
       pulse.start();
@@ -64,7 +99,6 @@ export default function RoomScreen() {
     glowAnim.setValue(0);
   }, [isSpeaking]);
 
-  // ── Push-to-talk handlers ──
   const handlePressIn = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setIsSpeaking(true);
@@ -77,144 +111,176 @@ export default function RoomScreen() {
     stopSpeaking(roomId || '');
   }, [roomId, stopSpeaking]);
 
-  // ── Camera toggle ──
-  const handleCameraToggle = useCallback(() => {
+  const handleCamera = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setCameraOn((prev) => !prev);
+    setCameraOn(prev => !prev);
     toggleCamera(roomId || '');
   }, [roomId, toggleCamera]);
 
-  // ── Leave ──
   const handleLeave = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     leaveRoom(roomId || '');
     router.back();
   }, [roomId, leaveRoom, router]);
 
-  // ── Grid layout ──
-  const maxPerRow = Math.floor((SCREEN_W - 32) / (CIRCLE_SIZE + GRID_GAP));
-  const rows: RoomParticipant[][] = [];
-  for (let i = 0; i < participants.length; i += maxPerRow) {
-    rows.push(participants.slice(i, i + maxPerRow));
-  }
-
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
         <View style={styles.connecting}>
-          <Animated.View style={[styles.connectingPulse]} />
-          <Text style={styles.connectingText}>Connecting...</Text>
+          <Animated.View style={styles.connectingPulse} />
+          <Text style={styles.connectingText}>Entering room...</Text>
         </View>
       </View>
     );
   }
 
-  if (!room) {
-    return (
-      <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
-        <View style={styles.connecting}>
-          <Text style={styles.connectingText}>Room not found</Text>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Text style={styles.backBtnText}>Go back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const ActiveTabContent = TAB_CONTENT[activeTab];
 
   return (
     <View style={[styles.container, { backgroundColor: '#0A0A0F' }]}>
-      {/* Ambient gradient background */}
       <LinearGradient
-        colors={['rgba(139,92,246,0.12)', 'rgba(99,102,241,0.06)', '#0A0A0F']}
+        colors={['rgba(139,92,246,0.10)', 'rgba(99,102,241,0.04)', '#0A0A0F']}
         style={styles.ambient}
       />
 
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View>
-          <Text style={styles.roomName}>{room.name}</Text>
-          {room.topic ? <Text style={styles.roomTopic}>{room.topic}</Text> : null}
+      {/* ── Header ── */}
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.roomName}>{room?.name || 'Room'}</Text>
+            <View style={styles.headerMeta}>
+              <View style={styles.headerBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+              {room?.creatorName && (
+                <Text style={styles.hostText}>Host: {room.creatorName}</Text>
+              )}
+              <View style={styles.pCountRow}>
+                <Users size={11} color="#9CA3AF" />
+                <Text style={styles.pCountText}>{participants.length}</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerBtn}>
+              <Share2 size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerBtn}>
+              <Sparkles size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={styles.badge}>
-          <View style={styles.badgeDot} />
-          <Text style={styles.badgeText}>LIVE</Text>
-        </View>
-        <View style={styles.participantCount}>
-          <Users size={14} color="#9CA3AF" />
-          <Text style={styles.countText}>{participants.length}</Text>
-        </View>
+        {room?.goal && (
+          <Text style={styles.goalText} numberOfLines={1}>
+            🎯 {room.goal}
+          </Text>
+        )}
       </View>
 
-      {/* Participant Grid */}
-      <ScrollView
-        style={styles.gridScroll}
-        contentContainerStyle={styles.gridContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {participants.length === 0 ? (
-          <View style={styles.emptyRoom}>
-            <Users size={40} color="rgba(139,92,246,0.3)" />
-            <Text style={styles.emptyTitle}>Waiting for people...</Text>
-            <Text style={styles.emptySub}>Share this room with your network</Text>
-          </View>
-        ) : (
-          rows.map((row, rowIdx) => (
-            <View key={rowIdx} style={styles.row}>
-              {row.map((p, idx) => {
-                const isSelf = p.userId === user?.id;
-                const displaySpeaking = isSelf ? isSpeaking : p.isSpeaking;
-                return (
-                  <View key={p.userId || idx} style={styles.circleWrapper}>
-                    <View
-                      style={[
-                        styles.circleOuter,
-                        displaySpeaking && styles.circleSpeaking,
-                      ]}
-                    >
-                      <Image
-                        source={{
-                          uri: p.avatar
-                            || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName || 'U')}&background=8B5CF6&color=fff&size=120`,
-                        }}
-                        style={styles.circleAvatar}
-                      />
-                      {p.hasCamera && (
-                        <View style={styles.cameraBadge}>
-                          <Camera size={10} color="#FFF" />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.circleName} numberOfLines={1}>
-                      {isSelf ? 'You' : p.fullName || 'User'}
-                    </Text>
-                    {displaySpeaking && (
-                      <Animated.View
-                        style={[
-                          styles.speakingBar,
-                          { opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) },
-                        ]}
-                      />
-                    )}
-                  </View>
-                );
-              })}
+      {/* ── Floating speaking participants ── */}
+      {speakingParticipants.length > 0 && (
+        <View style={styles.floatingParticipants} pointerEvents="none">
+          {speakingParticipants.slice(0, 4).map((p, i) => (
+            <View
+              key={p.userId}
+              style={[
+                styles.floatingCircle,
+                {
+                  top: 80 + i * 70,
+                  right: 10,
+                },
+              ]}
+            >
+              <Image
+                source={{
+                  uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=8B5CF6&color=fff&size=80`,
+                }}
+                style={styles.floatingAvatar}
+              />
+              <View style={styles.speakingRing} />
             </View>
-          ))
-        )}
-      </ScrollView>
+          ))}
+        </View>
+      )}
 
-      {/* Control Bar */}
-      <View style={[styles.controls, { paddingBottom: insets.bottom + 8 }]}>
-        {/* Camera toggle */}
+      {/* ── Tab Bar ── */}
+      <View style={[styles.tabBar, { borderBottomColor: '#1F2937' }]}>
+        <FlatList
+          horizontal
+          data={TABS}
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={t => t.key}
+          contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}
+          renderItem={({ item }) => {
+            const isActive = activeTab === item.key;
+            return (
+              <TouchableOpacity
+                style={[styles.tab, isActive && styles.tabActive]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setActiveTab(item.key);
+                }}
+              >
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+
+      {/* ── Plan Content ── */}
+      <View style={styles.content}>
+        {ActiveTabContent ? (
+          <ActiveTabContent />
+        ) : activeTab === 'chat' ? (
+          <View style={styles.placeholder}>
+            <MessageCircle size={36} color="#4B5563" />
+            <Text style={styles.placeholderTitle}>Chat</Text>
+            <Text style={styles.placeholderSub}>Room chat coming soon</Text>
+          </View>
+        ) : activeTab === 'people' ? (
+          <View style={styles.placeholder}>
+            <Users size={36} color="#4B5563" />
+            <Text style={styles.placeholderTitle}>People</Text>
+            <Text style={styles.placeholderSub}>
+              {participants.length} participant{participants.length !== 1 ? 's' : ''} in this room
+            </Text>
+            <ScrollView style={{ width: '100%', marginTop: 12 }}>
+              {participants.map(p => (
+                <View key={p.userId} style={styles.personRow}>
+                  <Image
+                    source={{
+                      uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=374151&color=fff&size=60`,
+                    }}
+                    style={styles.personAvatar}
+                  />
+                  <Text style={styles.personName}>{p.fullName}</Text>
+                  {p.isSpeaking && <Text style={styles.speakingLabel}>🔊</Text>}
+                  {p.hasCamera && <Text style={styles.speakingLabel}>📹</Text>}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+      </View>
+
+      {/* ── Controls ── */}
+      <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
+        {/* Raise Hand */}
         <TouchableOpacity
-          style={[styles.cameraBtn, cameraOn && styles.cameraBtnActive]}
-          onPress={handleCameraToggle}
+          style={[styles.smallBtn, handRaised && { backgroundColor: '#F59E0B' }]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setHandRaised(prev => !prev);
+          }}
         >
-          {cameraOn ? <Camera size={20} color="#FFF" /> : <CameraOff size={20} color="#9CA3AF" />}
+          <Hand size={18} color={handRaised ? '#FFF' : '#9CA3AF'} />
         </TouchableOpacity>
 
-        {/* Press-hold Mic */}
+        {/* Hold to Talk */}
         <TouchableOpacity
           style={[styles.micBtn, isSpeaking && styles.micBtnActive]}
           onPressIn={handlePressIn}
@@ -223,31 +289,50 @@ export default function RoomScreen() {
         >
           <Animated.View style={[
             styles.micInner,
-            isSpeaking && {
-              transform: [{ scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] }) }],
-            },
+            isSpeaking && { transform: [{ scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) }] },
           ]}>
-            {isSpeaking ? <Mic size={28} color="#FFF" /> : <MicOff size={28} color="#FFF" />}
+            {isSpeaking ? (
+              <Mic size={26} color="#FFF" />
+            ) : (
+              <MicOff size={26} color="#FFF" />
+            )}
           </Animated.View>
+          <Text style={styles.controlLabel}>
+            {isSpeaking ? 'Speaking...' : 'Hold to Talk'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Hold for Camera */}
+        <TouchableOpacity
+          style={[styles.micBtn, cameraOn && { backgroundColor: '#8B5CF6' }]}
+          onPress={handleCamera}
+          activeOpacity={0.7}
+        >
+          <Animated.View style={styles.micInner}>
+            {cameraOn ? (
+              <Camera size={26} color="#FFF" />
+            ) : (
+              <CameraOff size={26} color="#FFF" />
+            )}
+          </Animated.View>
+          <Text style={styles.controlLabel}>
+            {cameraOn ? 'On Camera' : 'Camera'}
+          </Text>
         </TouchableOpacity>
 
         {/* Leave */}
         <TouchableOpacity style={styles.leaveBtn} onPress={handleLeave}>
-          <PhoneOff size={20} color="#FFF" />
+          <PhoneOff size={18} color="#FFF" />
         </TouchableOpacity>
       </View>
 
-      {/* Speaking glow bar */}
+      {/* Speaking indicator */}
       {isSpeaking && (
-        <Animated.View
-          style={[styles.glowBar, { opacity: glowAnim }]}
-          pointerEvents="none"
-        >
+        <Animated.View style={[styles.glowBar, { opacity: glowAnim }]} pointerEvents="none">
           <LinearGradient
-            colors={['rgba(139,92,246,0)', 'rgba(139,92,246,0.4)', 'rgba(99,102,241,0.5)', 'rgba(139,92,246,0.4)', 'rgba(139,92,246,0)']}
+            colors={['rgba(139,92,246,0)', 'rgba(139,92,246,0.5)', 'rgba(99,102,241,0.6)', 'rgba(139,92,246,0.5)', 'rgba(139,92,246,0)']}
             style={styles.glowGradient}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
+            start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
           />
         </Animated.View>
       )}
@@ -255,128 +340,88 @@ export default function RoomScreen() {
   );
 }
 
+// Wrapper with PlanProvider
+export default function RoomScreen() {
+  return (
+    <PlanProvider>
+      <RoomContent />
+    </PlanProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  ambient: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  ambient: { ...StyleSheet.absoluteFillObject },
+  connecting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  connectingPulse: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(139,92,246,0.2)' },
+  connectingText: { color: '#9CA3AF', fontSize: 15 },
 
-  // ── Connecting ──
-  connecting: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16,
-  },
-  connectingPulse: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: 'rgba(139,92,246,0.2)',
-  },
-  connectingText: { color: '#9CA3AF', fontSize: 16 },
-  backBtn: {
-    marginTop: 8, paddingHorizontal: 24, paddingVertical: 12,
-    borderRadius: 24, backgroundColor: '#8B5CF6',
-  },
-  backBtnText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  // Header
+  header: { paddingHorizontal: 14, paddingBottom: 10 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  roomName: { color: '#FFF', fontSize: 20, fontWeight: '700' },
+  headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' },
+  headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
+  liveText: { color: '#10B981', fontSize: 10, fontWeight: '700' },
+  hostText: { color: '#9CA3AF', fontSize: 12, fontWeight: '500' },
+  pCountRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  pCountText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  headerActions: { flexDirection: 'row', gap: 8 },
+  headerBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  goalText: { color: '#8B5CF6', fontSize: 13, fontWeight: '500', marginTop: 6 },
 
-  // ── Header ──
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingBottom: 12, gap: 12,
-  },
-  roomName: { color: '#FFF', fontSize: 20, fontWeight: '700', flex: 1 },
-  roomTopic: { color: '#8B5CF6', fontSize: 13, fontWeight: '600', marginTop: 2 },
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 10,
-    paddingVertical: 4, borderRadius: 12,
-  },
-  badgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
-  badgeText: { color: '#10B981', fontSize: 11, fontWeight: '700' },
-  participantCount: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 10,
-    paddingVertical: 6, borderRadius: 12,
-  },
-  countText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  // Floating
+  floatingParticipants: { position: 'absolute', top: 0, right: 0, zIndex: 10 },
+  floatingCircle: { position: 'absolute', alignItems: 'center' },
+  floatingAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#8B5CF6' },
+  speakingRing: { position: 'absolute', width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: '#A78BFA', opacity: 0.5 },
 
-  // ── Grid ──
-  gridScroll: { flex: 1 },
-  gridContent: { padding: 16, alignItems: 'center' },
-  row: {
-    flexDirection: 'row', justifyContent: 'center',
-    gap: GRID_GAP, marginBottom: 24, flexWrap: 'wrap',
-  },
-  circleWrapper: { alignItems: 'center', width: CIRCLE_SIZE + 10 },
-  circleOuter: {
-    width: CIRCLE_SIZE, height: CIRCLE_SIZE, borderRadius: CIRCLE_SIZE / 2,
-    borderWidth: 3, borderColor: 'rgba(139,92,246,0.3)',
-    overflow: 'hidden',
-  },
-  circleSpeaking: {
-    borderColor: '#8B5CF6',
-    shadowColor: '#8B5CF6',
-    shadowOpacity: 0.7,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
-  },
-  circleAvatar: {
-    width: '100%', height: '100%', borderRadius: CIRCLE_SIZE / 2,
-  },
-  cameraBadge: {
-    position: 'absolute', bottom: 2, right: 2,
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center',
-  },
-  circleName: {
-    color: '#D1D5DB', fontSize: 11, fontWeight: '500',
-    marginTop: 6, width: CIRCLE_SIZE + 10, textAlign: 'center',
-  },
-  speakingBar: {
-    width: CIRCLE_SIZE, height: 3, borderRadius: 2,
-    backgroundColor: '#8B5CF6', marginTop: 4,
-  },
+  // Tab Bar
+  tabBar: { borderBottomWidth: 1, paddingVertical: 8 },
+  tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
+  tabActive: { backgroundColor: '#8B5CF6' },
+  tabLabel: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  tabLabelActive: { color: '#FFF' },
 
-  // ── Empty ──
-  emptyRoom: {
-    alignItems: 'center', paddingVertical: 80, gap: 10,
-  },
-  emptyTitle: { color: '#9CA3AF', fontSize: 17, fontWeight: '600' },
-  emptySub: { color: '#6B7280', fontSize: 14 },
+  // Content
+  content: { flex: 1 },
 
-  // ── Controls ──
+  // Placeholder
+  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 8 },
+  placeholderTitle: { color: '#9CA3AF', fontSize: 16, fontWeight: '600' },
+  placeholderSub: { color: '#6B7280', fontSize: 14 },
+  personRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 16 },
+  personAvatar: { width: 32, height: 32, borderRadius: 16 },
+  personName: { color: '#D1D5DB', fontSize: 14, fontWeight: '500', flex: 1 },
+  speakingLabel: { fontSize: 14 },
+
+  // Controls
   controls: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 24, paddingVertical: 14, paddingHorizontal: 16,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    gap: 14, paddingVertical: 12, paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
   },
-  cameraBtn: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  cameraBtnActive: {
-    backgroundColor: '#8B5CF6',
+  smallBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
   },
   micBtn: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: 'rgba(139,92,246,0.3)',
+    width: 66, height: 66, borderRadius: 33,
+    backgroundColor: 'rgba(139,92,246,0.25)',
     alignItems: 'center', justifyContent: 'center',
   },
-  micBtnActive: {
-    backgroundColor: '#8B5CF6',
-  },
+  micBtnActive: { backgroundColor: '#8B5CF6' },
   micInner: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: '#8B5CF6',
-    alignItems: 'center', justifyContent: 'center',
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: '#8B5CF6', alignItems: 'center', justifyContent: 'center',
   },
+  controlLabel: { color: '#9CA3AF', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
   leaveBtn: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: '#EF4444',
-    alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
   },
-  glowBar: {
-    position: 'absolute', bottom: 90, left: 0, right: 0, height: 4,
-  },
+  glowBar: { position: 'absolute', bottom: 72, left: 0, right: 0, height: 3 },
   glowGradient: { flex: 1 },
 });

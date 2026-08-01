@@ -23,6 +23,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { TabBarProvider } from '@/contexts/TabBarContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
 import { RoomProvider } from '@/contexts/RoomContext';
+import { PlanProvider } from '@/contexts/PlanContext';
 import { UserPostsProvider } from '@/contexts/UserPostsContext';
 
 import { BundleProvider } from '@/contexts/BundleContext';
@@ -220,6 +221,7 @@ export default function RootLayout() {
                           <SkillProvider>
                           <ServiceRequestProvider>
                                 <RoomProvider>
+                                <PlanProvider>
                                 <MessagingProvider>
                                   <MarketplaceProvider>
                                     <BookingsProvider>
@@ -233,6 +235,7 @@ export default function RootLayout() {
                                     </BookingsProvider>
                                   </MarketplaceProvider>
                                 </MessagingProvider>
+                                </PlanProvider>
                                 </RoomProvider>
                           </ServiceRequestProvider>
                           </SkillProvider>
