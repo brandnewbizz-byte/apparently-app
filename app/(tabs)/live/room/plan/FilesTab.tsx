@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Image,
   Alert, ActivityIndicator, Platform, ActionSheetIOS,
+  Modal, SafeAreaView, StatusBar, Dimensions, Pressable,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as WebBrowser from 'expo-web-browser';
 import {
-  Plus, Upload, Image as ImageIcon, FileText, File, Trash2,
-  ExternalLink, Camera, Paperclip, HardDrive,
+  Upload, Image as ImageIcon, FileText, File, Trash2,
+  ExternalLink, Camera, Paperclip, HardDrive, X, Download,
 } from 'lucide-react-native';
 import { usePlan, FileRef } from '@/contexts/PlanContext';
 import { useTheme } from '@/contexts/ThemeContext';
+
+const { width: SCREEN_W } = Dimensions.get('window');
 
 const FILE_TYPE_ICONS: Record<string, { icon: any; color: string; label: string }> = {
   image: { icon: ImageIcon, color: '#3B82F6', label: 'Image' },
@@ -25,6 +29,14 @@ const FILE_TYPE_ICONS: Record<string, { icon: any; color: string; label: string 
   supplier: { icon: File, color: '#6B7280', label: 'Supplier' },
   other: { icon: File, color: '#6B7280', label: 'File' },
 };
+
+const IMAGE_TYPES = new Set(['image', 'design']);
+
+function isImageFile(file: FileRef): boolean {
+  if (IMAGE_TYPES.has(file.type)) return true;
+  const ext = (file.name || '').split('.').pop()?.toLowerCase() || '';
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'].includes(ext);
+}
 
 function fmtBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
@@ -49,6 +61,8 @@ export default function FilesTab() {
 
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [viewerFile, setViewerFile] = useState<FileRef | null>(null);
+  const [viewerImageLoadError, setViewerImageLoadError] = useState(false);
 
   const files = plan?.files || [];
   const usedPct = storageLimit > 0 ? Math.min(storageUsedBytes / storageLimit, 1) : 0;
@@ -115,23 +129,17 @@ export default function FilesTab() {
   };
 
   const doUpload = async (uri: string, name: string, mimeType: string, fileType: string, size: number) => {
-    // Check quota
     if (size > 0 && storageUsedBytes + size > storageLimit) {
       Alert.alert('Storage Full', `Upload would exceed the 5 GB limit. (${fmtBytes(storageUsedBytes)} used)`);
       return;
     }
-
     setUploading(true);
     setUploadProgress(`Uploading ${name}...`);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     const ok = await uploadFile(uri, name, mimeType, fileType);
-
     setUploading(false);
     setUploadProgress('');
-    if (ok) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
+    if (ok) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   const handleDelete = (file: FileRef) => {
@@ -139,6 +147,31 @@ export default function FilesTab() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); deleteFile(file.id); } },
     ]);
+  };
+
+  // ── Open file ──
+  const openFile = async (file: FileRef) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (isImageFile(file)) {
+      setViewerImageLoadError(false);
+      setViewerFile(file);
+    } else if (file.url && (file.url.startsWith('http://') || file.url.startsWith('https://'))) {
+      try {
+        await WebBrowser.openBrowserAsync(file.url, {
+          toolbarColor: isLight ? '#FFFFFF' : '#111827',
+          controlsColor: '#8B5CF6',
+        });
+      } catch {
+        Alert.alert('Cannot Open', 'Unable to open this file.');
+      }
+    } else {
+      Alert.alert('Preview', `${file.name}\n\nType: ${file.type}\n${file.sizeBytes ? 'Size: ' + fmtBytes(file.sizeBytes) : 'Size unknown'}\n\nFull preview coming soon.`, [{ text: 'OK' }]);
+    }
+  };
+
+  const closeViewer = () => {
+    setViewerFile(null);
+    setViewerImageLoadError(false);
   };
 
   return (
@@ -193,11 +226,26 @@ export default function FilesTab() {
           files.map(file => {
             const meta = FILE_TYPE_ICONS[file.type] || FILE_TYPE_ICONS.other;
             const Icon = meta.icon;
+            const showPreview = isImageFile(file) && file.url && file.url.length > 0;
             return (
-              <View key={file.id} style={[styles.fileCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={[styles.fileIcon, { backgroundColor: meta.color + '20' }]}>
-                  <Icon size={22} color={meta.color} />
-                </View>
+              <TouchableOpacity
+                key={file.id}
+                style={[styles.fileCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => openFile(file)}
+                activeOpacity={0.7}
+              >
+                {/* Thumbnail / Icon */}
+                {showPreview ? (
+                  <Image
+                    source={{ uri: file.url }}
+                    style={styles.fileThumb}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.fileIcon, { backgroundColor: meta.color + '20' }]}>
+                    <Icon size={22} color={meta.color} />
+                  </View>
+                )}
                 <View style={styles.fileInfo}>
                   <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>{file.name}</Text>
                   <View style={styles.fileMeta}>
@@ -210,15 +258,67 @@ export default function FilesTab() {
                     {new Date(file.uploadedAt).toLocaleDateString()}
                   </Text>
                 </View>
-                <TouchableOpacity style={styles.fileDelete} onPress={() => handleDelete(file)}>
+                <TouchableOpacity style={styles.fileDelete} onPress={() => handleDelete(file)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   <Trash2 size={16} color={colors.textTertiary} />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             );
           })
         )}
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      {/* ── Full-Screen Image Viewer Modal ── */}
+      <Modal
+        visible={viewerFile !== null}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        onRequestClose={closeViewer}
+      >
+        {viewerFile && (
+          <SafeAreaView style={[styles.viewerRoot, { backgroundColor: '#000' }]}>
+            <StatusBar barStyle="light-content" />
+            {/* Header */}
+            <View style={styles.viewerHeader}>
+              <TouchableOpacity onPress={closeViewer} style={styles.viewerClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <X size={24} color="#FFF" />
+              </TouchableOpacity>
+              <View style={styles.viewerTitleBox}>
+                <Text style={styles.viewerTitle} numberOfLines={1}>{viewerFile.name}</Text>
+                <Text style={styles.viewerSub}>
+                  {FILE_TYPE_ICONS[viewerFile.type]?.label || 'File'}
+                  {viewerFile.sizeBytes > 0 ? ` · ${fmtBytes(viewerFile.sizeBytes)}` : ''}
+                </Text>
+              </View>
+              <View style={{ width: 40 }} />
+            </View>
+            {/* Image Content */}
+            <ScrollView
+              style={styles.viewerScroll}
+              contentContainerStyle={styles.viewerScrollContent}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              bouncesZoom
+            >
+              {viewerImageLoadError ? (
+                <View style={styles.viewerError}>
+                  <ImageIcon size={48} color="#666" />
+                  <Text style={styles.viewerErrorText}>Unable to load preview</Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: viewerFile.url }}
+                  style={styles.viewerImage}
+                  resizeMode="contain"
+                  onError={() => setViewerImageLoadError(true)}
+                />
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -234,29 +334,25 @@ const styles = StyleSheet.create({
   },
   uploadBtnText: { color: '#FFF', fontWeight: '700', fontSize: 15 },
   // Storage card
-  storageCard: {
-    borderRadius: 14, borderWidth: 1, padding: 14, gap: 8,
-  },
-  storageHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-  },
+  storageCard: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 8 },
+  storageHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   storageLabel: { fontSize: 12, fontWeight: '600', flex: 1 },
   storageValue: { fontSize: 12, fontWeight: '700' },
-  storageBar: {
-    height: 6, borderRadius: 3, overflow: 'hidden',
-  },
+  storageBar: { height: 6, borderRadius: 3, overflow: 'hidden' },
   storageFill: { height: 6, borderRadius: 3 },
   storageWarn: { fontSize: 10, fontWeight: '600' },
   // File list
   list: { flex: 1 },
-  empty: {
-    alignItems: 'center', paddingVertical: 50, gap: 10,
-  },
+  empty: { alignItems: 'center', paddingVertical: 50, gap: 10 },
   emptyTitle: { fontSize: 16, fontWeight: '600' },
   emptySub: { fontSize: 13, textAlign: 'center', paddingHorizontal: 30, lineHeight: 20 },
   fileCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1,
+  },
+  fileThumb: {
+    width: 48, height: 48, borderRadius: 12,
+    backgroundColor: '#E5E5E5',
   },
   fileIcon: {
     width: 48, height: 48, borderRadius: 14,
@@ -269,4 +365,23 @@ const styles = StyleSheet.create({
   fileSize: { fontSize: 11, fontWeight: '500' },
   fileDate: { fontSize: 11, fontWeight: '500' },
   fileDelete: { padding: 8 },
+  // Image viewer modal
+  viewerRoot: { flex: 1 },
+  viewerHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+  },
+  viewerClose: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  viewerTitleBox: { flex: 1, alignItems: 'center', paddingHorizontal: 12 },
+  viewerTitle: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  viewerSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '500', marginTop: 2 },
+  viewerScroll: { flex: 1 },
+  viewerScrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: SCREEN_W, height: SCREEN_W },
+  viewerError: { alignItems: 'center', gap: 12 },
+  viewerErrorText: { color: '#999', fontSize: 14, fontWeight: '500' },
 });
