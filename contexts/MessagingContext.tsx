@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Post } from '@/mocks/data';
 import { logger } from '@/lib/logger';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 export interface SharedPost {
   post: Post;
@@ -96,6 +97,55 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       setConversations(query.data);
     }
   }, [query.data]);
+
+  // Sync Supabase conversations into local state (bridges BundleContext.grabBundle → inbox)
+  useEffect(() => {
+    if (!authUser?.id) return;
+    const sync = async () => {
+      try {
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('*')
+          .or(`participant_one.eq.${authUser.id},participant_two.eq.${authUser.id}`)
+          .order('last_message_at', { ascending: false });
+        if (!convs?.length) return;
+
+        const supabaseIds = new Set(convs.map((c: any) => c.id));
+        const stored = await AsyncStorage.getItem(scopedKey);
+        const existing: Conversation[] = stored ? JSON.parse(stored) : [];
+
+        for (const cv of convs as any[]) {
+          if (existing.find(e => e.id === cv.id)) continue;
+          const otherId = cv.participant_one === authUser.id ? cv.participant_two : cv.participant_one;
+          const { data: msgs } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', cv.id)
+            .order('created_at', { ascending: true });
+
+          const messages: Message[] = (msgs || []).map((m: any) => ({
+            id: m.id, text: m.content || '', content: m.content,
+            senderId: m.sender_id, receiverId: otherId,
+            timestamp: m.created_at, read: m.read,
+          }));
+
+          existing.push({
+            id: cv.id, participantId: otherId,
+            participantName: 'User', participantAvatar: '', participantUsername: 'user',
+            messages, lastMessageAt: messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at,
+            unreadCount: messages.filter(m => !m.read && m.receiverId === authUser.id).length,
+          });
+        }
+
+        setConversations(existing);
+        await AsyncStorage.setItem(scopedKey, JSON.stringify(existing));
+        logger.info('MessagingContext', 'Synced Supabase conversations', { added: convs.length });
+      } catch (err) {
+        logger.warn('MessagingContext', 'Supabase sync failed', { error: String(err) });
+      }
+    };
+    sync();
+  }, [authUser?.id]);
 
   const persistState = useCallback((next: Conversation[]) => {
     setConversations(next);

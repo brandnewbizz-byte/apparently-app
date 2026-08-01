@@ -251,8 +251,6 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
             .insert({
               participant_one: a,
               participant_two: b,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
             })
             .select('id')
             .single();

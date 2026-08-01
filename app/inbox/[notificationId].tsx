@@ -191,7 +191,7 @@ export default function ConversationScreen() {
       if (!conv?.id) {
         const { data: created } = await supabase
           .from('conversations')
-          .insert({ participant_one: a, participant_two: b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .insert({ participant_one: a, participant_two: b })
           .select('id')
           .single();
         if (created) conv = created;
@@ -273,7 +273,7 @@ export default function ConversationScreen() {
         const { data: vConvData } = await supabase.from('conversations').select('id').eq('participant_one', va).eq('participant_two', vb).maybeSingle();
         let vConvId = vConvData?.id;
         if (!vConvId) {
-          const { data: vCreated } = await supabase.from('conversations').insert({ participant_one: va, participant_two: vb, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select('id').single();
+          const { data: vCreated } = await supabase.from('conversations').insert({ participant_one: va, participant_two: vb }).select('id').single();
           vConvId = vCreated?.id;
         }
         if (!vConvId) throw new Error('No conversation for voice');
