@@ -469,6 +469,7 @@ function PostCard({
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
   const authorAvatar = post.author.avatar || '';
+  const { user: currentUser } = useAuth();
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const routerFromCard = useRouter();
 
@@ -532,7 +533,13 @@ function PostCard({
 
   const handleProfileTap = () => {
     if (!post.author.userId) return;
-    routerFromCard.push(`/user/${post.author.userId}` as any);
+    if (post.author.userId === currentUser?.id) {
+      // Own profile → go to bottom tab profile
+      routerFromCard.push('/(tabs)/profile' as any);
+    } else {
+      // Someone else → dedicated user profile page
+      routerFromCard.push(`/user/${post.author.userId}` as any);
+    }
   };
 
   return (
