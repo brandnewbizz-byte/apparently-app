@@ -112,7 +112,17 @@ export default function InboxScreen() {
     const { data } = await supabase.from('conversations').select('*')
       .or(`participant_one.eq.${user.id},participant_two.eq.${user.id}`)
       .order('last_message_at', { ascending: false }).limit(30);
-    if (data) setSupabaseConvs(data);
+    if (!data || data.length === 0) { setSupabaseConvs([]); return; }
+    const otherIds = data.map(cv => cv.participant_one === user.id ? cv.participant_two : cv.participant_one);
+    const { data: profiles } = await supabase.from('profiles').select('id, full_name, username, avatar')
+      .in('id', [...new Set(otherIds)]);
+    const pm = new Map((profiles || []).map(p => [p.id, p]));
+    const enriched = data.map(cv => {
+      const oid = cv.participant_one === user.id ? cv.participant_two : cv.participant_one;
+      const p = pm.get(oid);
+      return { ...cv, _name: p?.full_name || p?.username || 'User', _avatar: p?.avatar || '', _username: p?.username || 'user', _otherId: oid };
+    });
+    setSupabaseConvs(enriched);
   }, [user?.id]);
 
   const onRefresh = useCallback(async () => {
@@ -149,13 +159,13 @@ export default function InboxScreen() {
     const extras: any[] = [];
     for (const cv of supabaseConvs) {
       if (!seen.has(cv.id)) {
-        const otherId = cv.participant_one === user?.id ? cv.participant_two : cv.participant_one;
+        const oid = (cv as any)._otherId || (cv.participant_one === user?.id ? cv.participant_two : cv.participant_one);
         extras.push({
           id: cv.id,
-          participantId: otherId,
-          participantName: otherId?.slice(0, 8) || 'User',
-          participantAvatar: '',
-          participantUsername: 'user',
+          participantId: oid,
+          participantName: (cv as any)._name || 'User',
+          participantAvatar: (cv as any)._avatar || '',
+          participantUsername: (cv as any)._username || 'user',
           messages: [{ content: 'Tap to view conversation' }],
           lastMessageAt: cv.last_message_at || cv.created_at,
           unreadCount: 0,

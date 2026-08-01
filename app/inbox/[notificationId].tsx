@@ -102,18 +102,20 @@ export default function ConversationScreen() {
     if (!notificationId) return;
 
     const fetchData = async () => {
-      // Fetch participant profile
+      // Fetch participant profile from profiles table
       const { data: userData } = await supabase
-        .from('users')
-        .select('id, name, username, avatar')
+        .from('profiles')
+        .select('id, full_name, username, avatar')
         .eq('id', notificationId)
         .single();
       if (userData) {
         setParticipant({
-          name: userData.name || 'Unknown',
+          name: userData.full_name || userData.username || 'Unknown',
           avatar: userData.avatar || '',
           username: userData.username || '',
         });
+      } else {
+        setParticipant({ name: 'Unknown', avatar: '', username: '' });
       }
 
       // Fetch messages — messages table uses conversation_id (NOT recipient_id)
@@ -202,8 +204,6 @@ export default function ConversationScreen() {
         conversation_id: conv.id,
         sender_id: user.id,
         content: text,
-        mentions: mentions.length ? mentions : null,
-        created_at: new Date().toISOString(),
         read: false,
       }).select('id, created_at').single();
 
