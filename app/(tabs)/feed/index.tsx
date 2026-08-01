@@ -782,15 +782,33 @@ export default function FeedScreen() {
 
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
-  // Load ALL posts from SocialContext for the feed — all users, not just current.
-  // Re-runs whenever getAllPosts changes (query refetch, new posts, etc.)
-  const lastPostCountRef = useRef(0);
+
+  // Load who the current user follows (for feed filtering)
+  const [feedFollowingIds, setFeedFollowingIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!authUser?.id) return;
+    supabase.from('follows')
+      .select('following_id')
+      .eq('follower_id', authUser.id)
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setFeedFollowingIds(new Set((data as any[]).map(f => f.following_id)));
+        }
+      });
+  }, [authUser?.id]);
+
+  // Load feed posts: ONLY from followed users + own posts
+  const lastPostCountRef = useRef('');
   useEffect(() => {
     const posts = getAllPosts();
     if (!posts || posts.length === 0) return;
-    // Only update if post list actually changed (avoids unnecessary re-renders)
-    if (posts.length === lastPostCountRef.current) return;
+    const now = Date.now(), twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
     const allPosts: FeedPost[] = posts
+      .filter((p: any) => {
+        const authorId = p.user?.id || p.user_id || '';
+        // Own post or followed user
+        return authorId === authUser?.id || feedFollowingIds.has(authorId);
+      })
       .map((p: any) => ({
         id: p.id,
         type: p.type || 'photo',
@@ -803,11 +821,14 @@ export default function FeedScreen() {
         tags: p.tags || [],
         stats: { saves: p.saves || 0, comments: (p.comments || []).length },
       }));
-    if (allPosts.length > 0) {
+    // Only update if post list actually changed
+    const key = allPosts.map(p => p.id).sort().join(',');
+    if (key === lastPostCountRef.current) return;
+    lastPostCountRef.current = key;
+    if (allPosts.length > 0 || userPosts.length > 0) {
       setUserPosts(allPosts);
-      lastPostCountRef.current = posts.length;
     }
-  }, [getAllPosts]);
+  }, [getAllPosts, feedFollowingIds, authUser?.id]);
 
   const queryClient = useQueryClient();
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);

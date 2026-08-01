@@ -213,8 +213,10 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
     });
-    // Create inbox notification for the bundle owner
+    // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
+      const grabMessage = `👋 I grabbed your bundle "${bundle.title}" — let's chat!`;
+      // 1. Notification
       supabase.from('notifications').insert({
         recipient_id: bundle.creatorId,
         sender_id: user.id,
@@ -229,6 +231,15 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         created_at: new Date().toISOString(),
       }).then(({ error }) => {
         if (error) logger.warn('BundleContext', 'Notification insert failed', { error });
+      });
+      // 2. Auto-create the first DM message so the conversation is ready
+      supabase.from('messages').insert({
+        sender_id: user.id,
+        recipient_id: bundle.creatorId,
+        text: grabMessage,
+        created_at: new Date().toISOString(),
+      }).then(({ error }) => {
+        if (error) logger.warn('BundleContext', 'Grab DM message insert failed', { error });
       });
     }
   }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, bundles]);

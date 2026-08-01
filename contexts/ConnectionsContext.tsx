@@ -8,6 +8,7 @@ import * as localApi from '@/lib/api';
 import type { DbUser } from '@/lib/database.types';
 import type { MarketplaceProfile } from '@/mocks/data';
 import { logger } from '@/lib/logger';
+import { useAuth } from '@/contexts/AuthContext';
 
 export type ConnectionStatus = 'pending' | 'approved' | 'rejected';
 
@@ -97,8 +98,6 @@ const mapDbUserToMarketplaceProfile = (u: DbUser): MarketplaceProfile => ({
   hourlyRate: '',
 });
 
-const CURRENT_USER_ID = 'current-user';
-
 const sampleIncomingRequests: ConnectionRequest[] = [];
 
 const defaultState: ConnectionsState = {
@@ -124,6 +123,8 @@ const ensureValidState = (state: Partial<ConnectionsState> | null): ConnectionsS
 
 export const [ConnectionsProvider, useConnections] = createContextHook(() => {
   const queryClient = useQueryClient();
+  const { user: authUser } = useAuth();
+  const CURRENT_USER_ID = authUser?.id || '';
   const [state, setState] = useState<ConnectionsState>(defaultState);
 
   const query = useQuery({

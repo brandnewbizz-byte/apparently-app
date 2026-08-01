@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Post } from '@/mocks/data';
 import { logger } from '@/lib/logger';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface SharedPost {
   post: Post;
@@ -45,22 +46,19 @@ interface MessagingState {
 
 const STORAGE_KEY = 'apparently_messaging_state';
 
-const currentUser = {
-  id: 'current-user',
-  name: 'You',
-  username: 'you',
-  avatar: '',
-};
-
 export const [MessagingProvider, useMessaging] = createContextHook<MessagingState>(() => {
   const queryClient = useQueryClient();
+  const { user: authUser } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
+  // Scope storage per logged-in user — prevents message leakage between accounts
+  const scopedKey = authUser?.id ? `${STORAGE_KEY}_${authUser.id}` : STORAGE_KEY;
+
   const query = useQuery({
-    queryKey: ['messagingState'],
+    queryKey: ['messagingState', authUser?.id],
     queryFn: async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        const stored = await AsyncStorage.getItem(scopedKey);
         if (stored && stored !== 'undefined' && stored !== 'null') {
           try {
             const parsed = JSON.parse(stored);
@@ -68,7 +66,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             return parsed as Conversation[];
           } catch (parseError) {
             logger.error('MessagingContext', 'JSON parse error, clearing corrupted data', { parseError });
-            await AsyncStorage.removeItem(STORAGE_KEY);
+            await AsyncStorage.removeItem(scopedKey);
             return [];
           }
         }
@@ -83,7 +81,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
   const { mutate: persistMutation } = useMutation({
     mutationFn: async (payload: Conversation[]) => {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      await AsyncStorage.setItem(scopedKey, JSON.stringify(payload));
       logger.info('MessagingContext', 'Persisted messaging state');
       return payload;
     },
@@ -149,7 +147,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       const newMessage: Message = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         text: message || '',
-        senderId: currentUser.id,
+        senderId: authUser?.id || '',
         receiverId: userId,
         timestamp,
         read: false,
@@ -195,7 +193,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     const newMessage: Message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       text,
-      senderId: currentUser.id,
+      senderId: authUser?.id || '',
       receiverId: participantId,
       timestamp,
       read: false,
@@ -230,7 +228,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           unreadCount: 0,
           messages: conv.messages.map(msg => ({
             ...msg,
-            read: msg.receiverId === currentUser.id ? true : msg.read,
+            read: msg.receiverId === (authUser?.id || '') ? true : msg.read,
           })),
         };
       }
