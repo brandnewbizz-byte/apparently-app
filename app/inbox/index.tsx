@@ -1,4 +1,4 @@
-import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Star } from 'lucide-react-native';
+import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Star, Phone, Video } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -77,10 +77,11 @@ export default function InboxScreen() {
             id: n.id,
             type: n.type,
             senderId: n.sender_id,
-            senderName: content.grabber_name || content.caller_name || 'Someone',
+            senderName: content.grabber_name || content.caller_name || content.inviter_name || 'Someone',
             message: content.message || content.title || '',
             read: n.read,
             createdAt: n.created_at,
+            _raw: { ...content, room_id: content.room_id, caller_id: content.caller_id },
           };
         }));
       }
@@ -190,37 +191,101 @@ export default function InboxScreen() {
     return (
       <>
         {notifs.map((n) => (
-          <TouchableOpacity
+          <View
             key={`notif-${n.id}`}
             style={[styles.card, { backgroundColor: n.read ? colors.surface : colors.accent + '08', borderColor: n.read ? colors.border : colors.accent + '40' }]}
-            activeOpacity={0.8}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push(`/inbox/${n.senderId}` as any);
-            }}
           >
-            <View style={[styles.avatar, { backgroundColor: colors.accent + '20', alignItems: 'center', justifyContent: 'center' }]}>
-              <Bell size={20} color={colors.accent} />
-            </View>
-            <View style={styles.cardContent}>
-              <View style={styles.cardHeader}>
-                <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
-                  {n.type === 'bundle_grab' ? 'Bundle grabbed' : n.type === 'call_request' ? 'Missed call' : 'Notification'}
-                </Text>
-                <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
-                  {formatTimeAgo(n.createdAt)}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (n.type === 'call_request') return; // handled by buttons
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push(`/inbox/${n.senderId}` as any);
+              }}
+            >
+              <View style={[styles.avatar, { backgroundColor: n.type === 'call_request' ? '#EF444420' : n.type === 'room_invite' ? '#8B5CF620' : colors.accent + '20', alignItems: 'center', justifyContent: 'center' }]}>
+                {n.type === 'call_request' ? <Phone size={20} color="#EF4444" /> : n.type === 'room_invite' ? <Bell size={20} color="#8B5CF6" /> : <Bell size={20} color={colors.accent} />}
+              </View>
+              <View style={styles.cardContent}>
+                <View style={styles.cardHeader}>
+                  <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
+                    {n.type === 'bundle_grab' ? 'Bundle grabbed' : n.type === 'call_request' ? 'Incoming Call' : n.type === 'room_invite' ? 'Room Invite' : 'Notification'}
+                  </Text>
+                  <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
+                    {formatTimeAgo(n.createdAt)}
+                  </Text>
+                </View>
+                <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {n.senderName}: {n.message}
                 </Text>
               </View>
-              <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-                {n.senderName}: {n.message}
-              </Text>
-            </View>
-            {!n.read && (
-              <View style={[styles.unread, { backgroundColor: colors.accent }]}>
-                <Text style={styles.unreadText}>1</Text>
+              {!n.read && (
+                <View style={[styles.unread, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.unreadText}>1</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {/* Call request actions */}
+            {n.type === 'call_request' && (
+              <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
+                <TouchableOpacity
+                  style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    const content = typeof n._raw?.content === 'string' ? JSON.parse(n._raw.content) : n;
+                    router.push({ pathname: '/call/[roomId]' as any, params: {
+                      roomId: content.room_id || `call-${Date.now()}`,
+                      callerId: n.senderId,
+                      callerName: n.senderName,
+                      targetId: user?.id,
+                      targetName: user?.fullName || 'You',
+                      isOutgoing: '0',
+                      currentUserId: user?.id,
+                      currentUserName: user?.fullName || 'You',
+                    } as any});
+                  }}
+                >
+                  <Phone size={16} color="#10B981" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}
+                  onPress={() => {
+                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
+                    setNotifs(prev => prev.filter(x => x.id !== n.id));
+                  }}
+                >
+                  <X size={16} color="#EF4444" />
+                </TouchableOpacity>
               </View>
             )}
-          </TouchableOpacity>
+            {/* Room invite actions */}
+            {n.type === 'room_invite' && (
+              <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
+                <TouchableOpacity
+                  style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    const content = typeof n._raw?.content === 'string' ? JSON.parse(n._raw.content) : n;
+                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
+                    setNotifs(prev => prev.filter(x => x.id !== n.id));
+                    if (content.room_id) router.push(`/(tabs)/live/room/${content.room_id}` as any);
+                  }}
+                >
+                  <Check size={16} color="#10B981" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}
+                  onPress={() => {
+                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
+                    setNotifs(prev => prev.filter(x => x.id !== n.id));
+                  }}
+                >
+                  <X size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         ))}
         {allConversations.map((conv) => {
       const lastMsg = conv.messages[conv.messages.length - 1];

@@ -13,6 +13,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import ChatTab from '@/components/live/ChatTab';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -750,11 +751,7 @@ function RoomContent() {
         {ActiveTabContent ? (
           <ActiveTabContent />
         ) : activeTab === 'chat' ? (
-          <View style={styles.placeholder}>
-            <MessageCircle size={36} color="#4B5563" />
-            <Text style={styles.placeholderTitle}>Chat</Text>
-            <Text style={styles.placeholderSub}>Room chat coming soon</Text>
-          </View>
+          <ChatTab roomId={roomId || ''} roomName={room?.name || ''} />
         ) : activeTab === 'history' ? (
           <HistoryFeed
             entries={mergedHistoryEntries}

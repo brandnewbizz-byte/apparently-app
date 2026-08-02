@@ -58,8 +58,8 @@ export default function ConversationScreen() {
   // ── Phone call ──
   const startCall = async () => {
     if (!user?.id) return;
-    const roomId = `call-${Date.now()}`;
-    callRoomRef.current = roomId;
+    const callRoomId = `call-${Date.now()}`;
+    callRoomRef.current = callRoomId;
     setIsCalling(true);
     // Send call notification to recipient
     await supabase.from('notifications').insert({
@@ -67,16 +67,28 @@ export default function ConversationScreen() {
       sender_id: user.id,
       type: 'call_request',
       content: JSON.stringify({
-        room_id: roomId,
+        room_id: callRoomId,
         caller_name: user.fullName || 'Someone',
-        message: `is calling you...`,
+        caller_id: user.id,
+        message: 'is calling you...',
       }),
       read: false,
       created_at: new Date().toISOString(),
     });
-    Alert.alert('Calling...', `Calling ${participant.name}...`, [
-      { text: 'Cancel', onPress: () => { setIsCalling(false); callRoomRef.current = null; }, style: 'cancel' },
-    ]);
+    // Navigate to call screen directly as caller
+    router.push({
+      pathname: '/call/[roomId]' as any,
+      params: {
+        roomId: callRoomId,
+        callerId: user.id,
+        callerName: user.fullName || 'You',
+        targetId: notificationId,
+        targetName: participant.name,
+        isOutgoing: '1',
+        currentUserId: user.id,
+        currentUserName: user.fullName || 'You',
+      },
+    } as any);
   };
 
   // Real participant data — fetched from Supabase
