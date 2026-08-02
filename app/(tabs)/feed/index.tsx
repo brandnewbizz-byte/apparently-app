@@ -856,16 +856,23 @@ export default function FeedScreen() {
       setSearchUserLoading(true);
       const pattern = `%${searchQuery.trim()}%`;
       const { data } = await supabase
-        .from('users')
-        .select('id, name, username, avatar, is_verified, followers_count')
-        .or(`name.ilike.${pattern},username.ilike.${pattern}`)
+        .from('profiles')
+        .select('id, full_name, username, avatar')
+        .or(`full_name.ilike.${pattern},username.ilike.${pattern}`)
         .limit(8);
+      // Map profiles format to expected user format
+      const mapped = (data || []).map((p: any) => ({
+        id: p.id,
+        name: p.full_name || p.username || 'User',
+        username: p.username || '',
+        avatar: p.avatar || '',
+      }));
       // Discard stale results if a newer request was already fired
       if (requestId !== searchRequestIdRef.current) return;
-      if (data) {
-        setSearchUsers(data);
-        if (authUser?.id && data.length > 0) {
-          const ids = data.map((u: any) => u.id).filter((id: string) => id !== authUser.id);
+      if (mapped.length > 0) {
+        setSearchUsers(mapped);
+        if (authUser?.id) {
+          const ids = mapped.map((u: any) => u.id).filter((id: string) => id !== authUser.id);
           if (ids.length > 0) {
             const { data: followData } = await supabase
               .from('follows')
@@ -1383,6 +1390,30 @@ export default function FeedScreen() {
                 )}
               </View>
             </View>
+
+            {/* ── User Search Results ── */}
+            {searchUsers.length > 0 && (
+              <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textTertiary, marginBottom: 8 }}>Users</Text>
+                {searchUsers.map((u: any) => (
+                  <TouchableOpacity key={u.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 }}
+                    onPress={() => { router.push(`/user/${u.id}` as any); setSearchQuery(''); }}>
+                    <RNImage source={{ uri: u.avatar }} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.border }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{u.name}</Text>
+                      <Text style={{ fontSize: 13, color: colors.textTertiary }}>@{u.username}</Text>
+                    </View>
+                    {u.id !== authUser?.id && (
+                      <TouchableOpacity onPress={() => handleToggleFollow(u.id)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: searchFollowingIds.has(u.id) ? colors.border : colors.accent }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: searchFollowingIds.has(u.id) ? colors.text : '#fff' }}>
+                          {searchFollowingIds.has(u.id) ? 'Following' : 'Follow'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             {/* ── For You Row ── */}
             {activeFilter === 'all' && !tagFilter && (

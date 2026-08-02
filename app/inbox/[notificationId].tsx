@@ -341,13 +341,13 @@ export default function ConversationScreen() {
   const filteredUsers = useCallback(async (query: string) => {
     if (!query || query.length < 2) return [];
     const { data } = await supabase
-      .from('users')
-      .select('id, name, username, avatar')
-      .ilike('username', `%${query}%`)
+      .from('profiles')
+      .select('id, full_name, username, avatar')
+      .or(`full_name.ilike.%${query}%,username.ilike.%${query}%`)
       .limit(5);
     return (data || []).map((u: any) => ({
       id: u.id,
-      name: u.name || '',
+      name: u.full_name || u.username || '',
       username: u.username || '',
       avatar: u.avatar || '',
       isVerified: false,
@@ -356,6 +356,15 @@ export default function ConversationScreen() {
   }, []);
 
   const [mentionUsers, setMentionUsers] = useState<any[]>([]);
+
+  // Fetch mention suggestions when user types @
+  useEffect(() => {
+    if (mentionQuery && mentionQuery.length >= 2) {
+      filteredUsers(mentionQuery).then(setMentionUsers).catch(() => setMentionUsers([]));
+    } else {
+      setMentionUsers([]);
+    }
+  }, [mentionQuery, filteredUsers]);
 
   const formatDuration = (sec: number) => {
     const m = Math.floor(sec / 60);
