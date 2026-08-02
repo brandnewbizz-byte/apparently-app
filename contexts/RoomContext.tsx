@@ -93,6 +93,8 @@ interface RoomContextValue {
   endLive: (roomId: string) => void;
   deleteRoom: (roomId: string) => void;
   generateInviteLink: (roomId: string) => string;
+  toggleRoomLock: (roomId: string) => void;
+  isRoomLocked: boolean;
 
   // Gestures
   toggleRaiseHand: (roomId: string) => void;
@@ -163,6 +165,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const isTableReady = useRef(false);
   const controlRequestsRef = useRef<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'browse' | 'presenting'>('browse');
+  const [isRoomLocked, setIsRoomLocked] = useState(false);
 
   // ── Init: load from AsyncStorage first, then try Supabase ──
   const initialLoadDone = useRef(false);
@@ -450,6 +453,10 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
 
   const generateInviteLink = useCallback((roomId: string): string => {
     return `apparently://live/room/${roomId}`;
+  }, []);
+
+  const toggleRoomLock = useCallback((roomId: string) => {
+    setIsRoomLocked(prev => !prev);
   }, []);
 
   // ── Push-to-talk ──
@@ -832,7 +839,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const value: RoomContextValue = {
     rooms, currentRoom, isLoading,
     fetchRooms, createRoom, joinRoom, leaveRoom, isInRoom,
-    goLive, endLive, deleteRoom, generateInviteLink,
+    goLive, endLive, deleteRoom, generateInviteLink, isRoomLocked, toggleRoomLock,
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
     muteParticipant, unmuteParticipant, muteAllExceptHosts, toggleOpenDiscussion,

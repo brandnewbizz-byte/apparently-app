@@ -136,7 +136,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
             return { ...prev, [postId]: { ...current, isLiked: true, likeCount: Math.max(current.likeCount, 1) } };
           });
         }
-      }).catch(() => {});
+      });
     });
   }, [authUserId]); // Run once when auth is ready
 
@@ -147,7 +147,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         setAuthUserId(data.user.id);
         logger.info('SocialContext', 'Got auth user ID', { userId: data.user.id });
       }
-    }).catch(() => {});
+    });
   }, []);
 
   const postsQuery = useQuery({
@@ -445,8 +445,19 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
-    // Persist to local API
     localApi.toggleLike(postId, authUserId).catch(() => {});
+    // Send notification if liking
+    if (!current.isLiked && authUserId && authUserId !== 'u-dev') {
+      supabase.from('posts').select('user_id').eq('id', postId).single().then(({ data: post }: any) => {
+        if (post?.user_id && post.user_id !== authUserId) {
+          supabase.from('notifications').insert({
+            recipient_id: post.user_id, sender_id: authUserId, type: 'like',
+            content: JSON.stringify({ post_id: postId, message: 'liked your post' }),
+            read: false, created_at: new Date().toISOString(),
+          });
+        }
+      });
+    }
   }, [ensureInteraction, interactions, persistState, authUserId]);
 
   const addComment = useCallback((postId: string, text: string, parentId?: string) => {
@@ -490,8 +501,19 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
-    // Persist to local API
     localApi.addComment(postId, authUserId, text, parentId).catch(() => {});
+    // Send notification to post author
+    if (authUserId && authUserId !== 'u-dev') {
+      supabase.from('posts').select('user_id').eq('id', postId).single().then(({ data: post }: any) => {
+        if (post?.user_id && post.user_id !== authUserId) {
+          supabase.from('notifications').insert({
+            recipient_id: post.user_id, sender_id: authUserId, type: 'comment',
+            content: JSON.stringify({ post_id: postId, message: 'commented: "' + text.slice(0, 60) + '"' }),
+            read: false, created_at: new Date().toISOString(),
+          });
+        }
+      });
+    }
   }, [ensureInteraction, interactions, persistState, authUserId]);
 
   const toggleCommentLike = useCallback((postId: string, commentId: string) => {
@@ -609,7 +631,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         const next = { ...interactions, [postId]: updated };
         setInteractions(next);
       }
-    }).catch(() => {});
+    });
     return local;
   }, [getInteraction, ensureInteraction, interactions]);
 
@@ -750,7 +772,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         });
         setApiPosts(mapped);
         setInteractions(buildDefaultState(mapped));
-      }).catch(() => {});
+      });
     }).catch(err => {
       logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
     });

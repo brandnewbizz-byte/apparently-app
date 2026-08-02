@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, ScrollView, Image, FlatList, PanResponder, Alert,
+  Animated, ScrollView, Image, FlatList, PanResponder, Alert, Modal, TextInput,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
   MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck, Radio,
-  Repeat2, Trash2,
+  Repeat2, Trash2, Lock, UserPlus, Search, User,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
@@ -241,6 +241,10 @@ function RoomContent() {
   const [facing, setFacing] = useState<'front' | 'back'>('front');
   const [expandedCamera, setExpandedCamera] = useState<{ userId: string; fullName: string; isLocal: boolean } | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [inviteResults, setInviteResults] = useState<any[]>([]);
+  const [inviteLoading, setInviteLoading] = useState(false);
   // handRaised/setHandRaised removed — using RoomContext toggleRaiseHand
   // presenterTab/setPresenterTab from RoomContext — syncs via supabase realtime
   const [activeTab, setActiveTab] = useState('overview');
@@ -268,7 +272,7 @@ function RoomContent() {
     isHost, isCoHostOrAbove, getUserRole,
     enterFollowMode, leaveFollowMode, returnToLivePresentation,
     viewMode, setViewMode, currentRoom, addActivity,
-    goLive, endLive, deleteRoom, generateInviteLink,
+    goLive, endLive, deleteRoom, generateInviteLink, isRoomLocked, toggleRoomLock,
   } = useRoom();
   const { plan, createPlan, loadPlan, saveNow } = usePlan();
 
@@ -417,6 +421,49 @@ function RoomContent() {
     router.back();
   }, [roomId, leaveRoom, router]);
 
+  // ── Room Invite ──
+  const searchUsersForInvite = useCallback(async (query: string) => {
+    if (query.length < 2) { setInviteResults([]); return; }
+    setInviteLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, avatar')
+        .or(`full_name.ilike.%25${query}%25,username.ilike.%25${query}%25`)
+        .limit(10);
+      if (!error && data) {
+        // Filter out current user and already-participants
+        const participantIds = new Set((room?.participants || []).map((p: any) => p.userId));
+        setInviteResults(data.filter((u: any) => u.id !== user?.id && !participantIds.has(u.id)));
+      }
+    } catch {}
+    setInviteLoading(false);
+  }, [room?.participants, user?.id]);
+
+  const sendRoomInvite = useCallback(async (targetUserId: string, targetName: string) => {
+    if (!user?.id || !roomId) return;
+    await supabase.from('notifications').insert({
+      recipient_id: targetUserId,
+      sender_id: user.id,
+      type: 'room_invite',
+      content: JSON.stringify({
+        room_id: roomId,
+        room_name: room?.name || 'A room',
+        inviter_name: (user as any)?.fullName || 'Someone',
+        message: `invited you to join "${room?.name || 'their room'}"`,
+      }),
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+    Alert.alert('Invited', `Invitation sent to ${targetName}`);
+  }, [user?.id, user, roomId, room?.name]);
+
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => searchUsersForInvite(inviteSearch), 300);
+    return () => clearTimeout(t);
+  }, [inviteSearch, searchUsersForInvite]);
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
@@ -536,35 +583,23 @@ function RoomContent() {
                 <Text style={styles.manageBtnText}>Manage</Text>
               </TouchableOpacity>
             )}
-            {room?.status === 'live' && room?.category !== 'Love' && (
-              <TouchableOpacity
-                style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
-                onPress={() => {
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                  endLive(roomId || '');
-                }}
-              >
-                <Monitor size={14} color="#FFF" />
-                <Text style={styles.presentBtnText}>End Live</Text>
-              </TouchableOpacity>
-            )}
-            {room?.status === 'live' && room?.category === 'Love' && (
+            {room?.status === 'live' && userIsHostOrAbove && (
               <>
                 <TouchableOpacity
-                  style={[styles.presentBtn, { backgroundColor: '#6B7280' }]}
+                  style={[styles.presentBtn, { backgroundColor: isRoomLocked ? '#22C55E' : '#F59E0B' }]}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    endLive(roomId || '');
+                    toggleRoomLock(roomId || '');
                   }}
                 >
-                  <X size={14} color="#FFF" />
-                  <Text style={styles.presentBtnText}>Close Room</Text>
+                  <Lock size={14} color="#FFF" />
+                  <Text style={styles.presentBtnText}>{isRoomLocked ? 'Unlock' : 'Lock'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    Alert.alert('Delete Room', 'Permanently delete this Love Room?', [
+                    Alert.alert('Delete Room', 'Permanently delete this room? This cannot be undone.', [
                       { text: 'Cancel', style: 'cancel' },
                       { text: 'Delete', style: 'destructive', onPress: () => deleteRoom(roomId || '') },
                     ]);
@@ -575,11 +610,22 @@ function RoomContent() {
                 </TouchableOpacity>
               </>
             )}
+            {room?.status === 'live' && userIsHostOrAbove && (
+              <TouchableOpacity
+                style={[styles.presentBtn, { backgroundColor: '#3B82F6' }]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowInviteModal(true);
+                }}
+              >
+                <UserPlus size={14} color="#FFF" />
+                <Text style={styles.presentBtnText}>Invite</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.headerBtn}
               onPress={() => {
                 const link = generateInviteLink(roomId || '');
-                // Copy to clipboard via Share API
                 const { Share } = require('react-native');
                 Share.share({ message: `Join my live room on Apparently: ${link}`, url: link }).catch(() => {});
               }}
@@ -963,6 +1009,68 @@ function RoomContent() {
           />
         </Animated.View>
       )}
+      {/* ── Invite Modal ── */}
+      <Modal visible={showInviteModal} transparent animationType="slide" onRequestClose={() => setShowInviteModal(false)}>
+        <TouchableOpacity style={styles.inviteOverlay} activeOpacity={1} onPress={() => setShowInviteModal(false)}>
+          <View style={[styles.inviteSheet, { backgroundColor: '#FFFFFF' }]} onStartShouldSetResponder={() => true}>
+            <Text style={styles.inviteTitle}>Invite to Room</Text>
+            <View style={styles.inviteSearchInput}>
+              <Search size={16} color="#8E8E93" />
+              <TextInput
+                style={styles.inviteSearchField}
+                placeholder="Search users..."
+                placeholderTextColor="#8E8E93"
+                value={inviteSearch}
+                onChangeText={setInviteSearch}
+                autoFocus
+              />
+              {inviteSearch.length > 0 && (
+                <TouchableOpacity onPress={() => { setInviteSearch(''); setInviteResults([]); }}>
+                  <X size={16} color="#8E8E93" />
+                </TouchableOpacity>
+              )}
+            </View>
+            <FlatList
+              data={inviteResults}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={styles.inviteUserItem}>
+                  <View style={styles.inviteAvatar}>
+                    {item.avatar ? (
+                      <Image source={{ uri: item.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+                    ) : (
+                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                        <User size={20} color="#8E8E93" />
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inviteName}>{item.full_name || 'Unnamed'}</Text>
+                    <Text style={styles.inviteUser}>@{item.username || 'user'}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.inviteBtn}
+                    onPress={() => {
+                      sendRoomInvite(item.id, item.full_name || item.username || 'User');
+                      setShowInviteModal(false);
+                      setInviteSearch('');
+                      setInviteResults([]);
+                    }}
+                  >
+                    <Text style={styles.inviteBtnText}>Invite</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              ListEmptyComponent={
+                inviteSearch.length >= 2 && !inviteLoading ? (
+                  <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 20 }}>No users found</Text>
+                ) : null
+              }
+            />
+            {inviteLoading && <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 10 }}>Searching...</Text>}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1211,4 +1319,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
   },
   adminActionDanger: { backgroundColor: 'rgba(239,68,68,0.1)' },
+  // Invite modal
+  inviteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  inviteSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%' },
+  inviteTitle: { fontSize: 18, fontWeight: '700', color: '#262626', marginBottom: 12 },
+  inviteSearchInput: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  inviteSearchField: { flex: 1, fontSize: 16, color: '#262626' },
+  inviteUserItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  inviteAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F0F0F0', marginRight: 12 },
+  inviteName: { fontSize: 15, fontWeight: '600', color: '#262626' },
+  inviteUser: { fontSize: 13, color: '#8E8E93' },
+  inviteBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: '#3B82F6' },
+  inviteBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
 });
