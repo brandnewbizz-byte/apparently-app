@@ -363,6 +363,17 @@ export default function ConversationScreen() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Delete own message
+  const handleDeleteMessage = (msgId: string) => {
+    Alert.alert('Delete Message', 'Remove this message?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setMessages(prev => prev.filter(m => m.id !== msgId));
+        try { await supabase.from('messages').delete().eq('id', msgId); } catch {}
+      }},
+    ]);
+  };
+
   const renderMessage = (message: Message, index: number) => {
     const isMe = message.userId === 'me';
     const isAudio = !!message.audioUrl;
@@ -375,6 +386,7 @@ export default function ConversationScreen() {
           <TouchableOpacity
             style={[styles.audioBubble, isMe ? styles.myAudioBubble : styles.theirAudioBubble]}
             onPress={() => playAudio(message.audioUrl!, message.id)}
+            onLongPress={() => isMe && handleDeleteMessage(message.id)}
             activeOpacity={0.7}
           >
             {isPlaying ? <Pause size={22} color="#FFFFFF" /> : <Play size={22} color="#FFFFFF" />}
@@ -406,10 +418,14 @@ export default function ConversationScreen() {
     return (
       <View key={message.id} style={[styles.messageContainer, isMe ? styles.myMessageContainer : styles.theirMessageContainer]}>
         {!isMe && <Image source={{ uri: participant.avatar }} style={styles.messageAvatar} />}
-        <View style={[styles.messageBubble, isMe ? styles.myMessageBubble : styles.theirMessageBubble]}>
+        <TouchableOpacity
+          style={[styles.messageBubble, isMe ? styles.myMessageBubble : styles.theirMessageBubble]}
+          activeOpacity={0.8}
+          onLongPress={() => isMe && handleDeleteMessage(message.id)}
+        >
           <Text style={[styles.messageText, isMe && styles.myMessageText]}>{textWithMentions}</Text>
           <Text style={[styles.messageTimestamp, isMe && styles.myMessageTimestamp]}>{message.timestamp}</Text>
-        </View>
+        </TouchableOpacity>
         {isMe && <Image source={{ uri: myAvatar }} style={styles.messageAvatar} />}
       </View>
     );

@@ -43,13 +43,7 @@ export default function InboxScreen() {
   const [supabaseConvs, setSupabaseConvs] = useState<any[]>([]);
   useEffect(() => {
     if (!user?.id) return;
-    const fetchConvs = async () => {
-      const { data } = await supabase.from('conversations').select('*')
-        .or(`participant_one.eq.${user.id},participant_two.eq.${user.id}`)
-        .order('last_message_at', { ascending: false }).limit(30);
-      if (data) setSupabaseConvs(data);
-    };
-    fetchConvs();
+    fetchSupabaseConvs();
   }, [user?.id, messaging.conversations.length]);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
