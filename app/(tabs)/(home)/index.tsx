@@ -1356,7 +1356,7 @@ export default function HomeScreen() {
 
   // Compute bundle sets from context
   const bundleSets = useMemo(() => {
-    const availableBundles = contextBundles.filter((b) => b.status === 'available' || b.status === 'draft' || b.status === 'published');
+    const availableBundles = contextBundles.filter((b) => b.status === 'available' || b.status === 'active' || b.status === 'draft' || b.status === 'published');
     const forYou = availableBundles.map(userBundleToPlan);
     const hot = [...availableBundles].sort((a, b) => b.grabCount - a.grabCount).map(userBundleToPlan);
     return [
@@ -1871,7 +1871,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={(serviceRequests && serviceRequests.length > 0) ? serviceRequests.filter(r => (r.creatorId || (r as any).creator_id || '') !== user?.id) : []}
+            requests={serviceRequests && serviceRequests.length > 0 ? serviceRequests : []}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}

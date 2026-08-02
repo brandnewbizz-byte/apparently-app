@@ -1077,18 +1077,6 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
             <TouchableOpacity style={viewerStyles.xBtn} onPress={() => setShowOptions(true)}>
               <MoreHorizontal size={22} color="#CCC" />
             </TouchableOpacity>
-            <TouchableOpacity style={[viewerStyles.xBtn, { marginLeft: 8 }]} onPress={() => {
-              Alert.alert(
-                'Delete Post',
-                'This action cannot be undone. Are you sure?',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
-                ]
-              );
-            }}>
-              <Trash2 size={22} color="#EF4444" />
-            </TouchableOpacity>
             <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
               <X size={22} color="#CCC" />
             </TouchableOpacity>
