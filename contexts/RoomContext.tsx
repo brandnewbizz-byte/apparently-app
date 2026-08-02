@@ -248,6 +248,10 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const fetchRooms = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Get current user for scoping
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData?.user?.id;
+      
       if (isTableReady.current) {
         const { data, error } = await supabase
           .from('rooms')
@@ -255,9 +259,18 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
           .order('created_at', { ascending: false })
           .limit(50);
         if (!error && data) {
-          const mapped = data.map(mapFromDB);
-          setRooms(mapped);
-          AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(mapped)).catch(() => {});
+          let allRooms = data.map(mapFromDB);
+          // Filter: only show own rooms or rooms the user is a participant in
+          if (currentUserId) {
+            allRooms = allRooms.filter(room => {
+              if (room.creatorId === currentUserId) return true;
+              // Check if user is in participants
+              const participants = room.participants || [];
+              return participants.some((p: any) => p.userId === currentUserId);
+            });
+          }
+          setRooms(allRooms);
+          AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(allRooms)).catch(() => {});
           setIsLoading(false);
           return;
         }

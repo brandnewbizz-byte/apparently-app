@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, ScrollView, Image, FlatList, PanResponder,
+  Animated, ScrollView, Image, FlatList, PanResponder, Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
   MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck, Radio,
-  Repeat2,
+  Repeat2, Trash2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
@@ -536,7 +536,7 @@ function RoomContent() {
                 <Text style={styles.manageBtnText}>Manage</Text>
               </TouchableOpacity>
             )}
-            {room?.status === 'live' && (
+            {room?.status === 'live' && room?.category !== 'Love' && (
               <TouchableOpacity
                 style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
                 onPress={() => {
@@ -547,6 +547,33 @@ function RoomContent() {
                 <Monitor size={14} color="#FFF" />
                 <Text style={styles.presentBtnText}>End Live</Text>
               </TouchableOpacity>
+            )}
+            {room?.status === 'live' && room?.category === 'Love' && (
+              <>
+                <TouchableOpacity
+                  style={[styles.presentBtn, { backgroundColor: '#6B7280' }]}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    endLive(roomId || '');
+                  }}
+                >
+                  <X size={14} color="#FFF" />
+                  <Text style={styles.presentBtnText}>Close Room</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    Alert.alert('Delete Room', 'Permanently delete this Love Room?', [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: () => deleteRoom(roomId || '') },
+                    ]);
+                  }}
+                >
+                  <Trash2 size={14} color="#FFF" />
+                  <Text style={styles.presentBtnText}>Delete</Text>
+                </TouchableOpacity>
+              </>
             )}
             <TouchableOpacity
               style={styles.headerBtn}

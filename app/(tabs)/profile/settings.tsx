@@ -20,6 +20,7 @@ export default function SettingsScreen() {
   const [editingUsername, setEditingUsername] = useState(user?.username || '');
   const [editingBio, setEditingBio] = useState(user?.bio || '');
   const [editingAvatar, setEditingAvatar] = useState((user as any)?.avatar_url || user?.avatar || '');
+  const [editingAvatarBase64, setEditingAvatarBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -39,7 +40,12 @@ export default function SettingsScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets?.length > 0) {
-      setEditingAvatar(result.assets[0].uri);
+      const uri = result.assets[0].uri;
+      // Store base64 for reliable upload — fetch() can fail with local file:// URIs
+      if (result.assets[0].base64) {
+        setEditingAvatarBase64(result.assets[0].base64);
+      }
+      setEditingAvatar(uri);
     }
   };
 

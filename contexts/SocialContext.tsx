@@ -120,6 +120,26 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [feedStories, setFeedStories] = useState<Story[]>([]);
   const [authUserId, setAuthUserId] = useState<string>('u-dev');
 
+  // Fetch like statuses from Supabase for all loaded posts
+  useEffect(() => {
+    if (!authUserId || authUserId === 'u-dev') return;
+    const postIds = Object.keys(interactions);
+    if (postIds.length === 0) return;
+    
+    postIds.forEach(postId => {
+      localApi.getLikeStatus(postId, authUserId).then(({ liked }) => {
+        if (liked) {
+          setInteractions((prev: Record<string, PostInteraction>) => {
+            const current = prev[postId];
+            if (!current) return { ...prev, [postId]: { likeCount: 1, commentCount: 0, shareCount: 0, isLiked: true, comments: [] } };
+            if (current.isLiked) return prev;
+            return { ...prev, [postId]: { ...current, isLiked: true, likeCount: Math.max(current.likeCount, 1) } };
+          });
+        }
+      }).catch(() => {});
+    });
+  }, [authUserId]); // Run once when auth is ready
+
   // Get real auth user ID on mount
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {

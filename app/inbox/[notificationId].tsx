@@ -460,7 +460,10 @@ export default function ConversationScreen() {
         <TouchableOpacity
           style={styles.callButton}
           onPress={() => {
-            Alert.alert('Call', `Call ${participant.name}?`);
+            Alert.alert('Call', `Call ${participant.name}?`, [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Call', onPress: startCall },
+            ]);
           }}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
