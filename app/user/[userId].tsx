@@ -480,6 +480,52 @@ export default function UserProfileScreen() {
                 <Text style={[styles.optionText, { color: ACCENT_COLORS.coral }]}>Delete Post</Text>
               </TouchableOpacity>
             )}
+            {!isOwnProfile && (
+              <>
+                <TouchableOpacity style={styles.optionRow} onPress={() => {
+                  setShowOptions(false);
+                  Alert.alert('Block User', 'Are you sure you want to block this user? You will no longer see their posts or messages.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Block', style: 'destructive', onPress: async () => {
+                      if (authUser?.id && userId) {
+                        await supabase.from('blocks').upsert({ blocker_id: authUser.id, blocked_id: userId });
+                        Alert.alert('Blocked', 'User has been blocked');
+                      }
+                    }}
+                  ]);
+                }}>
+                  <Slash size={20} color={ACCENT_COLORS.coral} />
+                  <Text style={[styles.optionText, { color: ACCENT_COLORS.coral }]}>Block User</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.optionRow} onPress={() => {
+                  setShowOptions(false);
+                  Alert.alert('Report User', 'Please select a reason for reporting this user:', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Spam', onPress: async () => {
+                      if (authUser?.id && userId) {
+                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'spam' });
+                      }
+                      Alert.alert('Reported', 'Thank you. We will review this report.');
+                    }},
+                    { text: 'Harassment', onPress: async () => {
+                      if (authUser?.id && userId) {
+                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'harassment' });
+                      }
+                      Alert.alert('Reported', 'Thank you. We will review this report.');
+                    }},
+                    { text: 'Inappropriate Content', onPress: async () => {
+                      if (authUser?.id && userId) {
+                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'inappropriate' });
+                      }
+                      Alert.alert('Reported', 'Thank you. We will review this report.');
+                    }},
+                  ]);
+                }}>
+                  <AlertTriangle size={20} color={ACCENT_COLORS.amber} />
+                  <Text style={[styles.optionText, { color: ACCENT_COLORS.amber }]}>Report User</Text>
+                </TouchableOpacity>
+              </>
+            )}
             <TouchableOpacity style={styles.optionRow} onPress={() => { setShowOptions(false); }}>
               <Share2 size={20} color={colors.textSecondary} />
               <Text style={[styles.optionText, { color: colors.text }]}>Share</Text>

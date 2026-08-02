@@ -1,4 +1,4 @@
-import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign } from 'lucide-react-native';
+import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign, Lock, Info } from 'lucide-react-native';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert, Switch, TextInput, Image } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -90,6 +90,46 @@ export default function SettingsScreen() {
   const handleToggleTheme = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     toggleTheme();
+  };
+
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showEmailChange, setShowEmailChange] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [accountLoading, setAccountLoading] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+    setAccountLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setAccountLoading(false);
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Success', 'Password updated');
+      setNewPassword('');
+      setShowPasswordChange(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!newEmail || !newEmail.includes('@')) {
+      Alert.alert('Error', 'Enter a valid email address');
+      return;
+    }
+    setAccountLoading(true);
+    const { error } = await supabase.auth.updateUser({ email: newEmail });
+    setAccountLoading(false);
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Check your email', 'A confirmation link was sent to your new email address.');
+      setNewEmail('');
+      setShowEmailChange(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -216,6 +256,42 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Change Email */}
+          <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setShowEmailChange(!showEmailChange)}>
+            <View style={[styles.settingIcon, { backgroundColor: colors.accentGlow }]}>
+              <Mail size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>Change Email</Text>
+            </View>
+          </TouchableOpacity>
+          {showEmailChange && (
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+              <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface, marginBottom: 8 }]} value={newEmail} onChangeText={setNewEmail} placeholder="New email address" placeholderTextColor={colors.textTertiary} autoCapitalize="none" keyboardType="email-address" />
+              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: accountLoading ? 0.6 : 1 }]} onPress={handleChangeEmail} disabled={accountLoading}>
+                <Text style={styles.saveBtnText}>{accountLoading ? 'Sending...' : 'Update Email'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Change Password */}
+          <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setShowPasswordChange(!showPasswordChange)}>
+            <View style={[styles.settingIcon, { backgroundColor: colors.accentGlow }]}>
+              <Lock size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>Change Password</Text>
+            </View>
+          </TouchableOpacity>
+          {showPasswordChange && (
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+              <TextInput style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface, marginBottom: 8 }]} value={newPassword} onChangeText={setNewPassword} placeholder="New password (min 6 chars)" placeholderTextColor={colors.textTertiary} secureTextEntry />
+              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: accountLoading ? 0.6 : 1 }]} onPress={handleChangePassword} disabled={accountLoading}>
+                <Text style={styles.saveBtnText}>{accountLoading ? 'Updating...' : 'Update Password'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <TouchableOpacity style={[styles.settingItem, styles.logoutItem]} onPress={handleSignOut}>
             <View style={[styles.settingIcon, { backgroundColor: 'rgba(255,82,82,0.2)' }]}>
               <LogOut size={20} color="#FF5252" />
@@ -224,6 +300,20 @@ export default function SettingsScreen() {
               <Text style={{ fontSize: 15, fontWeight: '600', color: '#FF5252' }}>Sign Out</Text>
             </View>
           </TouchableOpacity>
+        </View>
+
+        {/* About */}
+        <View style={[styles.section, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
+          <View style={[styles.settingItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.settingIcon, { backgroundColor: colors.accentGlow }]}>
+              <Info size={20} color={colors.accent} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>Version</Text>
+              <Text style={[styles.settingValue, { color: colors.textSecondary }]}>1.0.0 (Build 64)</Text>
+            </View>
+          </View>
         </View>
 
         <Text style={[styles.versionText, { color: colors.textTertiary }]}>apparently v1.0</Text>
