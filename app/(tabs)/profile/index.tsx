@@ -93,6 +93,53 @@ interface StatItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Saved Posts Grid — Bookmarks/collection
+// ═══════════════════════════════════════════════════════════════════════════
+
+function SavedPostsGrid({ colors }: { colors: any }) {
+  const { getSavedPosts } = useSocial();
+  const saved = getSavedPosts();
+
+  if (saved.length === 0) {
+    return (
+      <View style={{ paddingTop: 40, alignItems: 'center' }}>
+        <Bookmark size={40} color={colors.textTertiary || '#8E8E93'} />
+        <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: colors.text }}>No saved posts</Text>
+        <Text style={{ marginTop: 4, fontSize: 13, color: colors.textSecondary || '#8E8E93' }}>Tap the bookmark on any post to save it here</Text>
+      </View>
+    );
+  }
+
+  const numCols = 3;
+  const gap = 2;
+  const size = (Dimensions.get('window').width - gap * (numCols + 1)) / numCols;
+
+  return (
+    <FlatList
+      data={saved}
+      keyExtractor={item => item.id}
+      numColumns={numCols}
+      scrollEnabled={false}
+      contentContainerStyle={{ padding: gap }}
+      renderItem={({ item }: { item: any }) => {
+        const imgUri = item.image || item.media || item.image_url || item.imageUrl;
+        return (
+          <TouchableOpacity style={{ width: size, height: size, margin: gap / 2 }} activeOpacity={0.8}>
+            {imgUri ? (
+              <Image source={{ uri: imgUri }} style={{ width: '100%', height: '100%', borderRadius: 2 }} />
+            ) : (
+              <View style={{ width: '100%', height: '100%', backgroundColor: colors.surface || '#F0F0F0', borderRadius: 2, alignItems: 'center', justifyContent: 'center' }}>
+                <Bookmark size={24} color={colors.textTertiary || '#8E8E93'} />
+              </View>
+            )}
+          </TouchableOpacity>
+        );
+      }}
+    />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // My Posts Grid — Instagram 3-column grid
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -198,7 +245,7 @@ export default function ProfileScreen() {
   const [avgRating, setAvgRating] = useState(0);
   const [grabbedBundles, setGrabbedBundles] = useState<GrabbedBundle[]>([]);
   const [loadingBundles, setLoadingBundles] = useState(true);
-  const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans' | 'saved'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -572,7 +619,7 @@ export default function ProfileScreen() {
 
           {/* Tab Bar */}
           <View style={{ flexDirection: 'row', borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: colors.border }}>
-            {(['posts', 'bundles', 'skills', 'plans'] as const).map((tab) => (
+            {(['posts', 'bundles', 'skills', 'plans', 'saved'] as const).map((tab) => (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setActiveTab(tab)}
@@ -717,6 +764,8 @@ export default function ProfileScreen() {
                 )}
               </View>
             )}
+
+            {activeTab === 'saved' && <SavedPostsGrid colors={colors} />}
           </View>
         </Animated.View>
       </ScrollView>

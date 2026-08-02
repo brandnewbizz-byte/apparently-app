@@ -81,6 +81,11 @@ interface SocialState {
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
+  // Saved/bookmarked posts
+  savedPosts: string[];
+  toggleSave: (postId: string) => void;
+  isSaved: (postId: string) => boolean;
+  getSavedPosts: () => Post[];
 }
 
 
@@ -119,6 +124,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [feedStories, setFeedStories] = useState<Story[]>([]);
   const [authUserId, setAuthUserId] = useState<string>('u-dev');
+  const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
 
   // Fetch like statuses from Supabase for all loaded posts
   useEffect(() => {
@@ -854,6 +860,15 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     return [...feedStories];
   }, [feedStories]);
 
+  // ── Saved/bookmarked posts ──
+  const toggleSave = useCallback((postId: string) => {
+    setSavedPostIds(prev => prev.includes(postId) ? prev.filter(id => id !== postId) : [...prev, postId]);
+  }, []);
+  const isSaved = useCallback((postId: string) => savedPostIds.includes(postId), [savedPostIds]);
+  const getSavedPosts = useCallback((): Post[] => {
+    return getAllPosts().filter(p => savedPostIds.includes(p.id));
+  }, [getAllPosts, savedPostIds]);
+
   return {
     interactions,
     storyInteractions,
@@ -875,5 +890,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     createStory,
     getAllPosts,
     getAllStories,
+    savedPosts: savedPostIds,
+    toggleSave,
+    isSaved,
+    getSavedPosts,
   };
 });
