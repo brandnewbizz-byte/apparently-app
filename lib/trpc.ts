@@ -16,6 +16,17 @@ const getBaseUrl = () => {
 
 export const getApiUrl = () => getBaseUrl();
 
+// Fast fetch with short timeout — falls back to Supabase quickly if backend unreachable
+export async function fastFetch(url: string, timeoutMs = 3000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const trpcClient = trpc.createClient({
   links: [
     httpLink({

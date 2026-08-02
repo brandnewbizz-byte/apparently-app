@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
-import { getApiUrl } from '@/lib/trpc';
+import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 
@@ -96,7 +96,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
 
         // 1. Try backend API (service key bypasses RLS)
         try {
-          const res = await fetch(`${getApiUrl()}/api/home-feed`);
+          const res = await fastFetch(`${getApiUrl()}/api/home-feed`);
           if (res.ok) {
             const json = await res.json();
             if (json.bundles?.length) {
