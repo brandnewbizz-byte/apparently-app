@@ -347,7 +347,6 @@ export default function ConversationScreen() {
             {formatTimestamp(message.timestamp)}
           </Text>
           </TouchableOpacity>
-        </View>
         {isMe && (
           <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
         )}
