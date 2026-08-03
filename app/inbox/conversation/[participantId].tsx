@@ -283,7 +283,7 @@ export default function ConversationScreen() {
 
   const renderMessage = (message: Message) => {
     const isMe = message.senderId === (authUser?.id || '');
-    const user = isMe ? { name: 'You', avatar: authUser?.avatarUrl || myAvatar } : participant;
+    const user = isMe ? { name: 'You', avatar: ((authUser as any)?.avatar as string) || myAvatar } : participant;
 
     const textWithMentions = message.text.split(/(@\w+)/g).map((part, i) => {
       if (part.startsWith('@')) {

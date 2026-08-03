@@ -20,7 +20,7 @@ export default function SettingsScreen() {
   const [editingName, setEditingName] = useState(user?.fullName || '');
   const [editingUsername, setEditingUsername] = useState(user?.username || '');
   const [editingBio, setEditingBio] = useState(user?.bio || '');
-  const [editingAvatar, setEditingAvatar] = useState((user as any)?.avatar_url || user?.avatar || '');
+  const [editingAvatar, setEditingAvatar] = useState((user as any)?.avatar || '');
   const [editingAvatarBase64, setEditingAvatarBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -28,7 +28,7 @@ export default function SettingsScreen() {
     setEditingName(user?.fullName || '');
     setEditingUsername(user?.username || '');
     setEditingBio(user?.bio || '');
-    setEditingAvatar((user as any)?.avatar_url || user?.avatar || '');
+    setEditingAvatar((user as any)?.avatar || '');
   }, [user]);
 
   const pickAvatar = async () => {

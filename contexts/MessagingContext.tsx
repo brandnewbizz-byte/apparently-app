@@ -147,12 +147,12 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           try {
             const { data: profile } = await supabase
               .from('profiles')
-              .select('full_name, avatar_url, username')
+              .select('full_name, avatar, username')
               .eq('id', otherId)
               .maybeSingle();
             if (profile) {
               profileName = profile.full_name || profile.username || 'User';
-              profileAvatar = profile.avatar_url || '';
+              profileAvatar = profile.avatar || '';
               profileUsername = profile.username || 'user';
             }
           } catch {
