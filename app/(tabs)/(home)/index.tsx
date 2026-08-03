@@ -1473,17 +1473,21 @@ export default function HomeScreen() {
     setSavedRequests(prev => [...prev, request]);
   }, []);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] });
-    // Also refresh context-driven data by toggling a refresh key that
-    // forces re-render of sections relying on bundle/skill/request contexts
-    setRefreshKey(k => k + 1);
-    console.log('Grid load:', 'refresh');
-    setTimeout(() => setRefreshing(false), 1500);
+    try {
+      // Await the query invalidation so we know data is refetching
+      await queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] });
+      // Toggle refreshKey to force context-driven sections (bundles, skills, requests)
+      // to re-fetch their data from Supabase
+      setRefreshKey(k => k + 1);
+    } finally {
+      // Safety: always stop the spinner, even if invalidation hangs
+      setRefreshing(false);
+    }
   }, [queryClient]);
 
   const handleScroll = (event: { nativeEvent: { contentOffset: { y: number } } }) => {

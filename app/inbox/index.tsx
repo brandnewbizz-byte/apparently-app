@@ -24,6 +24,7 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 
 const TABS = [
+  { id: 'notifications' as const, label: 'Notifications', icon: Bell },
   { id: 'messages' as const, label: 'Messages', icon: MessageCircle },
   { id: 'requests' as const, label: 'Requests', icon: UserPlus },
 ];
@@ -37,7 +38,7 @@ export default function InboxScreen() {
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'messages' | 'requests'>('messages');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'messages' | 'requests'>('notifications');
   const [refreshing, setRefreshing] = useState(false);
   // Direct Supabase conversation fetch — bridges the AsyncStorage/Supabase disconnection
   const [supabaseConvs, setSupabaseConvs] = useState<any[]>([]);
@@ -63,25 +64,30 @@ export default function InboxScreen() {
     if (!user?.id) return;
 
     const fetchNotifs = async () => {
+      // DB columns: user_id (recipient), actor_id/actor_name/actor_avatar (sender)
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('recipient_id', user.id)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (!error && data) {
+        // actor_name and actor_avatar are already stored on the notification — no profile fetch needed
         setNotifs(data.map((n: any) => {
-          const content = typeof n.content === 'string' ? JSON.parse(n.content) : n.content || {};
+          const extra = n.data || {};
           return {
             id: n.id,
             type: n.type,
-            senderId: n.sender_id,
-            senderName: content.grabber_name || content.caller_name || content.inviter_name || 'Someone',
-            message: content.message || content.title || '',
+            senderId: n.actor_id,
+            senderName: n.actor_name || 'Someone',
+            senderAvatar: n.actor_avatar || '',
+            data: n.data || {},
+            _raw: n,
+            message: n.body || n.title || '',
             read: n.read,
             createdAt: n.created_at,
-            _raw: { ...content, room_id: content.room_id, caller_id: content.caller_id },
+            _raw: { ...extra, room_id: extra.room_id, caller_id: extra.caller_id },
           };
         }));
       }
@@ -95,7 +101,7 @@ export default function InboxScreen() {
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-        filter: `recipient_id=eq.${user.id}`,
+        filter: `user_id=eq.${user.id}`,
       }, () => fetchNotifs())
       .subscribe();
 
@@ -146,43 +152,21 @@ export default function InboxScreen() {
 
   const requestCount = connections.incomingRequests.length;
 
-  // ─── Messages Tab ───
+  // Notifications count
+  const notificationCount = notifs.filter(n => !n.read).length;
 
-  // Merge Supabase conversations with AsyncStorage ones (dedup by id)
-  const allConversations = React.useMemo(() => {
-    const seen = new Set(messaging.conversations.map(c => c.id));
-    const extras: any[] = [];
-    for (const cv of supabaseConvs) {
-      if (!seen.has(cv.id)) {
-        const oid = (cv as any)._otherId || (cv.participant_one === user?.id ? cv.participant_two : cv.participant_one);
-        extras.push({
-          id: cv.id,
-          participantId: oid,
-          participantName: (cv as any)._name || 'User',
-          participantAvatar: (cv as any)._avatar || '',
-          participantUsername: (cv as any)._username || 'user',
-          messages: [{ content: 'Tap to view conversation' }],
-          lastMessageAt: cv.last_message_at || cv.created_at,
-          unreadCount: 0,
-        });
-      }
-    }
-    return [...messaging.conversations, ...extras];
-  }, [messaging.conversations, supabaseConvs, user?.id]);
+  // ─── Notifications Tab ───
 
-  const renderMessages = () => {
-    const hasNotifs = notifs.length > 0;
-    const hasConversations = allConversations.length > 0;
-
-    if (!hasNotifs && !hasConversations) {
+  const renderNotifications = () => {
+    if (notifs.length === 0) {
       return (
         <View style={styles.empty}>
           <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-            <MessageCircle size={40} color={colors.textTertiary} />
+            <Bell size={40} color={colors.textTertiary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No messages yet</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No notifications</Text>
           <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-            Grab a bundle or skill from Home to start a conversation
+            Likes, comments, follows and more will appear here
           </Text>
         </View>
       );
@@ -199,27 +183,46 @@ export default function InboxScreen() {
               style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
               activeOpacity={0.8}
               onPress={() => {
-                if (n.type === 'call_request') return; // handled by buttons
+                if (n.type === 'call_request') return;
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push(`/inbox/${n.senderId}` as any);
+                // Mark as read
+                supabase.from('notifications').update({ read: true }).eq('id', n.id).then(() => {});
+                setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                // Navigate based on type
+                if (n.type === 'follow' || n.type === 'bundle_grab' || n.type === 'skill_grab') {
+                  router.push(`/user/${n.senderId}` as any);
+                } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
+                  const ownerId = n.data?.post_user_id;
+                  if (ownerId) router.push(`/user/${ownerId}` as any);
+                }
               }}
             >
-              <View style={[styles.avatar, { backgroundColor: n.type === 'call_request' ? '#EF444420' : n.type === 'room_invite' ? '#8B5CF620' : colors.accent + '20', alignItems: 'center', justifyContent: 'center' }]}>
-                {n.type === 'call_request' ? <Phone size={20} color="#EF4444" /> : n.type === 'room_invite' ? <Bell size={20} color="#8B5CF6" /> : <Bell size={20} color={colors.accent} />}
+              <View style={styles.avatar}>
+                {n.senderAvatar ? (
+                  <Image source={{ uri: n.senderAvatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                ) : (
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent + '20', alignItems: 'center', justifyContent: 'center' }}>
+                    <Bell size={20} color={colors.accent} />
+                  </View>
+                )}
               </View>
               <View style={styles.cardContent}>
                 <View style={styles.cardHeader}>
                   <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
-                    {n.type === 'bundle_grab' ? 'Bundle grabbed' : n.type === 'call_request' ? 'Incoming Call' : n.type === 'room_invite' ? 'Room Invite' : 'Notification'}
+                    {n.senderName}
                   </Text>
                   <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
                     {formatTimeAgo(n.createdAt)}
                   </Text>
                 </View>
                 <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {n.senderName}: {n.message}
+                  {n.type === 'bundle_grab' ? 'grabbed your bundle' : n.type === 'skill_grab' ? 'grabbed your skill' : n.type === 'follow' ? 'started following you' : n.type === 'comment' ? 'commented on your post' : n.type === 'like' ? 'liked your post' : n.type === 'mention' ? 'mentioned you' : n.type === 'call_request' ? 'wants to call you' : n.type === 'room_invite' ? 'invited you to a room' : n.message}
                 </Text>
               </View>
+              {/* Post thumbnail for like/comment/mention */}
+              {(n.type === 'like' || n.type === 'comment' || n.type === 'mention') && n.data?.post_image_url ? (
+                <Image source={{ uri: n.data.post_image_url }} style={{ width: 44, height: 44, borderRadius: 6, marginLeft: 8 }} />
+              ) : null}
               {!n.read && (
                 <View style={[styles.unread, { backgroundColor: colors.accent }]}>
                   <Text style={styles.unreadText}>1</Text>
@@ -233,9 +236,9 @@ export default function InboxScreen() {
                   style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    const content = typeof n._raw?.content === 'string' ? JSON.parse(n._raw.content) : n;
+                    const raw = n._raw || {};
                     router.push({ pathname: '/call/[roomId]' as any, params: {
-                      roomId: content.room_id || `call-${Date.now()}`,
+                      roomId: raw.room_id || `call-${Date.now()}`,
                       callerId: n.senderId,
                       callerName: n.senderName,
                       targetId: user?.id,
@@ -266,10 +269,10 @@ export default function InboxScreen() {
                   style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    const content = typeof n._raw?.content === 'string' ? JSON.parse(n._raw.content) : n;
+                    const raw = n._raw || {};
                     supabase.from('notifications').delete().eq('id', n.id).then(() => {});
                     setNotifs(prev => prev.filter(x => x.id !== n.id));
-                    if (content.room_id) router.push(`/(tabs)/live/room/${content.room_id}` as any);
+                    if (raw.room_id) router.push(`/(tabs)/live/room/${raw.room_id}` as any);
                   }}
                 >
                   <Check size={16} color="#10B981" />
@@ -287,6 +290,51 @@ export default function InboxScreen() {
             )}
           </View>
         ))}
+      </>
+    );
+  };
+
+  // ─── Messages Tab ───
+
+  // Merge Supabase conversations with AsyncStorage ones (dedup by id)
+  const allConversations = React.useMemo(() => {
+    const seen = new Set(messaging.conversations.map(c => c.id));
+    const extras: any[] = [];
+    for (const cv of supabaseConvs) {
+      if (!seen.has(cv.id)) {
+        const oid = (cv as any)._otherId || (cv.participant_one === user?.id ? cv.participant_two : cv.participant_one);
+        extras.push({
+          id: cv.id,
+          participantId: oid,
+          participantName: (cv as any)._name || 'User',
+          participantAvatar: (cv as any)._avatar || '',
+          participantUsername: (cv as any)._username || 'user',
+          messages: [{ content: 'Tap to view conversation' }],
+          lastMessageAt: cv.last_message_at || cv.created_at,
+          unreadCount: 0,
+        });
+      }
+    }
+    return [...messaging.conversations, ...extras];
+  }, [messaging.conversations, supabaseConvs, user?.id]);
+
+  const renderMessages = () => {
+    if (allConversations.length === 0) {
+      return (
+        <View style={styles.empty}>
+          <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
+            <MessageCircle size={40} color={colors.textTertiary} />
+          </View>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No messages yet</Text>
+          <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
+            Grab a bundle or skill from Home to start a conversation
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <>
         {allConversations.map((conv) => {
       const lastMsg = conv.messages[conv.messages.length - 1];
       return (
@@ -447,7 +495,7 @@ export default function InboxScreen() {
           {TABS.map((tab) => {
             const active = activeTab === tab.id;
             const Icon = tab.icon;
-            const badge = tab.id === 'messages' ? messaging.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0) : requestCount;
+            const badge = tab.id === 'notifications' ? notificationCount : tab.id === 'messages' ? messaging.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0) : requestCount;
             return (
               <TouchableOpacity
                 key={tab.id}
@@ -486,7 +534,7 @@ export default function InboxScreen() {
         }
       >
         <Animated.View style={{ opacity: fadeAnim }}>
-          {activeTab === 'messages' ? renderMessages() : renderRequests()}
+          {activeTab === 'notifications' ? renderNotifications() : activeTab === 'messages' ? renderMessages() : renderRequests()}
         </Animated.View>
       </ScrollView>
     </View>

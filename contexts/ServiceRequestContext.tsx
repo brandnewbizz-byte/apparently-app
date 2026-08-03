@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
+import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { logger } from '@/lib/logger';
 
 export type ServiceCategory =
@@ -180,7 +181,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         requester_id: newRequest.creatorId || '',
         creator_id: newRequest.creatorId || '',
         title: newRequest.title,
-        description: newRequest.description,
+        description: sanitizeBundleDesc(newRequest.description),
         category: newRequest.category,
         location: newRequest.location,
         budget: newRequest.budgetMin || newRequest.budgetMax || 0,

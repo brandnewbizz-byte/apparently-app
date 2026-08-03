@@ -140,7 +140,8 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
 
       // Fall back to local API
       try {
-        const localEvents = await localApi.getCalendarEvents(localApi.DEFAULT_USER_ID);
+        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
+        const localEvents = await localApi.getCalendarEvents(authId);
         if (localEvents && localEvents.length > 0) {
           logger.info('LifeCRM', 'Fetched events from local API', { length: localEvents.length });
           return localEvents.map((e: any) => ({
@@ -190,7 +191,8 @@ export const [LifeCrmProvider, useLifeCrm] = createContextHook(() => {
 
       // Fall back to local API
       try {
-        const localBills = await localApi.getBills(localApi.DEFAULT_USER_ID);
+        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
+        const localBills = await localApi.getBills(authId);
         if (localBills && localBills.length > 0) {
           logger.info('LifeCRM', 'Fetched bills from local API', { length: localBills.length });
           return localBills.map((b: any) => ({

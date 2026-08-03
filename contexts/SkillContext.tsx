@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
+import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -158,7 +159,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       id: newSkill.id,
       user_id: newSkill.creatorId || '',
       service: newSkill.title,
-      description: newSkill.description,
+      description: sanitizeBundleDesc(newSkill.description),
       featured_image: newSkill.imageUrl,
       category: newSkill.category,
       price: newSkill.price,
@@ -185,10 +186,71 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     // Sync to Supabase
-    supabase.from('skill_deals').update({ status: 'grabbed' }).eq('id', id).then(({ error }) => {
+    supabase.from('skill_deals').update({ status: 'grabbed', grabs: (skill?.grabCount || 0) + 1 }).eq('id', id).then(({ error }) => {
       if (error) logger.error('SkillContext', 'Supabase grab update failed', { error });
     });
-  }, [isLoaded, saveSkills]);
+    // Create inbox notification + auto-create DM for the skill owner
+    if (skill?.creatorId && user?.id && skill.creatorId !== user.id) {
+      const grabMessage = `👋 I grabbed your skill "${skill.title}" — let's chat!`;
+      // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
+      const actorName = user.fullName || user.username || 'Someone';
+      const actorAvatar = (user as any)?.avatarUrl || '';
+      supabase.from('notifications').insert({
+        user_id: skill.creatorId,
+        actor_id: user.id,
+        actor_name: actorName,
+        actor_avatar: actorAvatar,
+        type: 'skill_grab',
+        title: `${actorName} grabbed your skill "${skill.title}"`,
+        body: `grabbed your skill "${skill.title}"`,
+        data: {
+          skill_id: id,
+          skill_title: skill.title,
+        },
+        read: false,
+        created_at: new Date().toISOString(),
+      }).then(({ error }) => {
+        if (error) logger.warn('SkillContext', 'Notification insert failed', { error });
+      });
+      // 2. Find or create a conversation between these two users
+      (async () => {
+        const [a, b] = [user.id, skill.creatorId].sort();
+        // Look for existing conversation
+        const { data: existing } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('participant_one', a)
+          .eq('participant_two', b)
+          .maybeSingle();
+        let conversationId = existing?.id;
+        if (!conversationId) {
+          // Create new conversation
+          const { data: created, error: createErr } = await supabase
+            .from('conversations')
+            .insert({
+              participant_one: a,
+              participant_two: b,
+            })
+            .select('id')
+            .single();
+          if (createErr) {
+            logger.warn('SkillContext', 'Conversation create failed', { error: createErr });
+            return;
+          }
+          conversationId = created.id;
+        }
+        // 3. Insert the grab message into the conversation
+        const { error: msgErr } = await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          content: grabMessage,
+          created_at: new Date().toISOString(),
+          read: false,
+        });
+        if (msgErr) logger.warn('SkillContext', 'Grab DM message insert failed', { error: msgErr });
+      })();
+    }
+  }, [isLoaded, saveSkills, user?.id, user?.fullName, user?.username, skills]);
 
   const deleteSkill = useCallback((id: string) => {
     setSkills((prev) => {

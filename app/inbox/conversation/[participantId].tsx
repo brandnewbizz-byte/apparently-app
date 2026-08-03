@@ -1,4 +1,4 @@
-import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink } from 'lucide-react-native';
+import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle } from 'lucide-react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -19,6 +19,8 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
+import { Audio } from 'expo-av';
+import { supabase } from '@/lib/supabase';
 
 
 export default function ConversationScreen() {
@@ -30,6 +32,14 @@ export default function ConversationScreen() {
   const [messageText, setMessageText] = useState('');
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [voiceMessages, setVoiceMessages] = useState<{ id: string; audioUrl: string; duration: number; timestamp: string }[]>([]);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   const conversation = getConversation(participantId || '');
@@ -49,6 +59,80 @@ export default function ConversationScreen() {
       markConversationAsRead(participantId);
     }
   }, [participantId, markConversationAsRead]);
+
+  // ── Voice recording ──
+  const startRecording = async () => {
+    try {
+      await Audio.requestPermissionsAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const rec = new Audio.Recording();
+      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.startAsync();
+      recordingRef.current = rec;
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => setRecordingDuration(p => p + 1), 1000);
+    } catch {
+      Alert.alert('Error', 'Could not access microphone.');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recordingRef.current) return;
+    try {
+      setIsRecording(false);
+      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      if (!uri) return;
+      const dur = recordingDuration;
+      setRecordingDuration(0);
+      // Upload to messages bucket
+      const filePath = `voice/${participantId || 'anon'}/${Date.now()}.m4a`;
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: 'audio/m4a' });
+      if (uploadErr) { Alert.alert('Error', 'Failed to upload voice note'); return; }
+      const { data: urlData } = supabase.storage.from('messages').getPublicUrl(filePath);
+      const audioUrl = urlData?.publicUrl;
+      if (audioUrl && participantId) {
+        const newVoiceMsg = { id: Date.now().toString(), audioUrl, duration: dur, timestamp: 'Just now' };
+        setVoiceMessages(p => [newVoiceMsg, ...p]);
+        sendMessage(participantId, `🎤 Voice note • ${dur}s`);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to send voice note');
+    }
+  };
+
+  const togglePlayAudio = async (audioUrl: string, messageId: string) => {
+    try {
+      if (playingAudioId === messageId) {
+        await soundRef.current?.stopAsync();
+        await soundRef.current?.unloadAsync();
+        soundRef.current = null;
+        setPlayingAudioId(null);
+        return;
+      }
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, { shouldPlay: true });
+      soundRef.current = sound;
+      setPlayingAudioId(messageId);
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (status.didJustFinish) {
+          setPlayingAudioId(null);
+          sound.unloadAsync();
+          soundRef.current = null;
+        }
+      });
+    } catch (e) {
+      console.warn('[Conversation] audio playback error:', e);
+    }
+  };
 
   const handleSendMessage = () => {
     if (messageText.trim() && participantId) {
@@ -287,6 +371,27 @@ export default function ConversationScreen() {
           ) : (
             messages.map(renderMessage)
           )}
+          {voiceMessages.length > 0 && voiceMessages.map((vm) => {
+            const isPlaying = playingAudioId === vm.id;
+            return (
+              <View key={vm.id} style={[styles.messageContainer, styles.myMessageContainer]}>
+                <Image source={{ uri: myAvatar }} style={styles.messageAvatar} />
+                <View style={[styles.messageBubble, styles.myMessageBubble, { backgroundColor: colors.accent }]}>
+                  <TouchableOpacity
+                    style={styles.voicePlayButton}
+                    onPress={() => togglePlayAudio(vm.audioUrl, vm.id)}
+                  >
+                    {isPlaying ? (
+                      <PauseCircle size={24} color="#FFFFFF" />
+                    ) : (
+                      <PlayCircle size={24} color="#FFFFFF" />
+                    )}
+                    <Text style={styles.voiceDuration}>{vm.duration}s</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
         </ScrollView>
 
         {showMentionSuggestions && filteredUsers.length > 0 && (
@@ -311,40 +416,67 @@ export default function ConversationScreen() {
         )}
 
         <View style={[styles.inputContainer, { paddingBottom: insets.bottom || 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-          <TouchableOpacity
-            style={[styles.mentionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={() => {
-              setMessageText(prev => prev + '@');
-              setShowMentionSuggestions(true);
-            }}
-          >
-            <AtSign size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-          <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <TextInput
-              style={[styles.messageInput, { color: colors.text }]}
-              placeholder="Type a message..."
-              placeholderTextColor={colors.textTertiary}
-              value={messageText}
-              onChangeText={handleTextChange}
-              multiline
-              maxLength={500}
-            />
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.sendButton, 
-              { backgroundColor: messageText.trim() ? colors.accent : colors.surface, borderColor: colors.border },
-              !messageText.trim() && styles.sendButtonDisabled
-            ]}
-            onPress={handleSendMessage}
-            disabled={!messageText.trim()}
-          >
-            <Send
-              size={20}
-              color={messageText.trim() ? '#FFFFFF' : colors.textTertiary}
-            />
-          </TouchableOpacity>
+          {isRecording ? (
+            <View style={styles.recordingContainer}>
+              <View style={styles.recordingIndicator}>
+                <View style={[styles.recordingDot, { backgroundColor: '#EF4444' }]} />
+                <Text style={[styles.recordingTimer, { color: colors.text }]}>
+                  {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.stopRecordingBtn, { backgroundColor: '#EF4444' }]}
+                onPress={stopRecording}
+              >
+                <StopCircle size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.mentionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => {
+                  setMessageText(prev => prev + '@');
+                  setShowMentionSuggestions(true);
+                }}
+              >
+                <AtSign size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              {!messageText.trim() && (
+                <TouchableOpacity
+                  style={[styles.micButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={startRecording}
+                >
+                  <Mic size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.messageInput, { color: colors.text }]}
+                  placeholder="Type a message..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={messageText}
+                  onChangeText={handleTextChange}
+                  multiline
+                  maxLength={500}
+                />
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.sendButton, 
+                  { backgroundColor: messageText.trim() ? colors.accent : colors.surface, borderColor: colors.border },
+                  !messageText.trim() && styles.sendButtonDisabled
+                ]}
+                onPress={handleSendMessage}
+                disabled={!messageText.trim()}
+              >
+                <Send
+                  size={20}
+                  color={messageText.trim() ? '#FFFFFF' : colors.textTertiary}
+                />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -610,5 +742,58 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  // Voice recording styles
+  recordingContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  recordingIndicator: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 20,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  recordingTimer: {
+    fontSize: 16,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  stopRecordingBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  voicePlayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  voiceDuration: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

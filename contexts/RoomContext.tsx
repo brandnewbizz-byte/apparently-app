@@ -244,7 +244,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   // ── Persist to AsyncStorage whenever rooms change ──
   useEffect(() => {
     if (!initialLoadDone.current) return; // Skip initial empty state
-    AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(rooms)).catch(() => {});
+    AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(rooms)).catch((e: any) => console.warn('[Room] Failed to persist rooms:', e?.message));
   }, [rooms]);
 
   // ── Fetch ──
@@ -273,7 +273,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
             });
           }
           setRooms(allRooms);
-          AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(allRooms)).catch(() => {});
+          AsyncStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(allRooms)).catch((e: any) => console.warn('[Room] Failed to persist allRooms:', e?.message));
           setIsLoading(false);
           return;
         }

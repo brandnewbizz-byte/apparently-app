@@ -43,7 +43,7 @@ export function UserPostsProvider({ children }: { children: React.ReactNode }) {
   // Persist whenever list changes
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(userPosts)).catch(() => {});
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(userPosts)).catch((e: any) => console.warn('[UserPosts] Failed to persist:', e?.message));
   }, [userPosts, loaded]);
 
   const addUserPost = useCallback((post: UserPost) => {

@@ -61,17 +61,17 @@ export default function ConversationScreen() {
     const callRoomId = `call-${Date.now()}`;
     callRoomRef.current = callRoomId;
     setIsCalling(true);
-    // Send call notification to recipient
+    // Send call notification to recipient (DB columns: user_id, actor_id, data)
     await supabase.from('notifications').insert({
-      recipient_id: notificationId,
-      sender_id: user.id,
+      user_id: notificationId,
+      actor_id: user.id,
       type: 'call_request',
-      content: JSON.stringify({
+      title: `${user.fullName || 'Someone'} is calling you`,
+      body: 'is calling you...',
+      data: {
         room_id: callRoomId,
-        caller_name: user.fullName || 'Someone',
         caller_id: user.id,
-        message: 'is calling you...',
-      }),
+      },
       read: false,
       created_at: new Date().toISOString(),
     });

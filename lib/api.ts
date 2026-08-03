@@ -11,25 +11,36 @@ export const DEFAULT_USER_ID = 'u-dev';
 
 // ─── Posts ───
 export async function getPosts() {
-  // Join with users table so author name/avatar are always correct
+  // Fetch posts, then batch-fetch profiles for user data
   const { data, error } = await supabase
     .from('posts')
-    .select(`
-      *,
-      user:user_id (
-        id,
-        name,
-        username,
-        avatar,
-        is_verified,
-        followers_count,
-        relationship_category
-      )
-    `)
+    .select('*')
     .order('created_at', { ascending: false })
     .limit(500);
   if (error) throw error;
-  return data || [];
+  if (!data || data.length === 0) return [];
+  
+  // Collect unique user IDs and fetch profiles in one query
+  const userIds = [...new Set(data.map((p: any) => p.user_id).filter(Boolean))];
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, full_name, username, avatar')
+    .in('id', userIds);
+  const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+  
+  // Merge profile data into each post
+  return data.map((p: any) => {
+    const profile = profileMap.get(p.user_id);
+    return {
+      ...p,
+      user: profile ? {
+        id: profile.id,
+        name: profile.full_name,
+        username: profile.username,
+        avatar: profile.avatar,
+      } : null,
+    };
+  });
 }
 
 export async function createPost(
@@ -41,7 +52,7 @@ export async function createPost(
   const { data, error } = await supabase
     .from('posts')
     .insert({
-      user_id: userId || DEFAULT_USER_ID,
+      user_id: userId,
       content,
       image_url: imageUrl || null,
       post_kind: options?.postKind || 'post',
@@ -77,7 +88,7 @@ export async function createStory(userId: string, imageUrl: string, backgroundCo
   const { data, error } = await supabase
     .from('stories')
     .insert({
-      user_id: userId || DEFAULT_USER_ID,
+      user_id: userId,
       image_url: imageUrl,
       background_color: backgroundColor || null,
       text_content: textContent || null,
@@ -95,7 +106,7 @@ export async function toggleLike(postId: string, userId: string) {
     .from('post_likes')
     .select('id')
     .eq('post_id', postId)
-    .eq('user_id', userId || DEFAULT_USER_ID)
+    .eq('user_id', userId )
     .maybeSingle();
 
   if (existing) {
@@ -112,7 +123,7 @@ export async function toggleLike(postId: string, userId: string) {
       .from('post_likes')
       .insert({
         post_id: postId,
-        user_id: userId || DEFAULT_USER_ID,
+        user_id: userId,
       });
     if (error) throw error;
     return { liked: true };
@@ -120,7 +131,7 @@ export async function toggleLike(postId: string, userId: string) {
 }
 
 export async function getLikeStatus(postId: string, userId?: string) {
-  const uid = userId || DEFAULT_USER_ID;
+  const uid = userId ;
   const { data, error } = await supabase
     .from('post_likes')
     .select('id')
@@ -160,7 +171,7 @@ export async function addComment(postId: string, authorId: string, text: string,
     .from('post_comments')
     .insert({
       post_id: postId,
-      author_id: authorId || DEFAULT_USER_ID,
+      author_id: authorId ,
       text,
       parent_id: parentId || null,
     })
@@ -173,7 +184,7 @@ export async function addComment(postId: string, authorId: string, text: string,
 // ─── Users ───
 export async function getUsers() {
   const { data, error } = await supabase
-    .from('users')
+    .from('profiles')
     .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -182,7 +193,7 @@ export async function getUsers() {
 
 export async function getUser(userId: string) {
   const { data, error } = await supabase
-    .from('users')
+    .from('profiles')
     .select('*')
     .eq('id', userId)
     .single();
@@ -253,7 +264,7 @@ export async function getCalendarEvents(userId: string) {
   const { data, error } = await supabase
     .from('calendar_events')
     .select('*')
-    .eq('user_id', userId || DEFAULT_USER_ID)
+    .eq('user_id', userId )
     .order('date', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -274,7 +285,7 @@ export async function getBills(userId: string) {
   const { data, error } = await supabase
     .from('bills')
     .select('*')
-    .eq('user_id', userId || DEFAULT_USER_ID)
+    .eq('user_id', userId )
     .order('due_date', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -285,7 +296,7 @@ export async function getRelationships(userId: string) {
   const { data, error } = await supabase
     .from('relationships')
     .select('*')
-    .eq('user_id', userId || DEFAULT_USER_ID)
+    .eq('user_id', userId )
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -338,7 +349,7 @@ export async function getPlans(userId: string) {
   const { data, error } = await supabase
     .from('plans')
     .select('*')
-    .eq('user_id', userId || DEFAULT_USER_ID)
+    .eq('user_id', userId )
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -596,23 +607,26 @@ function spotTimeAgo(dateStr: string): string {
 export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse> {
   const cards: SpotCard[] = [];
 
-  // Fetch posts with user info
-  const { data: posts, error: postsErr } = await supabase
+  // Fetch posts, then batch-fetch profiles for user info
+  const { data: postsRaw, error: postsErr } = await supabase
     .from('posts')
-    .select(`
-      *,
-      user:user_id (
-        id,
-        name,
-        username,
-        avatar,
-        is_verified
-      )
-    `)
+    .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (postsErr) {
+  let posts: any[] = [];
+  if (!postsErr && postsRaw) {
+    const userIds = [...new Set(postsRaw.map((p: any) => p.user_id).filter(Boolean))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, avatar')
+      .in('id', userIds);
+    const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+    posts = postsRaw.map((p: any) => {
+      const profile = profileMap.get(p.user_id);
+      return { ...p, user: profile || null };
+    });
+  } else if (postsErr) {
     console.error('[getSpotFeed] Error fetching posts:', postsErr.message);
   }
 

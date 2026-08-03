@@ -200,7 +200,7 @@ export default function RootLayout() {
       SplashScreen.hideAsync().catch(() => {});
     }, 3000);
     SplashScreen.hideAsync().catch(() => {});
-    logger.info('Root', 'DEV MODE — Supabase/auth disabled, navigating directly to tabs');
+    logger.info('Root', 'App mounted');
     return () => clearTimeout(timer);
   }, []);
 

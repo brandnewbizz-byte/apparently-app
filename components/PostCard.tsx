@@ -26,7 +26,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
   const { user: currentUser } = useAuth();
-const authorAvatar = post.user.avatar || post.user.avatar_url || '';
+const authorAvatar = post.user.avatar || '';
   const interaction = interactions[post.id] ?? {
     likeCount: post.likes,
     commentCount: post.comments,

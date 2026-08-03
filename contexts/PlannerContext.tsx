@@ -163,12 +163,13 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
       // Fall back to local API
       try {
-        const localPlans = await localApi.getPlans(localApi.DEFAULT_USER_ID);
+        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
+        const localPlans = await localApi.getPlans(authId);
         if (localPlans && localPlans.length > 0) {
           logger.info('Planner', 'Fetched plans from local API', { length: localPlans.length });
           return localPlans.map((row: any) => ({
             id: String(row.id),
-            user_id: row.user_id || localApi.DEFAULT_USER_ID,
+            user_id: row.user_id || authId,
             date: row.date,
             date_label: row.date_label,
             location_type: row.location_type,
@@ -243,8 +244,9 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
       // Fall back to local API
       try {
+        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
         const localPlan = {
-          user_id: localApi.DEFAULT_USER_ID,
+          user_id: authId,
           title: input.date_label || `Plan for ${input.date}`,
           date: input.date,
           start_time: '',
@@ -261,7 +263,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         logger.info('Planner', 'Created plan in local API', { result });
         return {
           id: result?.id || `local-${Date.now()}`,
-          user_id: localApi.DEFAULT_USER_ID,
+          user_id: authId || input.user_id,
           date: input.date,
           status: 'pending',
           created_at: new Date().toISOString(),

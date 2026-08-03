@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
+import { sanitizeBio, sanitizeFullName, sanitizeUsername } from '@/lib/sanitize';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -38,6 +39,7 @@ export default function SettingsScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
+      base64: true,
     });
     if (!result.canceled && result.assets?.length > 0) {
       const uri = result.assets[0].uri;
@@ -55,28 +57,39 @@ export default function SettingsScreen() {
     setSaving(true);
     try {
       let finalAvatar = editingAvatar;
-      // Upload new avatar if changed
-      if (editingAvatar && editingAvatar !== (user as any)?.avatar_url && !editingAvatar.startsWith('http')) {
-        const ext = editingAvatar.split('.').pop() || 'jpg';
-        const path = `avatars/${user.id}_${Date.now()}.${ext}`;
-        const blob = await (await fetch(editingAvatar)).blob();
-        const { error: uploadErr } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true });
-        if (!uploadErr) {
-          const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
-          finalAvatar = urlData?.publicUrl || editingAvatar;
+      // Upload new avatar if changed — require base64 (never save file:// URIs to DB)
+      if (editingAvatar && !editingAvatar.startsWith('http')) {
+        if (!editingAvatarBase64) {
+          Alert.alert('Upload failed', 'Image data not available. Please select the image again.');
+          setSaving(false);
+          return;
+        }
+        const ext = (editingAvatar.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const safeExt = ['jpg','jpeg','png','gif','webp'].includes(ext) ? ext : 'jpg';
+        const mimeType = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp' }[safeExt] || 'image/jpeg';
+        const path = `avatars/${user.id}_${Date.now()}.${safeExt}`;
+        const blob = await (await fetch(`data:${mimeType};base64,${editingAvatarBase64}`)).blob();
+        const { error: uploadErr } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: mimeType });
+        if (uploadErr) {
+          console.log('[Settings] Avatar upload error:', uploadErr.message);
+          Alert.alert('Upload failed', uploadErr.message || 'Could not upload profile picture. Please try again.');
+          setSaving(false);
+          return;
+        }
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+        finalAvatar = urlData?.publicUrl || '';
+        if (!finalAvatar) {
+          Alert.alert('Upload failed', 'Could not get public URL for uploaded image.');
+          setSaving(false);
+          return;
         }
       }
-      const profileUpdates: any = { full_name: editingName, username: editingUsername, bio: editingBio, avatar: finalAvatar, updated_at: new Date().toISOString() };
-      const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates });
+      const profileUpdates: any = { full_name: sanitizeFullName(editingName), username: sanitizeUsername(editingUsername), bio: sanitizeBio(editingBio), avatar: finalAvatar, updated_at: new Date().toISOString() };
+      const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates }, { onConflict: 'id' });
       if (saveErr) {
         Alert.alert('Error', saveErr.message);
         setSaving(false);
         return;
-      }
-      // Sync to users table for feed, inbox, PostCard consistency
-      const { error: userErr } = await supabase.from('users').upsert({ id: user.id, name: editingName, username: editingUsername, avatar: finalAvatar }, { onConflict: 'id' });
-      if (userErr) {
-        console.log('[Settings] Warning: users table sync failed:', userErr.message);
       }
       await refreshProfile();
       Alert.alert('Saved', 'Profile updated.');

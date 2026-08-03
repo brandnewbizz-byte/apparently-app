@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
+import { sanitizeBundleDesc, sanitizeCaption } from '@/lib/sanitize';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -177,7 +178,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       user_id: newBundle.creatorId,
       type: 'bundle',
       title: newBundle.title,
-      description: newBundle.description || '',
+      description: sanitizeBundleDesc(newBundle.description),
       bundle_price: newBundle.price,
       items: newBundle.items,
       creator_id: newBundle.creatorId,
@@ -216,17 +217,21 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
       const grabMessage = `👋 I grabbed your bundle "${bundle.title}" — let's chat!`;
-      // 1. Notification (notifications table — notifications use recipient_id column)
+      // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
+      const actorName = user.fullName || user.username || 'Someone';
+      const actorAvatar = (user as any)?.avatarUrl || '';
       supabase.from('notifications').insert({
-        recipient_id: bundle.creatorId,
-        sender_id: user.id,
+        user_id: bundle.creatorId,
+        actor_id: user.id,
+        actor_name: actorName,
+        actor_avatar: actorAvatar,
         type: 'bundle_grab',
-        content: JSON.stringify({
+        title: `${actorName} grabbed your bundle "${bundle.title}"`,
+        body: `grabbed your bundle "${bundle.title}"`,
+        data: {
           bundle_id: id,
           bundle_title: bundle.title,
-          grabber_name: user.fullName || user.username || 'Someone',
-          message: `grabbed your bundle "${bundle.title}"`,
-        }),
+        },
         read: false,
         created_at: new Date().toISOString(),
       }).then(({ error }) => {

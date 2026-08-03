@@ -31,7 +31,7 @@ export class DatabaseService {
   private static unavailableTables = new Set<string>();
 
   static async fetchUsers(opts?: DbQueryOpts): Promise<DbUser[]> {
-    const table = 'users';
+    const table = 'profiles';
     if (DatabaseService.isTableUnavailable(table)) {
       console.log('[DB] Skipping fetchUsers - table unavailable');
       return [];
@@ -61,7 +61,7 @@ export class DatabaseService {
   }
 
   static async fetchUserById(id: string, opts?: DbQueryOpts): Promise<DbUser | null> {
-    const table = 'users';
+    const table = 'profiles';
     if (DatabaseService.isTableUnavailable(table)) {
       console.log('[DB] Skipping fetchUserById - table unavailable');
       return null;
@@ -114,61 +114,19 @@ export class DatabaseService {
     return session?.user?.id || null;
   }
 
-  private static DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
-
-  static async ensureDefaultUser(): Promise<string> {
-    const existingUser = await this.fetchUserById(this.DEFAULT_USER_ID);
-    if (existingUser) {
-      console.log('[DB] Default user exists:', this.DEFAULT_USER_ID);
-      return this.DEFAULT_USER_ID;
-    }
-
-    console.log('[DB] Creating default user...');
-    const { data, error } = await supabase
-      .from('users')
-      .insert({
-        id: this.DEFAULT_USER_ID,
-        name: 'App User',
-        username: 'appuser',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
-        is_verified: false,
-        followers_count: 0,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[DB] Error creating default user:', error.message, error.code, error.details);
-      if (error.code === '23505') {
-        console.log('[DB] Default user already exists (race condition)');
-        return this.DEFAULT_USER_ID;
-      }
-      throw new Error(`Failed to create default user: ${error.message}`);
-    }
-
-    console.log('[DB] Created default user:', data.id);
-    return data.id;
-  }
-
-  static async getOrCreateUserId(): Promise<string> {
+  // No hardcoded fallback user — always use real auth or fail explicitly
+  static async getOrCreateUserId(): Promise<string | null> {
     const authUserId = await this.getCurrentUserId();
     if (authUserId) {
       console.log('[DB] Using authenticated user:', authUserId);
       return authUserId;
     }
-    
-    // If no authenticated user, try to ensure default user exists
-    // But if that fails (e.g., RLS blocks it), still return the default ID
-    try {
-      return await this.ensureDefaultUser();
-    } catch (error) {
-      console.warn('[DB] Could not ensure default user, using default ID anyway:', error);
-      return this.DEFAULT_USER_ID;
-    }
+    console.warn('[DB] No authenticated user available — returning null');
+    return null;
   }
 
-  static getDefaultUserId(): string {
-    return this.DEFAULT_USER_ID;
+  static async getDefaultUserId(): Promise<string | null> {
+    return this.getOrCreateUserId();
   }
 
   static async fetchPosts(opts?: DbQueryOpts): Promise<DbPost[]> {
@@ -351,17 +309,16 @@ export class DatabaseService {
     console.log('[DB] Creating listing...');
     
     try {
-      // First try to get authenticated user, then fall back to default
-      let validUserId: string = await this.getCurrentUserId() || this.DEFAULT_USER_ID;
+      // Get authenticated user ID — no fallback to fake UUID
+      let validUserId: string | null = await this.getOrCreateUserId();
       
       console.log('[DB] Using user_id for listing:', validUserId);
       
       // Ensure we have a valid user ID
-      if (!validUserId || validUserId.trim() === '') {
-        validUserId = this.DEFAULT_USER_ID;
-        console.log('[DB] Fallback to default user ID:', validUserId);
+      if (!validUserId) {
+        console.warn('[DB] No valid user ID for listing — cannot create');
+        return null;
       }
-      
       // Build clean listing object with explicit user_id
       const listingToInsert: Record<string, any> = {
         category: listing.category,
@@ -439,7 +396,7 @@ export class DatabaseService {
       return [];
     }
 
-    const validHostId = hostId === 'current-user' ? this.DEFAULT_USER_ID : hostId;
+    const validHostId = hostId === 'current-user' ? (await this.getOrCreateUserId()) || hostId : hostId;
     console.log('[DB] Fetching user listings for host:', validHostId);
     
     const { data, error } = await withAbortSignal(

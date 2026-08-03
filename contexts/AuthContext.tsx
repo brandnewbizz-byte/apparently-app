@@ -3,8 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { File as ExpoFile } from 'expo-file-system';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
+import { isLocalFileUri } from '@/lib/media';
+import { sanitizeBio, sanitizeFullName, sanitizeLocation } from '@/lib/sanitize';
 import type { Session } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 
@@ -30,25 +33,12 @@ interface AuthState {
 const PROFILE_CACHE_KEY = 'apparently_user_profile_cache_v3';
 
 
-const dummyUser: UserProfile = {
-  id: 'dev-user',
-  fullName: 'Developer',
-  username: 'dev',
-  bio: null,
-  location: null,
-  phone: null,
-  email: 'dev@localhost',
-  avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=dev-user',
-};
-
-const devSession = {
-  user: { id: 'dev-user', email: 'dev@localhost' },
-} as unknown as Session;
-
+// UNAUTHENTICATED default — never assume a session on mount.
+// The useEffect calls getSession() + onAuthStateChange to determine real auth state.
 const defaultState: AuthState = {
-  session: devSession,
-  user: dummyUser,
-  isAuthenticated: true,
+  session: null,
+  user: null,
+  isAuthenticated: false,
   emailVerificationRequired: false,
   pendingVerificationEmail: null,
 };
@@ -314,7 +304,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: msg };
       }
 
-      const cleanedFullName = fullName.trim();
+      const cleanedFullName = sanitizeFullName(fullName);
+
+      if (!cleanedFullName) {
+        const msg = 'Please enter your name.';
+        setAuthError(msg);
+        return { success: false, error: msg };
+      }
 
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: trimmedEmail,
@@ -366,21 +362,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           logger.error('Auth', 'Profile save error', { message: profileError.message });
         }
 
-        // Sync to users table (used by SocialContext, feed, PostCard, etc.)
-        const { error: userError } = await supabase
-          .from('users')
-          .upsert(
-            {
-              id: authData.user.id,
-              name: cleanedFullName,
-              username: trimmedUsername,
-            },
-            { onConflict: 'id' }
-          );
 
-        if (userError) {
-          logger.error('Auth', 'User save error', { message: userError.message });
-        }
       }
 
       const needsEmailVerification = !authData.session && !authData.user?.email_confirmed_at;
@@ -547,18 +529,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           supabase.from('profiles').upsert({ ...base, full_name: trimmed }, { onConflict: 'id' }),
           abortController.signal
         );
-        // Also sync to users table (used by SocialContext, feed, PostCard, etc.)
-        const userResult = await withAbortSignal(
-          supabase.from('users').upsert({ id: userId, name: trimmed }, { onConflict: 'id' }),
-          abortController.signal
-        );
-        if (!profileResult.error && !userResult.error) {
+        if (!profileResult.error) {
           dbSaved = true;
         } else {
-          const errs = [profileResult.error?.message, userResult.error?.message]
-            .filter(Boolean)
-            .join('; ');
-          logger.error('Auth', 'profiles/users upsert(full_name) errors', { errors: errs });
+          logger.error('Auth', 'profiles upsert(full_name) error', { error: profileResult.error?.message });
         }
       } catch (e: any) {
         if (isAbortError(e)) {
@@ -585,6 +559,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       setAuthError(null);
 
+      // ── Guard: reject local file paths before anything else ──
+      if (isLocalFileUri(imageUri)) {
+        // If it's a file:// URI, read it as base64 to convert to data URI.
+        // The raw file path must never reach Supabase.
+        // We'll handle this below in the read step.
+        logger.info('Auth', 'Avatar from local file — will convert to base64', { imageUri: imageUri.substring(0, 40) });
+      }
+
       if (!state.session?.user) {
         const msg = 'Not signed in.';
         setAuthError(msg);
@@ -594,28 +576,66 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const userId = state.session.user.id;
       logger.info('Auth', 'Updating avatar', { userId });
 
-      // Read image file as base64 using expo-file-system new API
+      // ── Step 1: Read + validate + compress image ──
       let base64Data: string;
       try {
-        base64Data = await new ExpoFile(imageUri).base64();
+        if (isLocalFileUri(imageUri)) {
+          // Convert file:// → data URI via expo-file-system
+          base64Data = await new ExpoFile(imageUri).base64();
+        } else if (imageUri.startsWith('data:image/')) {
+          // Already a data URI — extract base64 part
+          const commaIdx = imageUri.indexOf(',');
+          base64Data = commaIdx > -1 ? imageUri.substring(commaIdx + 1) : imageUri;
+        } else {
+          // Remote URL — should not happen for uploads, but handle gracefully
+          logger.warn('Auth', 'updateAvatar called with remote URL — skipping upload', { imageUri: imageUri.substring(0, 60) });
+          return { success: false, error: 'Cannot upload from a remote URL. Please select a photo from your device.' };
+        }
       } catch (readErr) {
         logger.error('Auth', 'Failed to read image file', { readErr });
         return { success: false, error: 'Failed to read the selected image. Please try again.' };
       }
 
-      // Determine MIME type from URI
-      const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg',
-        jpeg: 'image/jpeg',
-        png: 'image/png',
-        gif: 'image/gif',
-        webp: 'image/webp',
-      };
-      const mimeType = mimeMap[ext] || 'image/jpeg';
-      const dataUri = `data:${mimeType};base64,${base64Data}`;
+      // ── Step 2: Compress via expo-image-manipulator before upload ──
+      let dataUri: string;
+      try {
+        // Use manipulateAsync for resize if the URI is file:// based
+        if (isLocalFileUri(imageUri)) {
+          const result = await manipulateAsync(
+            imageUri,
+            [{ resize: { width: 600 } }], // max 600px wide — avatars are small
+            { compress: 0.7, format: SaveFormat.JPEG }
+          );
+          const compressedBase64 = await new ExpoFile(result.uri).base64();
+          dataUri = `data:image/jpeg;base64,${compressedBase64}`;
+        } else {
+          const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+          const mimeMap: Record<string, string> = {
+            jpg: 'image/jpeg',
+            jpeg: 'image/jpeg',
+            png: 'image/png',
+            gif: 'image/gif',
+            webp: 'image/webp',
+          };
+          const mimeType = mimeMap[ext] || 'image/jpeg';
+          dataUri = `data:${mimeType};base64,${base64Data}`;
+        }
+        logger.info('Auth', 'Avatar compressed', { uriLen: dataUri.length });
+      } catch (compressErr) {
+        // Compression failed — use original base64 as fallback
+        logger.warn('Auth', 'Image compression failed, using original', { compressErr });
+        const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+        dataUri = `data:${mimeType};base64,${base64Data}`;
+      }
 
-      // Optimistic update
+      // ── Final guard: ensure we're not persisting a file:// path ──
+      if (isLocalFileUri(dataUri)) {
+        logger.error('Auth', 'CRITICAL: dataUri is still a local path — blocked');
+        return { success: false, error: 'Failed to process the image. Please try again.' };
+      }
+
+      // ── Step 3: Optimistic update ──
       const optimisticUser: UserProfile | null = state.user
         ? { ...state.user, avatar: dataUri }
         : null;
@@ -624,45 +644,41 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await saveProfileCache(optimisticUser);
       }
 
-      // Persist to database — update BOTH profiles and users tables
+      // ── Step 4: Persist to Supabase with retries ──
       let dbSaved = false;
-      try {
-        const abortController = new AbortController();
-        // Save to profiles table (used by AuthContext)
-        const profileResult = await withAbortSignal(
-          supabase
-            .from('profiles')
-            .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
-          abortController.signal
-        );
-        // Also save to users table (used by SocialContext, feed, inbox, PostCard, etc.)
-        const userResult = await withAbortSignal(
-          supabase
-            .from('users')
-            .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
-          abortController.signal
-        );
-        if (!profileResult.error && !userResult.error) {
-          dbSaved = true;
-          logger.info('Auth', 'Avatar saved to both tables', { userId });
-        } else {
-          const errs = [profileResult.error?.message, userResult.error?.message]
-            .filter(Boolean)
-            .join('; ');
-          logger.error('Auth', 'profiles/users upsert(avatar) errors', { errors: errs });
+      const MAX_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const abortController = new AbortController();
+          const profileResult = await withAbortSignal(
+            supabase
+              .from('profiles')
+              .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
+            abortController.signal
+          );
+          if (!profileResult.error) {
+            dbSaved = true;
+            logger.info('Auth', 'Avatar saved to profiles', { userId, attempt });
+            break;
+          }
+          logger.error('Auth', `profiles upsert attempt ${attempt} failed`, { error: profileResult.error?.message });
+        } catch (e: any) {
+          if (isAbortError(e)) {
+            logger.info('Auth', 'Avatar upsert aborted');
+            break;
+          }
+          logger.error('Auth', `profiles upsert attempt ${attempt} exception`, { e });
         }
-      } catch (e: any) {
-        if (isAbortError(e)) {
-          logger.info('Auth', 'Avatar upsert aborted');
-        } else {
-          logger.error('Auth', 'profiles upsert exception', { e });
+        if (attempt < MAX_RETRIES) {
+          // Exponential backoff: 1s, 2s, 4s
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
         }
       }
 
       if (!dbSaved) {
         return {
           success: true,
-          error: 'Saved locally. We will retry syncing to your profile later.',
+          error: 'Saved locally. We\'ll retry syncing to your profile later.',
         };
       }
 

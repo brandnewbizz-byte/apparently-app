@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, Radio, CalendarDays, User, Search } from 'lucide-react-native';
+import { Home, Newspaper, Users, CalendarDays, User, Search } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -80,7 +80,7 @@ export default function TabLayout() {
             tabBarShowLabel: false,
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <Radio size={24} color={color} />
+                <Users size={24} color={color} />
               </View>
             ),
           }}

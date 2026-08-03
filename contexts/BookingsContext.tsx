@@ -203,7 +203,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     queryKey: ['myListings'],
     queryFn: async ({ signal }) => {
       try {
-        const hostId = DatabaseService.getDefaultUserId();
+        const hostId = await DatabaseService.getDefaultUserId();
         logger.info('BookingsContext', 'Fetching my listings for host', { hostId });
         
         const dbListings = await DatabaseService.fetchUserListings(hostId, { signal });

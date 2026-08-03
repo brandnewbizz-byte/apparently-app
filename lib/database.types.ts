@@ -2,9 +2,15 @@ export type RelationshipCategory = 'family' | 'friend' | 'business' | 'mentor' |
 
 export interface DbUser {
   id: string;
-  name: string;
+  full_name: string;
+  name: string; // alias for full_name (backward compat)
   username: string;
   avatar: string;
+  email?: string;
+  bio?: string;
+  role?: string;
+  website?: string;
+  wallet_address?: string;
   is_verified: boolean;
   followers_count: number;
   is_live?: boolean;

@@ -37,6 +37,8 @@ import {
   Calendar,
   Link as LinkIcon,
   BadgeCheck,
+  Slash,
+  AlertTriangle,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -54,6 +56,8 @@ const ACCENT_COLORS = {
   purpleDim: 'rgba(139, 92, 246, 0.12)',
   blue: '#3B82F6',
   blueDim: 'rgba(59, 130, 246, 0.12)',
+  amber: '#F59E0B',
+  amberDim: 'rgba(245, 158, 11, 0.12)',
 };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -100,7 +104,7 @@ export default function UserProfileScreen() {
 
   const displayName = profileUser?.full_name || 'User';
   const displayUsername = profileUser?.username || '';
-  const displayAvatar = profileUser?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
+  const displayAvatar = profileUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
   const displayBio = profileUser?.bio || '';
   const isOwnProfile = authUser?.id === userId;
 
@@ -192,7 +196,7 @@ export default function UserProfileScreen() {
 
     const { data, error } = await supabase
       .from('follows')
-      .select(`${joinField}, profiles:${joinField}(id, full_name, username, avatar_url)`)
+      .select(`${joinField}, profiles:${joinField}(id, full_name, username, avatar)`)
       .eq(field, userId)
       .neq(selfExclude.field, selfExclude.val)
       .limit(50);
@@ -245,6 +249,23 @@ export default function UserProfileScreen() {
       await supabase.from('follows').insert({ follower_id: authUser.id, following_id: userId });
       setIsFollowing(true);
       setFollowersCount((c) => c + 1);
+      // Send follow notification (DB columns: user_id, actor_id, actor_name, etc.)
+      const actorName = authUser.fullName || authUser.username || 'Someone';
+      const actorAvatar = (authUser as any)?.avatarUrl || '';
+      supabase.from('notifications').insert({
+        user_id: userId,
+        actor_id: authUser.id,
+        actor_name: actorName,
+        actor_avatar: actorAvatar,
+        type: 'follow',
+        title: `${actorName} started following you`,
+        body: 'started following you',
+        data: {},
+        read: false,
+        created_at: new Date().toISOString(),
+      }).then(({ error }) => {
+        if (error) console.warn('[Follow] notification insert failed', error);
+      });
     }
     setFollowLoading(false);
   };
@@ -573,7 +594,7 @@ export default function UserProfileScreen() {
                     }}
                   >
                     <Image
-                      source={{ uri: item.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80&h=80&fit=crop' }}
+                      source={{ uri: item.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80&h=80&fit=crop' }}
                       style={styles.detailAvatar}
                     />
                     <View style={styles.detailUserInfo}>

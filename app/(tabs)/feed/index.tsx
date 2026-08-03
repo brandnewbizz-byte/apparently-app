@@ -1012,10 +1012,13 @@ export default function FeedScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setTagFilter(null);
-    // Invalidate Supabase query cache so fresh data is fetched from the server
-    queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-    setRefreshKey((k) => k + 1);
-    setTimeout(() => setRefreshing(false), 800);
+    try {
+      // Await query invalidation so the spinner stops once data is refetched
+      await queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+      setRefreshKey((k) => k + 1);
+    } finally {
+      setRefreshing(false);
+    }
   }, [queryClient]);
 
   const handleSavePost = (postId: string) => {
@@ -1160,8 +1163,19 @@ export default function FeedScreen() {
   // ── Camera flow (Instagram-style viewfinder) ──
   const handleCreateTap = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    hideTabBar();
-    setShowCamera(true);
+    Alert.alert('Create Post', '', [
+      { text: 'Take Photo/Video', onPress: () => {
+        hideTabBar();
+        setShowCamera(true);
+      }},
+      { text: 'Write Text Post', onPress: () => {
+        setCreatePreloadMedia(null);
+        setCreatePreloadMediaWidth(undefined);
+        setCreatePreloadMediaHeight(undefined);
+        setShowCreate(true);
+      }},
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   // Called when user captures from InstagramCamera

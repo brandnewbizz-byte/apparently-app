@@ -143,7 +143,7 @@ function SavedPostsGrid({ colors }: { colors: any }) {
 // My Posts Grid — Instagram 3-column grid
 // ═══════════════════════════════════════════════════════════════════════════
 
-function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any, posts: any[]) => void }) {
+function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPostPress?: (post: any, posts: any[]) => void; refreshKey?: number }) {
   const { user: authUser } = useAuth();
   const [allPosts, setAllPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,7 +174,7 @@ function UserPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (po
         })));
         setLoading(false);
       });
-  }, [authUser?.id]);
+  }, [authUser?.id, refreshKey]);
 
   if (loading) {
     return (
@@ -248,6 +248,7 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans' | 'saved'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
   const [followersCount, setFollowersCount] = useState(0);
@@ -435,7 +436,7 @@ export default function ProfileScreen() {
     }
   }, [user?.id]);
 
-  useEffect(() => { fetchProfileStats(); }, [fetchProfileStats]);
+  useEffect(() => { fetchProfileStats(); }, [fetchProfileStats, refreshKey]);
   useEffect(() => { fetchGrabbedBundles(); }, [fetchGrabbedBundles]);
 
   useEffect(() => {
@@ -528,6 +529,7 @@ export default function ProfileScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([fetchProfileStats(), fetchGrabbedBundles()]);
+    setRefreshKey(k => k + 1);
     setRefreshing(false);
   }, [fetchProfileStats, fetchGrabbedBundles]);
 
@@ -634,7 +636,7 @@ export default function ProfileScreen() {
 
           {/* Tab Content */}
           <View style={{ paddingBottom: 100 }}>
-            {activeTab === 'posts' && <UserPostsGrid colors={colors} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
+            {activeTab === 'posts' && <UserPostsGrid colors={colors} refreshKey={refreshKey} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
 
             {activeTab === 'bundles' && (
               <View style={{ paddingTop: 8 }}>

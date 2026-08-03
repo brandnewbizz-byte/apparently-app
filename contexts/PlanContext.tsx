@@ -3,6 +3,7 @@ import React, {
 } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { Platform, Alert } from 'react-native';
 
 // ── Types ──
@@ -225,7 +226,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     try {
       await supabase.from('plans').upsert({
         id: newPlan.id, room_id: roomId, title: newPlan.title, goal: newPlan.goal,
-        description: newPlan.description, project_type: newPlan.projectType,
+        description: sanitizeBundleDesc(newPlan.description), project_type: newPlan.projectType,
         start_date: newPlan.startDate, target_date: newPlan.targetDate,
         stage: newPlan.stage, progress: newPlan.progress, owner_id: user?.id,
         data: JSON.stringify(newPlan), updated_at: newPlan.updatedAt,
@@ -270,7 +271,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
         supabase.from('plans').upsert({
           id: p.id, room_id: p.roomId, title: p.title, goal: p.goal,
-          description: p.description, project_type: p.projectType,
+          description: sanitizeBundleDesc(p.description), project_type: p.projectType,
           start_date: p.startDate, target_date: p.targetDate,
           stage: p.stage, progress: p.progress, owner_id: p.ownerId,
           data: JSON.stringify(p), updated_at: new Date().toISOString(),
@@ -310,7 +311,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       supabase.from('plans').upsert({
         id: prev.id, room_id: prev.roomId, title: prev.title,
-        goal: prev.goal, description: prev.description, project_type: prev.projectType,
+        goal: prev.goal, description: sanitizeBundleDesc(prev.description), project_type: prev.projectType,
         start_date: prev.startDate, target_date: prev.targetDate,
         stage: prev.stage, progress: prev.progress, owner_id: prev.ownerId,
         data: JSON.stringify(prev), updated_at: new Date().toISOString(),
@@ -740,7 +741,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         // Immediately upsert to plans table — file references must survive app restarts/updates
         supabase.from('plans').upsert({
           id: updated.id, room_id: updated.roomId, title: updated.title, goal: updated.goal,
-          description: updated.description, project_type: updated.projectType,
+          description: sanitizeBundleDesc(updated.description), project_type: updated.projectType,
           start_date: updated.startDate, target_date: updated.targetDate,
           stage: updated.stage, progress: updated.progress, owner_id: updated.ownerId,
           data: JSON.stringify(updated), updated_at: updated.updatedAt,

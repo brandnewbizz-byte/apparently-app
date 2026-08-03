@@ -1,0 +1,408 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Apparently App — System Architecture</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --fg: #172033;
+    --muted: #5b6475;
+    --line: #94a3b8;
+    --neutral: #e2e8f0;
+    --page: #bfdbfe;
+    --context: #c7d2fe;
+    --supabase: #99f6e4;
+    --table: #fde68a;
+    --broken: #fecaca;
+    --ok: #bbf7d0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a;
+      --fg: #e5e7eb;
+      --muted: #a3adbd;
+      --line: #64748b;
+      --neutral: #334155;
+      --page: #1e3a5f;
+      --context: #312e81;
+      --supabase: #115e59;
+      --table: #78350f;
+      --broken: #7f1d1d;
+      --ok: #14532d;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-sans-serif,system-ui,sans-serif; }
+  main { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+  svg { width: 100%; height: auto; display: block; }
+  .title { font-size: 22px; font-weight: 700; fill: var(--fg); }
+  .subtitle { font-size: 13px; fill: var(--muted); }
+  .label { font-size: 13px; font-weight: 600; fill: var(--fg); }
+  .small { font-size: 11px; fill: var(--muted); }
+  .tag { font-size: 10px; font-weight: 700; }
+  .node { stroke: var(--line); stroke-width: 1.2; }
+  .page-fill { fill: var(--page); }
+  .ctx-fill { fill: var(--context); }
+  .supa-fill { fill: var(--supabase); }
+  .tbl-fill { fill: var(--table); }
+  .ok-fill { fill: var(--ok); }
+  .broken-fill { fill: var(--broken); }
+  .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .edge-ok { stroke: #22c55e; stroke-width: 2; fill: none; }
+  .edge-warn { stroke: #f59e0b; stroke-width: 2; stroke-dasharray: 5 3; fill: none; }
+  .zone { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 6 4; opacity: 0.7; }
+</style>
+<main>
+<svg viewBox="0 0 1180 900" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <marker id="arrow-ok" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#22c55e"/></marker>
+    <marker id="arrow-warn" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#f59e0b"/></marker>
+    <marker id="arrow-muted" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#94a3b8"/></marker>
+    <marker id="arrow-rev-ok" markerWidth="8" markerHeight="6" refX="0" refY="3" orient="auto"><polygon points="8 0, 0 3, 8 6" fill="#22c55e"/></marker>
+    <marker id="arrow-rev-muted" markerWidth="8" markerHeight="6" refX="0" refY="3" orient="auto"><polygon points="8 0, 0 3, 8 6" fill="#94a3b8"/></marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="20" y="28" class="title">Apparently App — System Architecture &amp; Connection Map</text>
+  <text x="20" y="48" class="subtitle">Frontend (Expo/React Native) ←→ Backend (Supabase) — Deployed OTAs #1–#16</text>
+
+  <!-- ════════════════ ZONES ════════════════ -->
+  <!-- Frontend Zone -->
+  <rect x="14" y="64" width="270" height="810" rx="8" class="zone"/>
+  <text x="24" y="84" class="label">📱 Pages (React Native Screens)</text>
+
+  <!-- Context Zone -->
+  <rect x="300" y="64" width="270" height="810" rx="8" class="zone"/>
+  <text x="310" y="84" class="label">🧠 Contexts &amp; Hooks (State)</text>
+
+  <!-- Supabase Services Zone -->
+  <rect x="586" y="64" width="270" height="810" rx="8" class="zone"/>
+  <text x="596" y="84" class="label">☁️ Supabase Services</text>
+
+  <!-- Data Zone -->
+  <rect x="872" y="64" width="294" height="810" rx="8" class="zone"/>
+  <text x="882" y="84" class="label">🗄️ Database Tables / Storage</text>
+
+  <!-- ════════════════ COL 1: PAGES ════════════════ -->
+  <!-- Feed -->
+  <rect x="28" y="104" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="125" text-anchor="middle" class="label">🏠 Feed</text>
+  <text x="149" y="143" text-anchor="middle" class="small">(tabs)/feed/index.tsx</text>
+
+  <!-- Search -->
+  <rect x="28" y="172" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="193" text-anchor="middle" class="label">🔍 Search</text>
+  <text x="149" y="211" text-anchor="middle" class="small">(tabs)/search.tsx</text>
+
+  <!-- Live Room -->
+  <rect x="28" y="240" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="261" text-anchor="middle" class="label">📻 Live Rooms</text>
+  <text x="149" y="279" text-anchor="middle" class="small">(tabs)/live/room/[roomId].tsx</text>
+
+  <!-- Create Post -->
+  <rect x="28" y="308" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="329" text-anchor="middle" class="label">✏️ Create Post</text>
+  <text x="149" y="347" text-anchor="middle" class="small">PostComposer modal + handleCreateTap</text>
+
+  <!-- Profile -->
+  <rect x="28" y="376" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="397" text-anchor="middle" class="label">👤 Profile</text>
+  <text x="149" y="415" text-anchor="middle" class="small">(tabs)/profile/index.tsx</text>
+
+  <!-- User Profile -->
+  <rect x="28" y="444" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="465" text-anchor="middle" class="label">👥 User Profile (other)</text>
+  <text x="149" y="483" text-anchor="middle" class="small">app/user/[userId].tsx</text>
+
+  <!-- Inbox -->
+  <rect x="28" y="512" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="533" text-anchor="middle" class="label">📬 Inbox (3 tabs)</text>
+  <text x="149" y="551" text-anchor="middle" class="small">app/inbox/index.tsx</text>
+
+  <!-- Conversation -->
+  <rect x="28" y="580" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="601" text-anchor="middle" class="label">💬 Conversation DM</text>
+  <text x="149" y="619" text-anchor="middle" class="small">app/inbox/conversation/[id].tsx</text>
+
+  <!-- Settings -->
+  <rect x="28" y="648" width="242" height="52" rx="6" class="node page-fill"/>
+  <text x="149" y="669" text-anchor="middle" class="label">⚙️ Settings</text>
+  <text x="149" y="687" text-anchor="middle" class="small">(tabs)/profile/settings.tsx</text>
+
+  <!-- ════════════════ COL 2: CONTEXTS ════════════════ -->
+  <!-- SocialContext -->
+  <rect x="314" y="104" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="123" text-anchor="middle" class="label">SocialContext</text>
+  <text x="435" y="141" text-anchor="middle" class="small">posts · likes · comments · create</text>
+
+  <!-- AuthContext -->
+  <rect x="314" y="168" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="187" text-anchor="middle" class="label">AuthContext</text>
+  <text x="435" y="205" text-anchor="middle" class="small">session · profile · fullName · avatar</text>
+
+  <!-- RoomContext -->
+  <rect x="314" y="232" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="251" text-anchor="middle" class="label">RoomContext</text>
+  <text x="435" y="269" text-anchor="middle" class="small">joinRoom · leaveRoom · participants</text>
+
+  <!-- useLiveAudio -->
+  <rect x="314" y="296" width="242" height="36" rx="6" class="node ctx-fill"/>
+  <text x="435" y="311" text-anchor="middle" class="label">useLiveAudio</text>
+  <text x="435" y="325" text-anchor="middle" class="small">voice · push-to-talk · WebRTC</text>
+
+  <!-- ConnectionsContext -->
+  <rect x="314" y="348" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="367" text-anchor="middle" class="label">ConnectionsContext</text>
+  <text x="435" y="385" text-anchor="middle" class="small">follow · unfollow · followingIds</text>
+
+  <!-- UserPostsContext -->
+  <rect x="314" y="412" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="431" text-anchor="middle" class="label">UserPostsContext</text>
+  <text x="435" y="449" text-anchor="middle" class="small">fetch posts for profile grid</text>
+
+  <!-- MessagingContext -->
+  <rect x="314" y="476" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="495" text-anchor="middle" class="label">MessagingContext</text>
+  <text x="435" y="513" text-anchor="middle" class="small">conversations · send · realtime</text>
+
+  <!-- BundleContext -->
+  <rect x="314" y="540" width="242" height="48" rx="6" class="node ctx-fill"/>
+  <text x="435" y="559" text-anchor="middle" class="label">BundleContext</text>
+  <text x="435" y="577" text-anchor="middle" class="small">bundles · items · grab</text>
+
+  <!-- Direct Supabase (search, inbox) -->
+  <rect x="314" y="648" width="242" height="48" rx="6" class="node ctx-fill" stroke-dasharray="4 2"/>
+  <text x="435" y="667" text-anchor="middle" class="label">Direct Supabase Queries</text>
+  <text x="435" y="685" text-anchor="middle" class="small">search.tsx · inbox → supabase.from()</text>
+
+  <!-- ════════════════ COL 3: SUPABASE SERVICES ════════════════ -->
+  <!-- Auth -->
+  <rect x="600" y="104" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="121" text-anchor="middle" class="label">🔐 Auth</text>
+  <text x="721" y="137" text-anchor="middle" class="small">email/password · sessions · JWT</text>
+
+  <!-- REST API (PostgREST) -->
+  <rect x="600" y="162" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="179" text-anchor="middle" class="label">📡 REST API (PostgREST)</text>
+  <text x="721" y="195" text-anchor="middle" class="small">select · insert · update · delete</text>
+
+  <!-- Realtime -->
+  <rect x="600" y="220" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="237" text-anchor="middle" class="label">🔄 Realtime (WebSocket)</text>
+  <text x="721" y="253" text-anchor="middle" class="small">notifications · rooms · messages</text>
+
+  <!-- Storage -->
+  <rect x="600" y="278" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="295" text-anchor="middle" class="label">📦 Storage (S3)</text>
+  <text x="721" y="311" text-anchor="middle" class="small">avatars · messages · public buckets</text>
+
+  <!-- RLS -->
+  <rect x="600" y="336" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="353" text-anchor="middle" class="label">🛡️ RLS Policies</text>
+  <text x="721" y="369" text-anchor="middle" class="small">user-scoped row-level security</text>
+
+  <!-- EAS OTA -->
+  <rect x="600" y="394" width="242" height="42" rx="6" class="node supa-fill"/>
+  <text x="721" y="411" text-anchor="middle" class="label">🚀 EAS Update (OTA)</text>
+  <text x="721" y="427" text-anchor="middle" class="small">branch: main · 16 OTAs deployed</text>
+
+  <!-- ════════════════ COL 4: TABLES ════════════════ -->
+  <!-- profiles -->
+  <rect x="886" y="104" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="951" y="127" text-anchor="middle" class="label">profiles</text>
+
+  <!-- posts -->
+  <rect x="1026" y="104" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="1091" y="127" text-anchor="middle" class="label">posts</text>
+
+  <!-- likes -->
+  <rect x="886" y="150" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="951" y="173" text-anchor="middle" class="label">likes</text>
+
+  <!-- comments -->
+  <rect x="1026" y="150" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="1091" y="173" text-anchor="middle" class="label">comments</text>
+
+  <!-- follows -->
+  <rect x="886" y="196" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="951" y="219" text-anchor="middle" class="label">follows</text>
+
+  <!-- notifications -->
+  <rect x="1026" y="196" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="1091" y="219" text-anchor="middle" class="label">notifications</text>
+
+  <!-- rooms -->
+  <rect x="886" y="242" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="951" y="265" text-anchor="middle" class="label">rooms</text>
+
+  <!-- messages -->
+  <rect x="1026" y="242" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="1091" y="265" text-anchor="middle" class="label">messages</text>
+
+  <!-- conversations -->
+  <rect x="886" y="288" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="951" y="311" text-anchor="middle" class="label">conversations</text>
+
+  <!-- bundles -->
+  <rect x="1026" y="288" width="130" height="36" rx="4" class="node tbl-fill"/>
+  <text x="1091" y="311" text-anchor="middle" class="label">bundles</text>
+
+  <!-- avatars bucket -->
+  <rect x="886" y="336" width="130" height="36" rx="4" class="node supa-fill"/>
+  <text x="951" y="359" text-anchor="middle" class="label">📁 avatars</text>
+
+  <!-- messages bucket -->
+  <rect x="1026" y="336" width="130" height="36" rx="4" class="node supa-fill"/>
+  <text x="1091" y="359" text-anchor="middle" class="label">📁 messages</text>
+
+  <!-- ════════════════ CONNECTIONS: Pages → Contexts ════════════════ -->
+  <!-- Feed → SocialContext -->
+  <path d="M270,130 C285,130 300,128 314,128" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- Feed → ConnectionsContext (following filter) -->
+  <path d="M270,140 C285,140 300,360 314,372" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Search → Supabase Direct -->
+  <path d="M270,198 C285,198 300,170 314,170" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Live Room → RoomContext -->
+  <path d="M270,266 C285,266 300,256 314,256" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- Live Room → useLiveAudio -->
+  <path d="M270,280 C285,280 300,314 314,314" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Create Post → SocialContext -->
+  <path d="M270,334 C285,334 300,150 314,150" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Profile → AuthContext -->
+  <path d="M270,402 C285,402 300,192 314,192" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- Profile → UserPostsContext -->
+  <path d="M270,416 C285,416 300,436 314,436" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- User Profile → AuthContext -->
+  <path d="M270,470 C285,470 300,210 314,210" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- User Profile → ConnectionsContext -->
+  <path d="M270,484 C285,484 300,384 314,384" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Inbox → Supabase Direct -->
+  <path d="M270,538 C285,538 300,500 314,500" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Conversation → MessagingContext -->
+  <path d="M270,606 C285,606 300,500 314,500" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Settings → AuthContext -->
+  <path d="M270,674 C285,674 300,210 314,210" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- ════════════════ CONNECTIONS: Contexts → Supabase ════════════════ -->
+  <!-- SocialContext → REST API → posts, likes, comments, notifications -->
+  <path d="M556,128 C571,128 586,183 600,183" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- AuthContext → Auth -->
+  <path d="M556,192 C571,192 586,125 600,125" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <!-- AuthContext → REST API → profiles -->
+  <path d="M556,210 C571,210 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- RoomContext → Realtime → rooms -->
+  <path d="M556,256 C571,256 586,241 600,241" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- useLiveAudio → WebRTC (peer-to-peer) -->
+  <path d="M556,314 C571,314 586,241 600,241" class="edge-warn" marker-end="url(#arrow-warn)"/>
+  <text x="564" y="305" class="small" fill="#f59e0b">WebRTC P2P</text>
+
+  <!-- ConnectionsContext → REST API → follows, notifications -->
+  <path d="M556,372 C571,372 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- UserPostsContext → REST API → posts -->
+  <path d="M556,436 C571,436 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- MessagingContext → REST API + Realtime → messages, conversations -->
+  <path d="M556,500 C571,500 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <path d="M556,512 C571,512 586,262 600,262" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- BundleContext → REST API → bundles -->
+  <path d="M556,564 C571,564 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- Direct queries (search, inbox) → REST API → profiles, posts, notifications -->
+  <path d="M556,672 C571,672 586,200 600,200" class="edge-ok" marker-end="url(#arrow-ok)"/>
+
+  <!-- ════════════════ CONNECTIONS: Supabase → Tables ════════════════ -->
+  <!-- REST API → tables (fan out) -->
+  <path d="M842,183 C856,183 870,150 886,150" class="edge-muted" marker-end="url(#arrow-muted)"/>
+  <path d="M842,183 C856,183 870,122 886,122" class="edge-muted" marker-end="url(#arrow-muted)"/>
+  <path d="M842,183 C870,183 870,219 886,219" class="edge-muted" marker-end="url(#arrow-muted)"/>
+
+  <!-- Auth → profiles -->
+  <path d="M842,125 C856,125 870,122 886,122" class="edge-muted" marker-end="url(#arrow-muted)"/>
+
+  <!-- Realtime → notifications, rooms, messages -->
+  <path d="M842,241 C856,241 870,219 886,219" class="edge-muted" marker-end="url(#arrow-muted)"/>
+  <path d="M842,241 C856,241 870,260 886,260" class="edge-muted" marker-end="url(#arrow-muted)"/>
+
+  <!-- Storage → buckets -->
+  <path d="M842,299 C856,299 870,354 886,354" class="edge-muted" marker-end="url(#arrow-muted)"/>
+  <path d="M842,311 C856,311 870,354 886,354" class="edge-muted" marker-end="url(#arrow-muted)"/>
+
+  <!-- ════════════════ DATA FLOW ARROWS (right side annotations) ════════════════ -->
+  <!-- Flow 1: Like notification -->
+  <text x="882" y="410" class="small" fill="#22c55e">✅ Flow 1: Like → SocialContext.toggleLike()</text>
+  <text x="890" y="425" class="small" fill="#94a3b8">   → posts SELECT (user_id, image_url)</text>
+  <text x="890" y="440" class="small" fill="#94a3b8">   → notifications INSERT (like type)</text>
+  <text x="890" y="455" class="small" fill="#94a3b8">   → realtime → inbox renders ✓</text>
+
+  <text x="882" y="478" class="small" fill="#22c55e">✅ Flow 2: Comment notification</text>
+  <text x="890" y="493" class="small" fill="#94a3b8">   → SocialContext.addComment()</text>
+  <text x="890" y="508" class="small" fill="#94a3b8">   → data: {post_id, post_image_url,</text>
+  <text x="890" y="523" class="small" fill="#94a3b8">        post_user_id} ✓ (OTA #15)</text>
+
+  <text x="882" y="546" class="small" fill="#22c55e">✅ Flow 3: Follow → ConnectionsContext</text>
+  <text x="890" y="561" class="small" fill="#94a3b8">   → follows INSERT + notification</text>
+
+  <text x="882" y="584" class="small" fill="#22c55e">✅ Flow 4: Room Invite (OTA #15)</text>
+  <text x="890" y="599" class="small" fill="#94a3b8">   → profiles ILIKE (name/user/email)</text>
+  <text x="890" y="614" class="small" fill="#94a3b8">   → sendRoomInvite → notification</text>
+
+  <text x="882" y="637" class="small" fill="#f59e0b">⚠️ Flow 5: Invite Accept → Room Join</text>
+  <text x="890" y="652" class="small" fill="#f59e0b">   → inbox accept → router.push room</text>
+  <text x="890" y="667" class="small" fill="#f59e0b">   → RoomContext.joinRoom() (LOCAL)</text>
+  <text x="890" y="682" class="small" fill="#f59e0b">   → NO DB persistence of participation</text>
+
+  <text x="882" y="705" class="small" fill="#22c55e">✅ Flow 6: Search (OTA #14 fix)</text>
+  <text x="890" y="720" class="small" fill="#94a3b8">   → profiles ILIKE name/user/email</text>
+  <text x="890" y="735" class="small" fill="#94a3b8">   → posts ILIKE content</text>
+
+  <text x="882" y="758" class="small" fill="#22c55e">✅ Flow 7: Inbox (OTA #13 – 3 tabs)</text>
+  <text x="890" y="773" class="small" fill="#94a3b8">   → Notifications tab (avatars + actions)</text>
+  <text x="890" y="788" class="small" fill="#94a3b8">   → Messages tab (conversations)</text>
+  <text x="890" y="803" class="small" fill="#94a3b8">   → Requests tab (pending)</text>
+
+  <!-- ════════════════ LEGEND ════════════════ -->
+  <rect x="600" y="470" width="242" height="130" rx="6" class="zone"/>
+  <text x="612" y="492" class="label">Legend</text>
+  <line x1="612" y1="510" x2="662" y2="510" class="edge-ok" marker-end="url(#arrow-ok)"/>
+  <text x="670" y="515" class="small">Connected &amp; verified</text>
+  <line x1="612" y1="530" x2="662" y2="530" class="edge-warn" marker-end="url(#arrow-warn)"/>
+  <text x="670" y="535" class="small">Connected, needs review</text>
+  <line x1="612" y1="550" x2="662" y2="550" class="edge-muted" marker-end="url(#arrow-muted)"/>
+  <text x="670" y="555" class="small">Internal data path</text>
+  <rect x="612" y="568" width="20" height="12" rx="2" class="node ok-fill" stroke="none"/>
+  <text x="640" y="579" class="small">✅ Verified in Supabase</text>
+  <rect x="612" y="588" width="20" height="12" rx="2" class="node broken-fill" stroke="none"/>
+  <text x="640" y="599" class="small">⚠️ Needs backend work</text>
+
+  <!-- Status badge -->
+  <rect x="600" y="620" width="242" height="80" rx="6" class="zone"/>
+  <text x="612" y="642" class="label">📊 Connection Health</text>
+  <text x="612" y="662" class="small" fill="#22c55e">6/7 flows verified ✅ · 16 OTAs deployed</text>
+  <text x="612" y="680" class="small">1 known gap: room invite → accept</text>
+  <text x="612" y="695" class="small"> has no DB write (uses local state only)</text>
+
+  <!-- Deployed OTAs list -->
+  <rect x="600" y="720" width="242" height="140" rx="6" class="zone"/>
+  <text x="612" y="742" class="label">📋 Recent OTAs</text>
+  <text x="612" y="760" class="small">#11 db.ts fake UUID fix</text>
+  <text x="612" y="776" class="small">#12 Inbox notifications fix (8 files)</text>
+  <text x="612" y="792" class="small">#13 Inbox 3-tab + text posts + search</text>
+  <text x="612" y="808" class="small">#14 Notification thumbnails + profile</text>
+  <text x="612" y="824" class="small">#15 Room invite search + SocialContext</text>
+  <text x="612" y="840" class="small">#16 Profile crash fix (refreshKey)</text>
+
+</svg>
+</main>

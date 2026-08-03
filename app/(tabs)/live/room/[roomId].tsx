@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
   Animated, ScrollView, Image, FlatList, PanResponder, Alert, Modal, TextInput,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -423,36 +424,45 @@ function RoomContent() {
   }, [roomId, leaveRoom, router]);
 
   // ── Room Invite ──
+  const participantIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set<string>((room?.participants || []).map((p: any) => p.userId));
+    participantIdsRef.current = ids;
+  }, [room?.participants]);
+
   const searchUsersForInvite = useCallback(async (query: string) => {
     if (query.length < 2) { setInviteResults([]); return; }
     setInviteLoading(true);
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, avatar')
-        .or(`full_name.ilike.%25${query}%25,username.ilike.%25${query}%25`)
+        .select('id, full_name, username, avatar, email')
+        .or(`full_name.ilike.%${query}%,username.ilike.%${query}%,email.ilike.%${query}%`)
         .limit(10);
       if (!error && data) {
-        // Filter out current user and already-participants
-        const participantIds = new Set((room?.participants || []).map((p: any) => p.userId));
-        setInviteResults(data.filter((u: any) => u.id !== user?.id && !participantIds.has(u.id)));
+        const pidSet = participantIdsRef.current;
+        setInviteResults(data.filter((u: any) => u.id !== user?.id && !pidSet.has(u.id)));
       }
     } catch {}
     setInviteLoading(false);
-  }, [room?.participants, user?.id]);
+  }, [user?.id]);
 
   const sendRoomInvite = useCallback(async (targetUserId: string, targetName: string) => {
     if (!user?.id || !roomId) return;
+    const actorName = user?.fullName || user?.username || 'Someone';
+    const actorAvatar = user?.avatar || '';
     await supabase.from('notifications').insert({
-      recipient_id: targetUserId,
-      sender_id: user.id,
+      user_id: targetUserId,
+      actor_id: user.id,
+      actor_name: actorName,
+      actor_avatar: actorAvatar,
       type: 'room_invite',
-      content: JSON.stringify({
+      title: `${actorName} invited you to join "${room?.name || 'their room'}"`,
+      body: `invited you to join "${room?.name || 'their room'}"`,
+      data: {
         room_id: roomId,
         room_name: room?.name || 'A room',
-        inviter_name: (user as any)?.fullName || 'Someone',
-        message: `invited you to join "${room?.name || 'their room'}"`,
-      }),
+      },
       read: false,
       created_at: new Date().toISOString(),
     });
@@ -1008,8 +1018,13 @@ function RoomContent() {
       )}
       {/* ── Invite Modal ── */}
       <Modal visible={showInviteModal} transparent animationType="slide" onRequestClose={() => setShowInviteModal(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={insets.top + 10}
+        >
         <TouchableOpacity style={styles.inviteOverlay} activeOpacity={1} onPress={() => setShowInviteModal(false)}>
-          <View style={[styles.inviteSheet, { backgroundColor: '#FFFFFF' }]} onStartShouldSetResponder={() => true}>
+          <TouchableOpacity style={[styles.inviteSheet, { backgroundColor: '#FFFFFF' }]} activeOpacity={1} onPress={() => {}}>
             <Text style={styles.inviteTitle}>Invite to Room</Text>
             <View style={styles.inviteSearchInput}>
               <Search size={16} color="#8E8E93" />
@@ -1030,6 +1045,7 @@ function RoomContent() {
             <FlatList
               data={inviteResults}
               keyExtractor={(item) => item.id}
+              style={{ flex: 1 }}
               renderItem={({ item }) => (
                 <View style={styles.inviteUserItem}>
                   <View style={styles.inviteAvatar}>
@@ -1043,7 +1059,7 @@ function RoomContent() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.inviteName}>{item.full_name || 'Unnamed'}</Text>
-                    <Text style={styles.inviteUser}>@{item.username || 'user'}</Text>
+                    <Text style={styles.inviteUser}>@{item.username || 'user'}{item.email ? ` · ${item.email}` : ''}</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.inviteBtn}
@@ -1065,8 +1081,11 @@ function RoomContent() {
               }
             />
             {inviteLoading && <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 10 }}>Searching...</Text>}
-          </View>
+            {/* bottom spacer so invite buttons aren't cut off */}
+            <View style={{ height: insets.bottom + 16 }} />
+          </TouchableOpacity>
         </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

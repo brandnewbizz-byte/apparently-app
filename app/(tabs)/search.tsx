@@ -27,12 +27,12 @@ interface UserResult {
   followers_count?: number;
 }
 
-// Maps profile row (full_name, avatar_url) to UserResult (name, avatar)
+// Maps profile row (full_name, avatar) to UserResult (name, avatar)
 interface ProfileRow {
   id: string;
   full_name: string | null;
   username: string | null;
-  avatar_url: string | null;
+  avatar: string | null;
   bio?: string | null;
 }
 
@@ -113,8 +113,8 @@ export default function SearchScreen() {
         ? Promise.resolve({ data: [], error: null })
         : supabase
             .from('profiles')
-            .select('id, full_name, username, avatar_url, bio')
-            .or(`full_name.ilike.${pattern},username.ilike.${pattern}`)
+            .select('id, full_name, username, avatar, bio, email')
+            .or(`full_name.ilike.${pattern},username.ilike.${pattern},email.ilike.${pattern}`)
             .limit(20);
 
       const postPattern = `%${trimmed}%`;
@@ -140,7 +140,7 @@ export default function SearchScreen() {
           id: p.id,
           name: p.full_name || p.username || 'User',
           username: p.username || '',
-          avatar: p.avatar_url || '',
+          avatar: p.avatar || '',
           is_verified: false,
           bio: p.bio || undefined,
         }));
@@ -170,7 +170,25 @@ export default function SearchScreen() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [currentUser?.id]);
+
+  // Reload following status when currentUser becomes available or search results change
+  useEffect(() => {
+    if (!currentUser?.id || users.length === 0) return;
+    const userIds = users.map(u => u.id);
+    supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUser.id)
+      .in('following_id', userIds)
+      .then(({ data: followData }) => {
+        if (followData) {
+          setFollowingIds(new Set(followData.map((f: any) => f.following_id)));
+        }
+      }, (err: any) => {
+        console.error('[Search] Follow status fetch error:', err);
+      });
+  }, [currentUser?.id, users]);
 
   const handleQueryChange = (text: string) => {
     setQuery(text);

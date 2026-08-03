@@ -1,7 +1,7 @@
 import {
   Radio, Plus, Users, Circle, Zap, Sparkles, X, Hash,
 } from 'lucide-react-native';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Animated, RefreshControl, Modal, TextInput,
@@ -26,6 +26,9 @@ export default function LiveScreen() {
   const { user } = useAuth();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { rooms, createRoom, fetchRooms } = useRoom();
+
+  // Only show user's own rooms
+  const myRooms = useMemo(() => rooms.filter(r => r.creatorId === user?.id), [rooms, user?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -98,8 +101,8 @@ export default function LiveScreen() {
             <View>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Spot</Text>
               <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
-                {rooms.length > 0
-                  ? `${rooms.length} room${rooms.length > 1 ? 's' : ''} live`
+                {myRooms.length > 0
+                  ? `${myRooms.length} room${myRooms.length > 1 ? 's' : ''}`
                   : 'Live collaboration space'}
               </Text>
             </View>
@@ -150,11 +153,11 @@ export default function LiveScreen() {
               </View>
             </View>
 
-            {rooms.length === 0 ? (
+            {myRooms.length === 0 ? (
               <View style={styles.emptyState}>
                 <Circle size={48} color={colors.accent + '30'} />
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  No rooms live yet
+                  No rooms yet
                 </Text>
                 <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
                   Create the first room and invite your network
@@ -169,7 +172,7 @@ export default function LiveScreen() {
               </View>
             ) : (
               <View style={styles.roomGrid}>
-                {rooms.map((room) => (
+                {myRooms.map((room) => (
                   <TouchableOpacity
                     key={room.id}
                     style={[

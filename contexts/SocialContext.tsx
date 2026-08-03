@@ -8,6 +8,9 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Post, Story } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
+import { isLocalFileUri } from '@/lib/media';
+import { sanitizeCaption } from '@/lib/sanitize';
+import { uploadImageToStorage } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 
@@ -20,6 +23,59 @@ function timeAgo(date: Date): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+async function processMentions(
+  senderId: string,
+  text: string,
+  contentId: string,
+  contentType: 'post' | 'comment',
+): Promise<void> {
+  const mentions = text.match(/@(\w+)/g);
+  if (!mentions) return;
+  const usernames = [...new Set(mentions.map(m => m.slice(1).toLowerCase()))];
+  if (usernames.length === 0) return;
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, username, full_name')
+    .in('username', usernames);
+  if (!profiles || profiles.length === 0) return;
+  const now = new Date().toISOString();
+  for (const profile of profiles) {
+    if (profile.id === senderId) continue;
+    // Insert mention notification (DB columns: user_id, actor_id, actor_name, data)
+    await supabase.from('notifications').insert({
+      user_id: profile.id, actor_id: senderId, type: 'mention',
+      actor_name: (sender as any)?.fullName || sender?.username || 'Someone',
+      actor_avatar: (sender as any)?.avatarUrl || '',
+      title: `${(sender as any)?.fullName || sender?.username || 'Someone'} mentioned you`,
+      body: `mentioned you in a ${contentType}`,
+      data: { content_id: contentId, content_type: contentType },
+      read: false, created_at: now,
+    });
+    // DM: find or create conversation
+    const [a, b] = [senderId, profile.id].sort();
+    let { data: convo } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('participant_one', a)
+      .eq('participant_two', b)
+      .maybeSingle();
+    let conversationId = convo?.id;
+    if (!conversationId) {
+      const { data: created } = await supabase
+        .from('conversations')
+        .insert({ participant_one: a, participant_two: b })
+        .select('id').single();
+      conversationId = created?.id;
+    }
+    if (conversationId) {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId, sender_id: senderId,
+        content: `mentioned you in a ${contentType}`, created_at: now, read: false,
+      });
+    }
+  }
 }
 
 export interface SocialComment {
@@ -172,11 +228,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               id: p.id,
               user: user ? {
                 id: user.id,
-                name: user.name,
+                name: user.full_name || user.name,
                 username: user.username,
                 avatar: user.avatar,
-                isVerified: user.is_verified,
-                followersCount: user.followers_count,
+                isVerified: user.is_verified ?? false,
+                followersCount: user.followers_count ?? 0,
                 relationshipCategory: user.relationship_category,
               } : currentUser,
               content: p.content,
@@ -220,11 +276,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               id: s.id,
               user: user ? {
                 id: user.id,
-                name: user.name,
+                name: user.full_name || user.name,
                 username: user.username,
                 avatar: user.avatar,
-                isVerified: user.is_verified,
-                followersCount: user.followers_count,
+                isVerified: user.is_verified ?? false,
+                followersCount: user.followers_count ?? 0,
               } : currentUser,
               imageUrl: s.image_url,
               timestamp: s.timestamp,
@@ -368,6 +424,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         });
         if (dbPost) {
           logger.info('SocialContext', 'Created post in Supabase', { id: dbPost.id });
+          // Process @mentions in post content
+          if (userId && userId !== 'u-dev') {
+            processMentions(userId, post.content, dbPost.id, 'post').catch((e) =>
+              logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
+            );
+          }
           return dbPost;
         }
       }
@@ -451,14 +513,21 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
-    localApi.toggleLike(postId, authUserId).catch(() => {});
-    // Send notification if liking
+    if (authUserId && authUserId !== 'u-dev') {
+      localApi.toggleLike(postId, authUserId).catch((e: any) => logger.warn('SocialContext', 'toggleLike API failed', { error: e?.message }));
+    }
+    // Send notification if liking (DB columns: user_id, actor_id, actor_name, data)
     if (!current.isLiked && authUserId && authUserId !== 'u-dev') {
-      supabase.from('posts').select('user_id').eq('id', postId).single().then(({ data: post }: any) => {
+      supabase.from('posts').select('user_id, image_url').eq('id', postId).single().then(({ data: post }: any) => {
         if (post?.user_id && post.user_id !== authUserId) {
+          const actorName = currentLoggedInUser?.fullName || currentLoggedInUser?.username || 'Someone';
+          const actorAvatar = (currentLoggedInUser as any)?.avatarUrl || '';
           supabase.from('notifications').insert({
-            recipient_id: post.user_id, sender_id: authUserId, type: 'like',
-            content: JSON.stringify({ post_id: postId, message: 'liked your post' }),
+            user_id: post.user_id, actor_id: authUserId, type: 'like',
+            actor_name: actorName, actor_avatar: actorAvatar,
+            title: `${actorName} liked your post`,
+            body: 'liked your post',
+            data: { post_id: postId, post_image_url: post.image_url || '', post_user_id: post.user_id },
             read: false, created_at: new Date().toISOString(),
           });
         }
@@ -507,18 +576,29 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
-    localApi.addComment(postId, authUserId, text, parentId).catch(() => {});
-    // Send notification to post author
     if (authUserId && authUserId !== 'u-dev') {
-      supabase.from('posts').select('user_id').eq('id', postId).single().then(({ data: post }: any) => {
+      localApi.addComment(postId, authUserId, text, parentId).catch((e: any) => logger.warn('SocialContext', 'addComment API failed', { error: e?.message }));
+    }
+    // Send notification to post author (DB columns: user_id, actor_id, actor_name, data)
+    if (authUserId && authUserId !== 'u-dev') {
+      supabase.from('posts').select('user_id, image_url').eq('id', postId).single().then(({ data: post }: any) => {
         if (post?.user_id && post.user_id !== authUserId) {
+          const actorName = currentLoggedInUser?.fullName || currentLoggedInUser?.username || 'Someone';
+          const actorAvatar = (currentLoggedInUser as any)?.avatarUrl || '';
           supabase.from('notifications').insert({
-            recipient_id: post.user_id, sender_id: authUserId, type: 'comment',
-            content: JSON.stringify({ post_id: postId, message: 'commented: "' + text.slice(0, 60) + '"' }),
+            user_id: post.user_id, actor_id: authUserId, type: 'comment',
+            actor_name: actorName, actor_avatar: actorAvatar,
+            title: `${actorName} commented on your post`,
+            body: 'commented: "' + text.slice(0, 60) + '"',
+            data: { post_id: postId, post_image_url: post.image_url || '', post_user_id: post.user_id },
             read: false, created_at: new Date().toISOString(),
           });
         }
       });
+      // Process @mentions in comment text
+      processMentions(authUserId, text, postId, 'comment').catch((e) =>
+        logger.warn('SocialContext', 'comment mention processing failed', { error: e?.message })
+      );
     }
   }, [ensureInteraction, interactions, persistState, authUserId]);
 
@@ -721,91 +801,132 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => {
     const isVideo = options?.mediaType === 'video';
     const videoUrl = isVideo ? imageUrl : undefined;
-    const finalImageUrl = isVideo ? undefined : imageUrl;
-    logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
-    createPostMutate({ content, imageUrl: finalImageUrl });
-    queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-    localApi.createPost(authUserId, content, imageUrl, options).then((saved) => {
-      logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
-      // When it's a sell post, also create a marketplace product
-      if (options?.postKind === 'sell') {
-        localApi.createProduct({
-          seller_id: authUserId,
-          seller_name: 'You',
-          seller_avatar: '',
-          seller_username: 'you',
-          title: content.slice(0, 100),
-          description: content,
-          price: 0,
-          accepts_swap: true,
-          condition: 'good',
-          category: options?.category || 'General',
-          images: imageUrl ? [{ id: '1', uri: imageUrl }] : [],
-          location: 'Local',
-        }).then(() => {
-          logger.info('SocialContext', 'Sell post also created as marketplace product');
-        }).catch((e) => {
-          logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
+    const rawImageUrl = isVideo ? undefined : imageUrl;
+    const safeContent = sanitizeCaption(content);
+
+    const doCreatePost = (finalImageUrl: string | undefined) => {
+      logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
+      createPostMutate({ content: safeContent, imageUrl: finalImageUrl });
+      queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+      localApi.createPost(authUserId, content, isVideo ? videoUrl : finalImageUrl, options).then((saved) => {
+        logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
+        if (options?.postKind === 'sell') {
+          localApi.createProduct({
+            seller_id: authUserId,
+            seller_name: 'You',
+            seller_avatar: '',
+            seller_username: 'you',
+            title: content.slice(0, 100),
+            description: content,
+            price: 0,
+            accepts_swap: true,
+            condition: 'good',
+            category: options?.category || 'General',
+            images: finalImageUrl ? [{ id: '1', uri: finalImageUrl }] : [],
+            location: 'Local',
+          }).then(() => {
+            logger.info('SocialContext', 'Sell post also created as marketplace product');
+          }).catch((e) => {
+            logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
+          });
+        }
+        apiLoaded.current = false;
+        localApi.getPosts().then((rawPosts: any[]) => {
+          const mapped: Post[] = rawPosts.map((p: any) => {
+            const joinedUser = p.user;
+            return {
+              id: p.id,
+              user: {
+                id: p.user_id,
+                name: joinedUser?.name || p.author_name || 'Unknown',
+                username: joinedUser?.username || p.author_username || 'unknown',
+                avatar: joinedUser?.avatar || p.author_avatar || '',
+                isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
+                followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
+                relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
+              },
+              content: p.content,
+              imageUrl: p.image_url,
+              videoUrl: p.video_url,
+              mediaType: p.media_type as 'image' | 'video' | undefined,
+              timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
+              likes: p.likes || 0,
+              comments: p.comments || 0,
+              shares: p.shares || 0,
+              category: p.category || undefined,
+              postKind: p.post_kind || 'post',
+              renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
+            };
+          });
+          setApiPosts(mapped);
+          setInteractions(buildDefaultState(mapped));
         });
-      }
-      apiLoaded.current = false;
-      localApi.getPosts().then((rawPosts: any[]) => {
-        const mapped: Post[] = rawPosts.map((p: any) => {
-          const joinedUser = p.user;
-          return {
-            id: p.id,
-            user: {
-              id: p.user_id,
-              name: joinedUser?.name || p.author_name || 'Unknown',
-              username: joinedUser?.username || p.author_username || 'unknown',
-              avatar: joinedUser?.avatar || p.author_avatar || '',
-              isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
-              followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
-              relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
-            },
-            content: p.content,
-            imageUrl: p.image_url,
-            videoUrl: p.video_url,
-            mediaType: p.media_type as 'image' | 'video' | undefined,
-            timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
-            likes: p.likes || 0,
-            comments: p.comments || 0,
-            shares: p.shares || 0,
-            category: p.category || undefined,
-            postKind: p.post_kind || 'post',
-            renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-          };
-        });
-        setApiPosts(mapped);
-        setInteractions(buildDefaultState(mapped));
+      }).catch(err => {
+        logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
       });
-    }).catch(err => {
-      logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
-    });
+    };
+
+    // If the image is a local file:// path, upload to Supabase Storage first
+    if (rawImageUrl && isLocalFileUri(rawImageUrl)) {
+      uploadImageToStorage(rawImageUrl, 'user-media', `posts/${authUserId}`)
+        .then((publicUrl) => {
+          logger.info('SocialContext', 'Local image uploaded to storage, creating post');
+          doCreatePost(publicUrl);
+        })
+        .catch(() => {
+          logger.warn('SocialContext', 'Storage upload failed, creating post without image');
+          doCreatePost(undefined);
+        });
+      return;
+    }
+
+    doCreatePost(rawImageUrl);
   }, [createPostMutate, queryClient, authUserId]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
-    logger.info('SocialContext', 'Creating story in Supabase...');
-    DatabaseService.getCurrentUserId().then(async (userId) => {
-      if (!userId) {
-        logger.info('SocialContext', 'createStory blocked - no user session');
-        return;
-      }
+    logger.info('SocialContext', 'Creating story...');
 
-      const payload = {
-        user_id: userId,
-        image_url: imageUrl ?? '',
-        timestamp: 'Just now',
-        viewed: false,
-        background_color: backgroundColor,
-        text_content: textContent,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      };
+    const doCreateStory = (finalImageUrl: string | undefined) => {
+      DatabaseService.getCurrentUserId().then(async (userId) => {
+        if (!userId) {
+          logger.info('SocialContext', 'createStory blocked - no user session');
+          return;
+        }
 
-      const res = await DatabaseService.createStory(payload as any);
-      logger.info('SocialContext', 'Save response', { res });
-      queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
-    });
+        const payload = {
+          user_id: userId,
+          image_url: finalImageUrl || '',
+          timestamp: 'Just now',
+          viewed: false,
+          background_color: backgroundColor,
+          text_content: textContent,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        };
+
+        const res = await DatabaseService.createStory(payload as any);
+        logger.info('SocialContext', 'Story saved', { id: (res as any)?.id });
+        queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
+      });
+    };
+
+    // Upload local images to Supabase Storage before creating the story
+    if (imageUrl && isLocalFileUri(imageUrl)) {
+      DatabaseService.getCurrentUserId().then((userId) => {
+        if (!userId) { doCreateStory(undefined); return; }
+        uploadImageToStorage(imageUrl, 'user-media', `stories/${userId}`)
+          .then((publicUrl) => {
+            logger.info('SocialContext', 'Story image uploaded to storage');
+            doCreateStory(publicUrl);
+          })
+          .catch(() => {
+            logger.warn('SocialContext', 'Storage upload failed, creating story without image');
+            doCreateStory(undefined);
+          });
+      });
+      return;
+    }
+
+    doCreateStory(imageUrl);
   }, [queryClient]);
 
   // ─── API-backed data loading ───
