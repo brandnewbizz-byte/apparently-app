@@ -321,7 +321,7 @@ export default function ConversationScreen() {
           style={[
             styles.messageBubble, 
             isMe ? [styles.myMessageBubble, { backgroundColor: colors.accent }] : [styles.theirMessageBubble, { backgroundColor: colors.surface, borderColor: colors.border }]
-          ]}
+          ]}>
           {message.sharedPost && (
             <>
               <Text style={[styles.sharedLabel, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
