@@ -137,7 +137,6 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         const existing: Conversation[] = stored ? JSON.parse(stored) : [];
 
         for (const cv of convs as any[]) {
-          if (existing.find(e => e.id === cv.id)) continue;
           const otherId = cv.participant_one === authUser.id ? cv.participant_two : cv.participant_one;
           
           // Fetch participant profile from Supabase
@@ -157,6 +156,15 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             }
           } catch {
             // Fall back to defaults
+          }
+
+          const existingConv = existing.find(e => e.id === cv.id);
+          if (existingConv) {
+            // Refresh participant info for existing conversations (was stale 'User')
+            existingConv.participantName = profileName;
+            existingConv.participantAvatar = profileAvatar;
+            existingConv.participantUsername = profileUsername;
+            continue;
           }
 
           const { data: msgs } = await supabase
