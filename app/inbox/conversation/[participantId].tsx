@@ -29,7 +29,7 @@ export default function ConversationScreen() {
   const insets = useSafeAreaInsets();
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
   const { colors } = useTheme();
-  const { getConversation, sendMessage, markConversationAsRead } = useMessaging();
+  const { getConversation, sendMessage, markConversationAsRead, deleteMessage } = useMessaging();
   const { user: authUser } = useAuth();
   const [messageText, setMessageText] = useState('');
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
@@ -296,6 +296,13 @@ export default function ConversationScreen() {
       return part;
     });
 
+    const handleLongPress = () => {
+      Alert.alert('Delete Message', 'Remove this message?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(message.id, participantId || '') },
+      ]);
+    };
+
     return (
       <View
         key={message.id}
@@ -307,10 +314,14 @@ export default function ConversationScreen() {
         {!isMe && (
           <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
         )}
-        <View style={[
-          styles.messageBubble, 
-          isMe ? [styles.myMessageBubble, { backgroundColor: colors.accent }] : [styles.theirMessageBubble, { backgroundColor: colors.surface, borderColor: colors.border }]
-        ]}>
+        <TouchableOpacity 
+          activeOpacity={0.7}
+          onLongPress={handleLongPress}
+          delayLongPress={400}
+          style={[
+            styles.messageBubble, 
+            isMe ? [styles.myMessageBubble, { backgroundColor: colors.accent }] : [styles.theirMessageBubble, { backgroundColor: colors.surface, borderColor: colors.border }]
+          ]}
           {message.sharedPost && (
             <>
               <Text style={[styles.sharedLabel, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
@@ -335,6 +346,7 @@ export default function ConversationScreen() {
           <Text style={[styles.messageTimestamp, isMe ? styles.myMessageTimestamp : { color: colors.textTertiary }]}>
             {formatTimestamp(message.timestamp)}
           </Text>
+          </TouchableOpacity>
         </View>
         {isMe && (
           <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />

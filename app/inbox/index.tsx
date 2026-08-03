@@ -346,6 +346,13 @@ export default function InboxScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.push(`/inbox/${conv.participantId}` as any);
           }}
+          onLongPress={() => {
+            Alert.alert('Delete Thread', `Remove conversation with ${conv.participantName}?`, [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => messaging.deleteConversation(conv.participantId) },
+            ]);
+          }}
+          delayLongPress={500}
         >
           <Image
             source={{ uri: conv.participantAvatar }}

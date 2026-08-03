@@ -345,6 +345,44 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     return conversations.reduce((total, conv) => total + conv.unreadCount, 0);
   }, [conversations]);
 
+  const deleteMessage = useCallback(async (messageId: string, participantId: string) => {
+    try {
+      // Delete from Supabase
+      const { error } = await supabase.from('messages').delete().eq('id', messageId);
+      if (error) { logger.warn('MessagingContext', 'Supabase delete message failed', { error: error.message }); }
+    } catch (e) {
+      logger.warn('MessagingContext', 'deleteMessage Supabase error', { error: String(e) });
+    }
+    // Remove from local state
+    const updated = conversations.map(c => {
+      if (c.participantId === participantId) {
+        const filtered = c.messages.filter(m => m.id !== messageId);
+        return { ...c, messages: filtered, lastMessageAt: filtered.length ? filtered[filtered.length - 1].timestamp : c.lastMessageAt };
+      }
+      return c;
+    }).filter(c => c.messages.length > 0); // remove empty conversations
+    logger.info('MessagingContext', 'Deleted message', { messageId, participantId });
+    persistState(updated);
+  }, [conversations, persistState]);
+
+  const deleteConversation = useCallback(async (participantId: string) => {
+    const conv = conversations.find(c => c.participantId === participantId);
+    if (!conv) return;
+    try {
+      // Delete all messages + conversation from Supabase
+      const { error: msgErr } = await supabase.from('messages').delete().eq('conversation_id', conv.id);
+      if (msgErr) { logger.warn('MessagingContext', 'Supabase delete messages failed', { error: msgErr.message }); }
+      const { error: convErr } = await supabase.from('conversations').delete().eq('id', conv.id);
+      if (convErr) { logger.warn('MessagingContext', 'Supabase delete conversation failed', { error: convErr.message }); }
+    } catch (e) {
+      logger.warn('MessagingContext', 'deleteConversation Supabase error', { error: String(e) });
+    }
+    // Remove from local state
+    const updated = conversations.filter(c => c.participantId !== participantId);
+    logger.info('MessagingContext', 'Deleted conversation', { participantId });
+    persistState(updated);
+  }, [conversations, persistState]);
+
   return {
     conversations,
     isLoading: query.isLoading,
@@ -353,5 +391,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     getConversation,
     markConversationAsRead,
     getTotalUnreadCount,
+    deleteMessage,
+    deleteConversation,
   };
 });
