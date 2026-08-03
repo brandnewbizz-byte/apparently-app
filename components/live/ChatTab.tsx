@@ -105,6 +105,8 @@ export default function ChatTab({ roomId, roomName }: ChatTabProps) {
     setInput('');
     // Clear typing immediately
     setTypingUsers(new Set());
+
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const msg = {
       conversation_id: roomConvId,
       sender_id: user.id,
@@ -112,12 +114,24 @@ export default function ChatTab({ roomId, roomName }: ChatTabProps) {
       read: false,
       created_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from('messages').insert(msg);
-    if (error) {
-      console.log('[Chat] Send error:', error.message);
-      // Fallback: add locally even if Supabase insert failed
-      const localMsg: ChatMessage = { ...msg, id: `local_${Date.now()}` };
-      setMessages(prev => [...prev, localMsg]);
+
+    // OPTIMISTIC UPDATE: show message immediately before Supabase responds
+    const optimisticMsg: ChatMessage = {
+      ...msg,
+      id: tempId,
+      sender_name: user?.fullName || user?.username || 'You',
+      sender_avatar: user?.avatar || null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+    const { error, data } = await supabase.from('messages').insert(msg).select('*').single();
+    if (error || !data) {
+      console.log('[Chat] Send error:', error?.message || 'no data returned');
+      // Keep the local optimistic message — it already shows in the UI
+    } else {
+      // Replace temp optimistic message with real server message
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...data, sender_name: user?.fullName, sender_avatar: user?.avatar } : m));
     }
     setSending(false);
   }, [input, user?.id, user, roomConvId, sending]);

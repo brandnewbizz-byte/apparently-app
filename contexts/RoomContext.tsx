@@ -85,6 +85,7 @@ interface RoomContextValue {
     visibility?: 'public' | 'private' | 'invite_only';
     maxParticipants?: number;
     environment?: string;
+    coverImage?: string | null;
   }) => Promise<LiveRoom | null>;
   joinRoom: (roomId: string) => void;
   leaveRoom: (roomId: string) => void;
@@ -297,7 +298,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
 
   // ── Create room ──
   const createRoom = useCallback(async (name: string, topic: string, opts?: {
-    goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number; environment?: string;
+    goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number; environment?: string; coverImage?: string | null;
   }) => {
     const roomId = `room_${seededId()}`;
     const inviteLink = `apparently://live/room/${roomId}`;
@@ -305,7 +306,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       id: roomId, name, topic,
       goal: opts?.goal || '', category: opts?.category || 'General',
       visibility: opts?.visibility || 'public', maxParticipants: opts?.maxParticipants || 25,
-      scheduledDate: null, coverImage: null,
+      scheduledDate: null, coverImage: opts?.coverImage || null,
       creatorId: user?.id || '', creatorName: user?.fullName || 'Anonymous',
       creatorAvatar: user?.avatar || null,
       participants: [makeParticipant(user, 'host')],

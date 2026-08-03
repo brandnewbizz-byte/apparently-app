@@ -534,6 +534,14 @@ function RoomContent() {
         nestedScrollEnabled={true}
         showsVerticalScrollIndicator={false}
       >
+      {/* ── Cover Image ── */}
+      {room?.coverImage ? (
+        <Image
+          source={{ uri: room.coverImage }}
+          style={styles.roomCover}
+        />
+      ) : null}
+
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerRow}>
@@ -1115,6 +1123,10 @@ const styles = StyleSheet.create({
   },
   connectingText: { color: '#737373', fontSize: 15 },
 
+  // Room Cover
+  roomCover: {
+    width: '100%', height: 160, resizeMode: 'cover',
+  },
   // Header
   header: { paddingHorizontal: 14, paddingBottom: 6 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },

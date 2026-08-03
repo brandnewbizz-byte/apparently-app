@@ -1,13 +1,15 @@
 import {
-  Radio, Plus, Users, Circle, Zap, Sparkles, X, Hash,
+  Radio, Plus, Users, Circle, Zap, Sparkles, X, Hash, Camera, Image as ImageIcon,
 } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Animated, RefreshControl, Modal, TextInput,
+  Animated, RefreshControl, Modal, TextInput, Alert,
   KeyboardAvoidingView, Platform, Dimensions, Image,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import { supabase } from '@/lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -36,6 +38,8 @@ export default function LiveScreen() {
   const [roomTopic, setRoomTopic] = useState('');
   const [roomEnvironment, setRoomEnvironment] = useState('generic');
   const [isCreating, setIsCreating] = useState(false);
+  const [coverImageUri, setCoverImageUri] = useState<string | null>(null);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -52,16 +56,65 @@ export default function LiveScreen() {
     fetchRooms().finally(() => setRefreshing(false));
   }, [fetchRooms]);
 
+  // ── Pick Cover Image ──
+  const pickCoverImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow access to your photo library to set a room cover.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setCoverImageUri(result.assets[0].uri);
+    }
+  }, []);
+
+  // ── Upload cover to Supabase Storage ──
+  const uploadCoverImage = useCallback(async (roomId: string): Promise<string | null> => {
+    if (!coverImageUri) return null;
+    try {
+      const ext = coverImageUri.split('.').pop()?.split('?')[0] || 'jpg';
+      const path = `covers/${roomId}/cover.${ext}`;
+      const blob: any = await fetch(coverImageUri).then(r => r.blob());
+      const { error } = await supabase.storage
+        .from('room-files')
+        .upload(path, blob, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('room-files').getPublicUrl(path);
+      return publicUrl;
+    } catch (e: any) {
+      console.log('[Cover Upload] failed:', e?.message || e);
+      return null;
+    }
+  }, [coverImageUri]);
+
   // ── Create Room ──
   const handleCreateRoom = useCallback(async () => {
     if (!roomName.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsCreating(true);
+    setIsUploadingCover(true);
     try {
-      const room = await createRoom(roomName.trim(), roomTopic.trim(), { environment: roomEnvironment });
+      const room = await createRoom(roomName.trim(), roomTopic.trim(), {
+        environment: roomEnvironment,
+        coverImage: coverImageUri,
+      });
+      // Upload cover AFTER room creation (uses room.id for path)
+      if (room && coverImageUri) {
+        const publicUrl = await uploadCoverImage(room.id);
+        if (publicUrl) {
+          room.coverImage = publicUrl;
+        }
+      }
       setRoomName('');
       setRoomTopic('');
       setRoomEnvironment('generic');
+      setCoverImageUri(null);
       setShowCreateModal(false);
       if (room) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -71,7 +124,8 @@ export default function LiveScreen() {
       // fall through
     }
     setIsCreating(false);
-  }, [roomName, roomTopic, createRoom, router]);
+    setIsUploadingCover(false);
+  }, [roomName, roomTopic, coverImageUri, createRoom, uploadCoverImage, router]);
 
   // ── Join Room ──
   const handleJoinRoom = useCallback((room: LiveRoom) => {
@@ -182,30 +236,53 @@ export default function LiveScreen() {
                     activeOpacity={0.9}
                     onPress={() => handleJoinRoom(room)}
                   >
-                    {/* Room status indicator */}
-                    <LinearGradient
-                      colors={
-                        room.status === 'ended' ? ['#6B7280', '#4B5563'] :
-                        room.status === 'draft' ? ['#F59E0B', '#D97706'] :
-                        ['#8B5CF6', '#6366F1']
-                      }
-                      style={styles.roomGradient}
-                    >
-                      <View style={styles.roomLiveIndicator}>
-                        <View style={[
-                          styles.roomLiveDot,
-                          room.status === 'draft' && { backgroundColor: '#FBBF24' },
-                          room.status === 'ended' && { backgroundColor: '#9CA3AF' },
-                        ]} />
-                        <Text style={[
-                          styles.roomLiveText,
-                          room.status === 'draft' && { color: '#FBBF24' },
-                          room.status === 'ended' && { color: '#D1D5DB' },
-                        ]}>
-                          {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
-                        </Text>
+                    {/* Room cover image or status gradient */}
+                    {room.coverImage ? (
+                      <View style={styles.roomGradient}>
+                        <Image
+                          source={{ uri: room.coverImage }}
+                          style={styles.roomCoverImg}
+                        />
+                        <View style={styles.roomLiveIndicator}>
+                          <View style={[
+                            styles.roomLiveDot,
+                            room.status === 'draft' && { backgroundColor: '#FBBF24' },
+                            room.status === 'ended' && { backgroundColor: '#9CA3AF' },
+                          ]} />
+                          <Text style={[
+                            styles.roomLiveText,
+                            room.status === 'draft' && { color: '#FBBF24' },
+                            room.status === 'ended' && { color: '#D1D5DB' },
+                          ]}>
+                            {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
+                          </Text>
+                        </View>
                       </View>
-                    </LinearGradient>
+                    ) : (
+                      <LinearGradient
+                        colors={
+                          room.status === 'ended' ? ['#6B7280', '#4B5563'] :
+                          room.status === 'draft' ? ['#F59E0B', '#D97706'] :
+                          ['#8B5CF6', '#6366F1']
+                        }
+                        style={styles.roomGradient}
+                      >
+                        <View style={styles.roomLiveIndicator}>
+                          <View style={[
+                            styles.roomLiveDot,
+                            room.status === 'draft' && { backgroundColor: '#FBBF24' },
+                            room.status === 'ended' && { backgroundColor: '#9CA3AF' },
+                          ]} />
+                          <Text style={[
+                            styles.roomLiveText,
+                            room.status === 'draft' && { color: '#FBBF24' },
+                            room.status === 'ended' && { color: '#D1D5DB' },
+                          ]}>
+                            {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
+                          </Text>
+                        </View>
+                      </LinearGradient>
+                    )}
 
                     <View style={styles.roomCardBody}>
                       <Text
@@ -357,6 +434,41 @@ export default function LiveScreen() {
                   maxLength={80}
                   returnKeyType="done"
                 />
+              </View>
+
+              {/* ── Cover Image ── */}
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Room Cover
+                </Text>
+                <TouchableOpacity
+                  style={[styles.coverPicker, {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  }]}
+                  onPress={pickCoverImage}
+                  disabled={isUploadingCover}
+                >
+                  {coverImageUri ? (
+                    <Image source={{ uri: coverImageUri }} style={styles.coverPreview} />
+                  ) : (
+                    <View style={styles.coverPlaceholder}>
+                      <Camera size={28} color={colors.textTertiary} />
+                      <Text style={[styles.coverPlaceholderText, { color: colors.textTertiary }]}>
+                        Add cover image
+                      </Text>
+                      <Text style={[styles.coverHint, { color: colors.textTertiary }]}>
+                        16:9 ratio recommended
+                      </Text>
+                    </View>
+                  )}
+                  {coverImageUri && (
+                    <View style={styles.coverChangeOverlay}>
+                      <ImageIcon size={16} color="#FFF" />
+                      <Text style={styles.coverChangeText}>Change</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
               </View>
 
               <View style={styles.fieldGroup}>
@@ -532,6 +644,10 @@ const styles = StyleSheet.create({
   },
   roomGradient: {
     height: 80, alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  roomCoverImg: {
+    ...StyleSheet.absoluteFillObject, width: '100%', height: '100%',
   },
   roomLiveIndicator: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -631,4 +747,31 @@ const styles = StyleSheet.create({
   previewCreator: { fontSize: 12, fontWeight: '500', flex: 1 },
   previewParticipants: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   previewCount: { fontSize: 11, fontWeight: '600' },
+
+  // ── Cover Image ──
+  coverPicker: {
+    borderRadius: 12, borderWidth: 1, overflow: 'hidden',
+    minHeight: 140,
+  },
+  coverPreview: {
+    width: '100%', height: 160, resizeMode: 'cover',
+  },
+  coverPlaceholder: {
+    height: 140, alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  coverPlaceholderText: {
+    fontSize: 14, fontWeight: '600',
+  },
+  coverHint: {
+    fontSize: 11,
+  },
+  coverChangeOverlay: {
+    position: 'absolute', right: 10, bottom: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10,
+    paddingVertical: 5, borderRadius: 12,
+  },
+  coverChangeText: {
+    color: '#FFF', fontSize: 12, fontWeight: '600',
+  },
 });
