@@ -11,6 +11,8 @@ import * as localApi from '@/lib/api';
 import { isLocalFileUri } from '@/lib/media';
 import { sanitizeCaption } from '@/lib/sanitize';
 import { uploadImageToStorage } from '@/lib/storage';
+import { queueAction, dequeueAction } from '@/lib/offlineQueue';
+import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 
@@ -211,6 +213,20 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       }
     });
   }, []);
+
+  // Retry failed likes/comments when app comes to foreground
+  useOfflineRetry({
+    retryLike: async (payload) => {
+      const { postId, userId } = payload as { postId: string; userId: string };
+      await localApi.toggleLike(postId, userId);
+      return true;
+    },
+    retryComment: async (payload) => {
+      const { postId, text, parentId } = payload as { postId: string; text: string; parentId?: string };
+      await localApi.addComment(postId, (payload as any).userId, text, parentId);
+      return true;
+    },
+  });
 
   const postsQuery = useQuery({
     queryKey: ['supabasePosts'],
@@ -514,7 +530,10 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
     if (authUserId && authUserId !== 'u-dev') {
-      localApi.toggleLike(postId, authUserId).catch((e: any) => logger.warn('SocialContext', 'toggleLike API failed', { error: e?.message }));
+      localApi.toggleLike(postId, authUserId).catch((e: any) => {
+        logger.warn('SocialContext', 'toggleLike API failed — queuing for retry', { error: e?.message, postId });
+        queueAction({ id: `like_${postId}_${authUserId}`, type: current.isLiked ? 'like' : 'unlike', payload: { postId, userId: authUserId }, createdAt: Date.now() });
+      });
     }
     // Send notification if liking (DB columns: user_id, actor_id, actor_name, data)
     if (!current.isLiked && authUserId && authUserId !== 'u-dev') {
@@ -577,7 +596,10 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
     if (authUserId && authUserId !== 'u-dev') {
-      localApi.addComment(postId, authUserId, text, parentId).catch((e: any) => logger.warn('SocialContext', 'addComment API failed', { error: e?.message }));
+      localApi.addComment(postId, authUserId, text, parentId).catch((e: any) => {
+        logger.warn('SocialContext', 'addComment API failed — queuing for retry', { error: e?.message, postId });
+        queueAction({ id: `comment_${postId}_${newComment.id}`, type: 'comment', payload: { postId, userId: authUserId, text, parentId }, createdAt: Date.now() });
+      });
     }
     // Send notification to post author (DB columns: user_id, actor_id, actor_name, data)
     if (authUserId && authUserId !== 'u-dev') {
