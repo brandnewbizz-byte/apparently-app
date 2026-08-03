@@ -98,30 +98,47 @@ export default function LiveScreen() {
     if (!roomName.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsCreating(true);
-    setIsUploadingCover(true);
     try {
+      // Step 1: Create room in DB (cover image uploaded after)
       const room = await createRoom(roomName.trim(), roomTopic.trim(), {
         environment: roomEnvironment,
-        coverImage: coverImageUri,
       });
-      // Upload cover AFTER room creation (uses room.id for path)
-      if (room && coverImageUri) {
-        const publicUrl = await uploadCoverImage(room.id);
-        if (publicUrl) {
+      if (!room) { setIsCreating(false); return; }
+
+      // Step 2: Upload cover image to Supabase Storage if selected
+      let publicUrl: string | null = null;
+      if (coverImageUri) {
+        setIsUploadingCover(true);
+        publicUrl = await uploadCoverImage(room.id);
+        setIsUploadingCover(false);
+      }
+
+      // Step 3: If cover was uploaded, persist the public URL to the DB
+      if (publicUrl) {
+        const { data, error } = await supabase
+          .from('rooms')
+          .update({ cover_image: publicUrl })
+          .eq('id', room.id)
+          .select('cover_image')
+          .single();
+        if (!error && data) {
+          room.coverImage = (data as any).cover_image || publicUrl;
+        } else {
           room.coverImage = publicUrl;
+          console.log('[Cover Save] DB update failed, using local:', error?.message);
         }
       }
+
+      // Cleanup & navigate
       setRoomName('');
       setRoomTopic('');
       setRoomEnvironment('generic');
       setCoverImageUri(null);
       setShowCreateModal(false);
-      if (room) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.push(`/(tabs)/live/room/${room.id}` as any);
-      }
-    } catch {
-      // fall through
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.push(`/(tabs)/live/room/${room.id}` as any);
+    } catch (e: any) {
+      console.log('[Create Room] failed:', e?.message || e);
     }
     setIsCreating(false);
     setIsUploadingCover(false);

@@ -333,6 +333,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
           id: roomId, name, topic, creator_id: user.id,
           creator_name: user.fullName, creator_avatar: user.avatar,
           participants: JSON.stringify(newRoom.participants),
+          cover_image: opts?.coverImage || null,
         }).select().single();
         if (!error && data) {
           const saved = mapFromDB(data);
