@@ -33,7 +33,10 @@ export default function SettingsScreen() {
 
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Please allow photo library access to set a profile picture.');
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -46,8 +49,10 @@ export default function SettingsScreen() {
       // Store base64 for reliable upload — fetch() can fail with local file:// URIs
       if (result.assets[0].base64) {
         setEditingAvatarBase64(result.assets[0].base64);
+        setEditingAvatar(uri);
+      } else {
+        Alert.alert('Error', 'Could not read image data. Please try a different photo.');
       }
-      setEditingAvatar(uri);
     }
   };
 
@@ -67,9 +72,13 @@ export default function SettingsScreen() {
         const ext = (editingAvatar.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
         const safeExt = ['jpg','jpeg','png','gif','webp'].includes(ext) ? ext : 'jpg';
         const mimeType = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp' }[safeExt] || 'image/jpeg';
-        const path = `avatars/${user.id}_${Date.now()}.${safeExt}`;
-        const blob = await (await fetch(`data:${mimeType};base64,${editingAvatarBase64}`)).blob();
-        const { error: uploadErr } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: mimeType });
+        const path = `${user.id}_${Date.now()}.${safeExt}`;
+        // Convert base64 to Uint8Array — fetch().blob() is unreliable in React Native
+        const byteChars = atob(editingAvatarBase64);
+        const byteNums = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+        const byteArr = new Uint8Array(byteNums);
+        const { error: uploadErr } = await supabase.storage.from('avatars').upload(path, byteArr, { upsert: true, contentType: mimeType });
         if (uploadErr) {
           console.log('[Settings] Avatar upload error:', uploadErr.message);
           Alert.alert('Upload failed', uploadErr.message || 'Could not upload profile picture. Please try again.');
@@ -83,6 +92,8 @@ export default function SettingsScreen() {
           setSaving(false);
           return;
         }
+        // Clear base64 after successful upload — prevent stale data on re-save
+        setEditingAvatarBase64(null);
       }
       const profileUpdates: any = { full_name: sanitizeFullName(editingName), username: sanitizeUsername(editingUsername), bio: sanitizeBio(editingBio), avatar: finalAvatar, updated_at: new Date().toISOString() };
       const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates }, { onConflict: 'id' });
@@ -91,6 +102,8 @@ export default function SettingsScreen() {
         setSaving(false);
         return;
       }
+      // Update local editingAvatar to the final URL so the preview stays correct
+      setEditingAvatar(finalAvatar);
       await refreshProfile();
       Alert.alert('Saved', 'Profile updated.');
     } catch (e: any) {

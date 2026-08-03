@@ -110,15 +110,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     if (!state.session?.user) return;
     const userId = state.session.user.id;
     const dbProfile = await fetchProfileFromDb(userId);
-    if (!dbProfile || !state.user) return;
+    if (!dbProfile) return;
+    // Build updated profile from current state + DB values.
+    // Fall back to a minimal user object if state.user is somehow null.
+    const currentUser = state.user ?? {
+      id: userId,
+      fullName: null,
+      username: null,
+      bio: null,
+      location: null,
+      phone: null,
+      email: null,
+      avatar: '',
+    };
+    // For avatar: prefer DB value if it's a real URL (non-null, non-empty),
+    // otherwise keep the current avatar.
+    const dbAvatar = dbProfile.avatar;
+    const resolvedAvatar = (dbAvatar && dbAvatar.length > 0) ? dbAvatar : currentUser.avatar;
     const updated: UserProfile = {
-      ...state.user,
-      fullName: dbProfile.full_name ?? state.user.fullName,
-      username: dbProfile.username ?? state.user.username,
-      bio: dbProfile.bio ?? state.user.bio,
-      location: dbProfile.location ?? state.user.location,
-      avatar: dbProfile.avatar || state.user.avatar,
-      phone: dbProfile.phone ?? state.user.phone,
+      ...currentUser,
+      fullName: dbProfile.full_name ?? currentUser.fullName,
+      username: dbProfile.username ?? currentUser.username,
+      bio: dbProfile.bio ?? currentUser.bio,
+      location: dbProfile.location ?? currentUser.location,
+      avatar: resolvedAvatar,
+      phone: dbProfile.phone ?? currentUser.phone,
     };
     setState((prev) => ({ ...prev, user: updated }));
     await saveProfileCache(updated);
