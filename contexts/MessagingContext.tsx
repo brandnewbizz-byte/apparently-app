@@ -23,6 +23,28 @@ export interface Message {
   timestamp: string;
   read: boolean;
   sharedPost?: SharedPost;
+  metadata?: {
+    bundle_card?: {
+      type: string;
+      id: string;
+      title: string;
+      description?: string;
+      category?: string;
+      price?: string;
+      image_url?: string;
+      creator_name?: string;
+    };
+    skill_card?: {
+      type: string;
+      id: string;
+      title: string;
+      description?: string;
+      category?: string;
+      price?: string;
+      image_url?: string;
+      creator_name?: string;
+    };
+  };
 }
 
 export interface Conversation {
@@ -117,6 +139,26 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         for (const cv of convs as any[]) {
           if (existing.find(e => e.id === cv.id)) continue;
           const otherId = cv.participant_one === authUser.id ? cv.participant_two : cv.participant_one;
+          
+          // Fetch participant profile from Supabase
+          let profileName = 'User';
+          let profileAvatar = '';
+          let profileUsername = 'user';
+          try {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('full_name, avatar_url, username')
+              .eq('id', otherId)
+              .maybeSingle();
+            if (profile) {
+              profileName = profile.full_name || profile.username || 'User';
+              profileAvatar = profile.avatar_url || '';
+              profileUsername = profile.username || 'user';
+            }
+          } catch {
+            // Fall back to defaults
+          }
+
           const { data: msgs } = await supabase
             .from('messages')
             .select('*')
@@ -127,11 +169,12 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             id: m.id, text: m.content || '', content: m.content,
             senderId: m.sender_id, receiverId: otherId,
             timestamp: m.created_at, read: m.read,
+            metadata: m.metadata || undefined,
           }));
 
           existing.push({
             id: cv.id, participantId: otherId,
-            participantName: 'User', participantAvatar: '', participantUsername: 'user',
+            participantName: profileName, participantAvatar: profileAvatar, participantUsername: profileUsername,
             messages, lastMessageAt: messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at,
             unreadCount: messages.filter(m => !m.read && m.receiverId === authUser.id).length,
           });

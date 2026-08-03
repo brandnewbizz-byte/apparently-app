@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Audio } from 'expo-av';
 import { supabase } from '@/lib/supabase';
 
@@ -29,6 +30,7 @@ export default function ConversationScreen() {
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
   const { colors } = useTheme();
   const { getConversation, sendMessage, markConversationAsRead } = useMessaging();
+  const { user: authUser } = useAuth();
   const [messageText, setMessageText] = useState('');
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -280,8 +282,8 @@ export default function ConversationScreen() {
   };
 
   const renderMessage = (message: Message) => {
-    const isMe = message.senderId === 'current-user';
-    const user = isMe ? { name: 'You', avatar: myAvatar } : participant;
+    const isMe = message.senderId === (authUser?.id || '');
+    const user = isMe ? { name: 'You', avatar: authUser?.avatarUrl || myAvatar } : participant;
 
     const textWithMentions = message.text.split(/(@\w+)/g).map((part, i) => {
       if (part.startsWith('@')) {
