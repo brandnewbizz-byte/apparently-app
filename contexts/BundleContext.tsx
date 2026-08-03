@@ -216,7 +216,17 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     });
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
-      const grabMessage = `👋 I grabbed your bundle "${bundle.title}" — let's chat!`;
+      const grabMessage = `👋 I'm interested in your bundle "${bundle.title}" — let's chat!`;
+      const bundleCard = {
+        type: 'bundle_card',
+        id: bundle.id,
+        title: bundle.title,
+        description: bundle.description || '',
+        category: bundle.category || '',
+        price: bundle.price || '',
+        image_url: bundle.imageUrl || '',
+        creator_name: bundle.creatorName || '',
+      };
       // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
       const actorAvatar = (user as any)?.avatarUrl || '';
@@ -238,7 +248,6 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         if (error) logger.warn('BundleContext', 'Notification insert failed', { error });
       });
       // 2. Find or create a conversation between these two users
-      //    messages table uses conversation_id + content (NOT recipient_id + text)
       (async () => {
         const [a, b] = [user.id, bundle.creatorId].sort();
         // Look for existing conversation
@@ -265,11 +274,12 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           }
           conversationId = created.id;
         }
-        // 3. Insert the grab message into the conversation (correct columns: conversation_id + content)
+        // 3. Insert the grab message into the conversation with bundle card metadata
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
           content: grabMessage,
+          metadata: { bundle_card: bundleCard },
           created_at: new Date().toISOString(),
           read: false,
         });

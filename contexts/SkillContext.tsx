@@ -191,7 +191,17 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     });
     // Create inbox notification + auto-create DM for the skill owner
     if (skill?.creatorId && user?.id && skill.creatorId !== user.id) {
-      const grabMessage = `👋 I grabbed your skill "${skill.title}" — let's chat!`;
+      const grabMessage = `👋 I'm interested in your skill "${skill.title}" — let's chat!`;
+      const skillCard = {
+        type: 'skill_card',
+        id: skill.id,
+        title: skill.title,
+        description: skill.description || '',
+        category: skill.category || '',
+        price: skill.price || '',
+        image_url: skill.imageUrl || '',
+        creator_name: skill.creatorName || '',
+      };
       // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
       const actorAvatar = (user as any)?.avatarUrl || '';
@@ -239,11 +249,12 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           }
           conversationId = created.id;
         }
-        // 3. Insert the grab message into the conversation
+        // 3. Insert the grab message into the conversation with skill card metadata
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
           content: grabMessage,
+          metadata: { skill_card: skillCard },
           created_at: new Date().toISOString(),
           read: false,
         });

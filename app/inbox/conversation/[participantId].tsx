@@ -247,6 +247,38 @@ export default function ConversationScreen() {
     );
   };
 
+  const renderBundleCard = (card: any, isMe: boolean) => {
+    return (
+      <TouchableOpacity
+        style={[styles.bundleCard, { backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : colors.backgroundTertiary, borderColor: colors.border }]}
+        activeOpacity={0.8}
+      >
+        <View style={styles.bundleCardHeader}>
+          <Tag size={14} color={colors.accent} />
+          <Text style={[styles.bundleCardType, { color: colors.accent }]}>
+            {card.type === 'skill_card' ? 'Skill Offer' : 'Bundle Offer'}
+          </Text>
+        </View>
+        {card.image_url ? (
+          <Image source={{ uri: card.image_url }} style={styles.bundleCardImage} resizeMode="cover" />
+        ) : null}
+        <View style={styles.bundleCardBody}>
+          <Text style={[styles.bundleCardTitle, { color: isMe ? '#fff' : colors.text }]} numberOfLines={1}>
+            {card.title}
+          </Text>
+          {card.price ? (
+            <Text style={[styles.bundleCardPrice, { color: colors.accent }]}>{card.price}</Text>
+          ) : null}
+          {card.description ? (
+            <Text style={[styles.bundleCardDesc, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]} numberOfLines={2}>
+              {card.description}
+            </Text>
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   const renderMessage = (message: Message) => {
     const isMe = message.senderId === 'current-user';
     const user = isMe ? { name: 'You', avatar: myAvatar } : participant;
@@ -283,6 +315,14 @@ export default function ConversationScreen() {
                 Shared a post
               </Text>
               {renderSharedPost(message.sharedPost)}
+            </>
+          )}
+          {((message as any).metadata?.bundle_card || (message as any).metadata?.skill_card) && (
+            <>
+              <Text style={[styles.sharedLabel, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
+                Grabbed your offer ↓
+              </Text>
+              {renderBundleCard((message as any).metadata?.bundle_card || (message as any).metadata?.skill_card, isMe)}
             </>
           )}
           {message.text.trim() && (
@@ -795,5 +835,48 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  // Bundle/Skill card in messages
+  bundleCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  bundleCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 6,
+  },
+  bundleCardType: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  bundleCardImage: {
+    width: '100%',
+    height: 120,
+  },
+  bundleCardBody: {
+    padding: 12,
+    paddingTop: 8,
+  },
+  bundleCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  bundleCardPrice: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  bundleCardDesc: {
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
