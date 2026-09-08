@@ -96,7 +96,7 @@ interface StatItem {
 // Saved Posts Grid — Bookmarks/collection
 // ═══════════════════════════════════════════════════════════════════════════
 
-function SavedPostsGrid({ colors }: { colors: any }) {
+function SavedPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any, posts: any[]) => void }) {
   const { getSavedPosts } = useSocial();
   const saved = getSavedPosts();
 
@@ -124,7 +124,11 @@ function SavedPostsGrid({ colors }: { colors: any }) {
       renderItem={({ item }: { item: any }) => {
         const imgUri = item.image || item.media || item.image_url || item.imageUrl;
         return (
-          <TouchableOpacity style={{ width: size, height: size, margin: gap / 2 }} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={{ width: size, height: size, margin: gap / 2 }}
+            activeOpacity={0.8}
+            onPress={() => { if (onPostPress) onPostPress(item, saved); }}
+          >
             {imgUri ? (
               <Image source={{ uri: imgUri }} style={{ width: '100%', height: '100%', borderRadius: 2 }} />
             ) : (
@@ -767,7 +771,7 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            {activeTab === 'saved' && <SavedPostsGrid colors={colors} />}
+            {activeTab === 'saved' && <SavedPostsGrid colors={colors} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
           </View>
         </Animated.View>
       </ScrollView>
