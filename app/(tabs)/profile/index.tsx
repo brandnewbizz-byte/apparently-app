@@ -27,6 +27,7 @@ import {
   Forward,
   Plus,
   MoreHorizontal,
+  BellRing,
 } from 'lucide-react-native';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
@@ -55,6 +56,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
+import { useOrders } from '@/contexts/OrdersContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
 
@@ -241,6 +243,7 @@ export default function ProfileScreen() {
   const { user } = useAuth();
   const { myBundles, deleteBundle } = useBundles();
   const { mySkills, deleteSkill } = useSkills();
+  const { pendingCount: pendingOrders } = useOrders();
   
   const [refreshing, setRefreshing] = useState(false);
   const [streak, setStreak] = useState(0);
@@ -647,9 +650,15 @@ export default function ProfileScreen() {
                 {/* Add New Bundle header — always visible */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }}>
                   <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSecondary }}>{myBundles.length} bundle{myBundles.length !== 1 ? 's' : ''}</Text>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.purpleDim }} onPress={() => router.push('/bundles' as any)}>
-                    <Plus size={16} color={ACCENT_COLORS.purple} />
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.purple }}>Manage Bundles</Text>
+                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.goldDim }} onPress={() => router.push('/orders' as any)}>
+                      <BellRing size={15} color={ACCENT_COLORS.gold} />
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.gold }}>Orders{pendingOrders > 0 ? ` (${pendingOrders})` : ''}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.purpleDim }} onPress={() => router.push('/bundles' as any)}>
+                      <Plus size={16} color={ACCENT_COLORS.purple} />
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.purple }}>Manage Bundles</Text>
+                    </TouchableOpacity>
                   </TouchableOpacity>
                 </View>
                 {myBundles.length === 0 ? (

@@ -31,6 +31,7 @@ import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
 import { MarketplaceProvider } from '@/contexts/MarketplaceContext';
 import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
+import { OrdersProvider } from '@/contexts/OrdersContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
@@ -224,11 +225,13 @@ export default function RootLayout() {
                                   <MarketplaceProvider>
                                     <BookingsProvider>
                                       <PlannerProvider>
-                                        <TabBarProvider>
-                                          <AppErrorBoundary>
-                                            <RootLayoutNavWithTheme />
-                                          </AppErrorBoundary>
-                                        </TabBarProvider>
+                                        <OrdersProvider>
+                                          <TabBarProvider>
+                                            <AppErrorBoundary>
+                                              <RootLayoutNavWithTheme />
+                                            </AppErrorBoundary>
+                                          </TabBarProvider>
+                                        </OrdersProvider>
                                       </PlannerProvider>
                                     </BookingsProvider>
                                   </MarketplaceProvider>
