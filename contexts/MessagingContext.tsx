@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Post } from '@/mocks/data';
 import { logger } from '@/lib/logger';
@@ -66,6 +66,12 @@ interface MessagingState {
   getConversation: (participantId: string) => Conversation | undefined;
   markConversationAsRead: (participantId: string) => void;
   getTotalUnreadCount: () => number;
+  deleteMessage: (messageId: string, participantId: string) => Promise<void>;
+  deleteConversation: (participantId: string) => Promise<void>;
+  /** participantId => presence payload (typing / online) */
+  presence: Record<string, { typing?: boolean; online?: boolean }>;
+  /** Signal typing to the given participant. */
+  notifyTyping: (participantId: string, typing: boolean) => void;
 }
 
 const STORAGE_KEY = 'apparently_messaging_state';
@@ -74,6 +80,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
   const queryClient = useQueryClient();
   const { user: authUser } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [presence, setPresence] = useState<Record<string, { typing?: boolean; online?: boolean }>>({});
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // Scope storage per logged-in user — prevents message leakage between accounts
   const scopedKey = authUser?.id ? `${STORAGE_KEY}_${authUser.id}` : STORAGE_KEY;
@@ -198,6 +206,168 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     sync();
   }, [authUser?.id]);
 
+  // ── REALTIME: live incoming messages + read receipts ──
+  useEffect(() => {
+    const me = authUser?.id || '';
+    if (!me) return;
+
+    const upsertMessageLocally = (incoming: any) => {
+      const senderId: string = incoming.sender_id;
+      const receiverId: string = me;
+      const otherId = senderId === me ? receiverId : senderId;
+      const msg: Message = {
+        id: incoming.id,
+        text: incoming.content || '',
+        content: incoming.content || '',
+        senderId,
+        receiverId,
+        timestamp: incoming.created_at,
+        read: incoming.read ?? false,
+        metadata: incoming.metadata || undefined,
+      };
+
+      setConversations(prev => {
+        const idx = prev.findIndex(c => c.participantId === otherId);
+        if (idx < 0) {
+          // Unknown participant — re-run the sync to build the conversation with
+          // profile info, or create a light entry.
+          syncFromSupabase();
+          return prev;
+        }
+        const conv = prev[idx];
+        const already = conv.messages.some(m => m.id === msg.id);
+        if (already) return prev; // de-dup realtime + local sync overlap
+        const nextMsgs = [...conv.messages, msg];
+        nextMsgs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        const next = prev.map((c, i) =>
+          i === idx
+            ? {
+                ...c,
+                messages: nextMsgs,
+                lastMessageAt: msg.timestamp,
+                // Unread only when it's addressed TO me and not the active read state
+                unreadCount: msg.senderId !== me && !msg.read ? (c.unreadCount || 0) + 1 : c.unreadCount,
+              }
+            : c
+        );
+        next.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+        return next;
+      });
+    };
+
+    const channel = supabase
+      .channel(`messaging-${me}`)
+    channelRef.current = channel;
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState() as Record<string, any>;
+        const next: Record<string, { typing?: boolean; online?: boolean }> = {};
+        for (const key of Object.keys(state)) {
+          const peer = state[key]?.[0];
+          if (!peer || peer.user_id === me) continue;
+          next[key] = { typing: !!peer.typing, online: true };
+        }
+        setPresence(next);
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        const peer = newPresences?.[0];
+        if (!peer || peer.user_id === me) return;
+        setPresence(prev => ({ ...prev, [key]: { typing: false, online: true } }));
+      })
+      .on('presence', { event: 'leave' }, ({ key }) => {
+        setPresence(prev => {
+          const cp = { ...prev };
+          delete cp[key];
+          return cp;
+        });
+      })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=in.(select id from conversations where participant_one=eq.${me} or participant_two=eq.${me})` },
+        (payload) => {
+          const row = payload.new as any;
+          if (row.sender_id === me) return; // ignore own echoes (handled optimistically)
+          upsertMessageLocally(row);
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages' },
+        (payload) => {
+          const row = payload.new as any;
+          // Reflect read-state changes pushed by the other participant
+          setConversations(prev =>
+            prev.map(c => ({
+              ...c,
+              messages: c.messages.map(m =>
+                m.id === row.id ? { ...m, read: row.read ?? m.read } : m
+              ),
+            }))
+          );
+        }
+      )
+      .subscribe();
+
+    // Local helper for the INSERT path when participant row is missing
+    const syncFromSupabase = async () => {
+      try {
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('*')
+          .or(`participant_one.eq.${me},participant_two.eq.${me}`);
+        if (!convs?.length) return;
+        const newState: Conversation[] = [];
+        for (const cv of convs as any[]) {
+          const otherId = cv.participant_one === me ? cv.participant_two : cv.participant_one;
+          let profileName = 'User';
+          let profileAvatar = '';
+          let profileUsername = 'user';
+          try {
+            const { data: p } = await supabase
+              .from('profiles')
+              .select('full_name, avatar, username')
+              .eq('id', otherId)
+              .maybeSingle();
+            if (p) {
+              profileName = p.full_name || p.username || 'User';
+              profileAvatar = p.avatar || '';
+              profileUsername = p.username || 'user';
+            }
+          } catch {}
+          const { data: msgs } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', cv.id)
+            .order('created_at', { ascending: true });
+          const messages: Message[] = (msgs || []).map((m: any) => ({
+            id: m.id, text: m.content || '', content: m.content,
+            senderId: m.sender_id, receiverId: otherId,
+            timestamp: m.created_at, read: m.read,
+            metadata: m.metadata || undefined,
+          }));
+          newState.push({
+            id: cv.id, participantId: otherId,
+            participantName: profileName, participantAvatar: profileAvatar, participantUsername: profileUsername,
+            messages: messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
+            lastMessageAt: cv.last_message_at || cv.created_at,
+            unreadCount: messages.filter(m => !m.read && m.receiverId === me).length,
+          });
+        }
+        newState.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+        setConversations(prev => {
+          const merged = [...newState];
+          for (const p of prev) {
+            if (!merged.find(m => m.participantId === p.participantId)) merged.push(p);
+          }
+          merged.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+          return merged;
+        });
+      } catch {}
+    };
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authUser?.id]);
+
   const persistState = useCallback((next: Conversation[]) => {
     setConversations(next);
     persistMutation(next);
@@ -280,6 +450,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
   const sendMessage = useCallback((participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }) => {
     if (!text.trim()) return;
+    const me = authUser?.id || '';
+    if (!me) return;
 
     const timestamp = new Date().toISOString();
     let updatedConversations = [...conversations];
@@ -292,45 +464,109 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       conversation = getOrCreateConversation(participantId, participantInfo);
     }
 
-    const newMessage: Message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    // Optimistic append so the sender sees the message instantly.
+    const optimistic: Message = {
+      id: `pending-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       text,
-      senderId: authUser?.id || '',
+      senderId: me,
       receiverId: participantId,
       timestamp,
       read: false,
     };
-
-    conversation.messages = [...conversation.messages, newMessage];
+    conversation.messages = [...conversation.messages, optimistic];
     conversation.lastMessageAt = timestamp;
 
-    if (existingIndex >= 0) {
-      updatedConversations[existingIndex] = conversation;
-    } else {
-      updatedConversations = [conversation, ...updatedConversations];
-    }
+    if (existingIndex >= 0) updatedConversations[existingIndex] = conversation;
+    else updatedConversations = [conversation, ...updatedConversations];
 
-    updatedConversations.sort((a, b) => 
-      new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
-    );
-
-    logger.info('MessagingContext', 'Sent message', { participantId, messageId: newMessage.id });
+    updatedConversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
     persistState(updatedConversations);
-  }, [conversations, getOrCreateConversation, persistState]);
+
+    // ── PERSIST to Supabase so the recipient can receive it ──
+    // Guarantee stable ordering of participants so we always find/create the
+    // same conversation row for a given pair.
+    const [pa, pb] = [me, participantId].sort();
+    (async () => {
+      try {
+        let convId = conversation.id.startsWith('conv-') ? null : conversation.id;
+        if (!convId) {
+          // find existing conversation row for this pair
+          const { data: pair } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(`and(participant_one.eq.${pa},participant_two.eq.${pb}),and(participant_one.eq.${pb},participant_two.eq.${pa})`)
+            .maybeSingle();
+          if (pair) {
+            convId = pair.id;
+          } else {
+            const { data: created } = await supabase
+              .from('conversations')
+              .insert({ participant_one: pa, participant_two: pb, last_message_at: timestamp })
+              .select('id')
+              .maybeSingle();
+            if (created) convId = created.id;
+          }
+        }
+        if (!convId) return;
+
+        const { data: row } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: convId,
+            sender_id: me,
+            receiver_id: participantId,
+            content: text,
+            read: false,
+          })
+          .select('id, content, created_at')
+          .maybeSingle();
+
+        if (!row) return;
+        // Swap the optimistic (pending-*) message for the confirmed DB row.
+        const confirmed: Message = { ...optimistic, id: row.id };
+        setConversations(prev =>
+          prev.map(c =>
+            c.participantId === participantId
+              ? { ...c, messages: c.messages.map(m => (m.id === optimistic.id ? confirmed : m)) }
+              : c
+          )
+        );
+      } catch (e) {
+        logger.warn('MessagingContext', 'Persist sendMessage failed', { error: String(e) });
+      }
+    })();
+
+    logger.info('MessagingContext', 'Sent message', { participantId, messageId: optimistic.id });
+  }, [conversations, getOrCreateConversation, persistState, authUser?.id]);
 
   const getConversation = useCallback((participantId: string) => {
     return conversations.find(c => c.participantId === participantId);
   }, [conversations]);
 
   const markConversationAsRead = useCallback((participantId: string) => {
+    const me = authUser?.id || '';
     const updatedConversations = conversations.map(conv => {
       if (conv.participantId === participantId) {
+        // Persist read state of MY received messages up to the DB so the sender
+        // sees the read receipt via realtime UPDATE.
+        const myIncoming = conv.messages.filter(m => m.receiverId === me && !m.read);
+        if (myIncoming.length && conv.id && !conv.id.startsWith('conv-')) {
+          const ids = myIncoming.map(m => m.id);
+          (async () => {
+            try {
+              await supabase.from('messages').update({ read: true }).in('id', ids);
+              logger.info('MessagingContext', 'Persisted read receipts', { count: ids.length });
+            } catch (err) {
+              logger.warn('MessagingContext', 'Persist read receipts failed', { error: String(err) });
+            }
+          })();
+        }
         return {
           ...conv,
           unreadCount: 0,
           messages: conv.messages.map(msg => ({
             ...msg,
-            read: msg.receiverId === (authUser?.id || '') ? true : msg.read,
+            read: msg.receiverId === me ? true : msg.read,
           })),
         };
       }
@@ -339,7 +575,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
     logger.info('MessagingContext', 'Marked conversation as read', { participantId });
     persistState(updatedConversations);
-  }, [conversations, persistState]);
+  }, [conversations, persistState, authUser?.id]);
 
   const getTotalUnreadCount = useCallback(() => {
     return conversations.reduce((total, conv) => total + conv.unreadCount, 0);
@@ -383,6 +619,19 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     persistState(updated);
   }, [conversations, persistState]);
 
+  const notifyTyping = useCallback((participantId: string, typing: boolean) => {
+    // Broadcast typing intent to the conversation participant via the realtime
+    // presence channel so the recipient can show a live "typing…" indicator.
+    const ch = channelRef.current;
+    if (!ch) return;
+    try {
+      // Channel presence is keyed by user id; use typed payload so peers can read it.
+      ch.track({ user_id: authUser?.id, typing } as any);
+    } catch (e) {
+      logger.warn('MessagingContext', 'Typing broadcast failed', { error: String(e) });
+    }
+  }, [authUser?.id]);
+
   return {
     conversations,
     isLoading: query.isLoading,
@@ -393,5 +642,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     getTotalUnreadCount,
     deleteMessage,
     deleteConversation,
+    presence,
+    notifyTyping,
   };
 });
