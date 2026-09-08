@@ -68,7 +68,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // Marketplace OFF switch: when false, the browse/marketplace decks (Bundles,
 // Skill Deals, Service Requests) are hidden app-wide. Flip to true to restore
 // them later (Boss defers deleting the marketplace — hides it for now).
-const MARKETPLACE_ENABLED = false;
+const MARKETPLACE_ENABLED = true;
 
 interface BundlePlan {
   id: string;
