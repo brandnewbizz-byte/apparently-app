@@ -3,6 +3,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import * as localApi from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 
 export type LocationType = 'home' | 'hotel' | 'airbnb' | 'coffee' | 'coworking';
@@ -118,9 +119,14 @@ interface PlannerState {
 export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() => {
   const queryClient = useQueryClient();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const { session, isLoading: authLoading } = useAuth();
 
   const plansQuery = useQuery({
-    queryKey: ['plans'],
+    queryKey: ['plans', session?.user?.id],
+    enabled: !!session?.user && !authLoading,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       logger.info('Planner', 'Fetching plans...');
       
@@ -163,7 +169,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
       // Fall back to local API
       try {
-        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
+        const authId = await supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
         const localPlans = await localApi.getPlans(authId);
         if (localPlans && localPlans.length > 0) {
           logger.info('Planner', 'Fetched plans from local API', { length: localPlans.length });
@@ -244,7 +250,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
 
       // Fall back to local API
       try {
-        const authId = await localApi.supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
+        const authId = await supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
         const localPlan = {
           user_id: authId,
           title: input.date_label || `Plan for ${input.date}`,
@@ -263,7 +269,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         logger.info('Planner', 'Created plan in local API', { result });
         return {
           id: result?.id || `local-${Date.now()}`,
-          user_id: authId || input.user_id,
+          user_id: authId || 'unknown',
           date: input.date,
           status: 'pending',
           created_at: new Date().toISOString(),
