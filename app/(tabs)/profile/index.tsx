@@ -643,9 +643,9 @@ export default function ProfileScreen() {
                 {/* Add New Bundle header — always visible */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }}>
                   <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSecondary }}>{myBundles.length} bundle{myBundles.length !== 1 ? 's' : ''}</Text>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.purpleDim }} onPress={() => router.push('/bundle-builder' as any)}>
+                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.purpleDim }} onPress={() => router.push('/bundles' as any)}>
                     <Plus size={16} color={ACCENT_COLORS.purple} />
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.purple }}>New Bundle</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.purple }}>Manage Bundles</Text>
                   </TouchableOpacity>
                 </View>
                 {myBundles.length === 0 ? (
@@ -655,8 +655,8 @@ export default function ProfileScreen() {
                     </View>
                     <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No bundles yet</Text>
                     <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Create a bundle to offer multiple services together</Text>
-                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.purpleDim }]} onPress={() => router.push('/bundle-builder' as any)}>
-                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.purple }]}>Create Bundle</Text>
+                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.purpleDim }]} onPress={() => router.push('/bundles' as any)}>
+                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.purple }]}>Manage Bundles</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (

@@ -907,7 +907,7 @@ export default function PlannerScreen() {
             style={styles.actionCard}
             onPress={() => {
               if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/bundle-builder' as any);
+              router.push('/bundles' as any);
             }}
             activeOpacity={0.9}
           >
@@ -918,7 +918,7 @@ export default function PlannerScreen() {
               end={{ x: 1, y: 1 }}
             >
               <Package size={20} color="#FFF" />
-              <Text style={styles.actionText}>Build Bundle</Text>
+              <Text style={styles.actionText}>My Bundles</Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
