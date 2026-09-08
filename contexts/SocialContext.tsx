@@ -10,7 +10,7 @@ import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import { isLocalFileUri } from '@/lib/media';
 import { sanitizeCaption } from '@/lib/sanitize';
-import { uploadImageToStorage } from '@/lib/storage';
+import { persistableImageUri } from '@/lib/storage';
 import { queueAction, dequeueAction } from '@/lib/offlineQueue';
 import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
@@ -37,6 +37,14 @@ async function processMentions(
   if (!mentions) return;
   const usernames = [...new Set(mentions.map(m => m.slice(1).toLowerCase()))];
   if (usernames.length === 0) return;
+  // Fetch the sender profile too, so we can attribute the mention to a real name/avatar.
+  const { data: senderProfile } = await supabase
+    .from('profiles')
+    .select('username, full_name, avatar_url')
+    .eq('id', senderId)
+    .maybeSingle();
+  const senderName = senderProfile?.full_name || senderProfile?.username || 'Someone';
+  const senderAvatar = senderProfile?.avatar_url || '';
   const { data: profiles } = await supabase
     .from('profiles')
     .select('id, username, full_name')
@@ -48,9 +56,9 @@ async function processMentions(
     // Insert mention notification (DB columns: user_id, actor_id, actor_name, data)
     await supabase.from('notifications').insert({
       user_id: profile.id, actor_id: senderId, type: 'mention',
-      actor_name: (sender as any)?.fullName || sender?.username || 'Someone',
-      actor_avatar: (sender as any)?.avatarUrl || '',
-      title: `${(sender as any)?.fullName || sender?.username || 'Someone'} mentioned you`,
+      actor_name: senderName,
+      actor_avatar: senderAvatar,
+      title: `${senderName} mentioned you`,
       body: `mentioned you in a ${contentType}`,
       data: { content_id: contentId, content_type: contentType },
       read: false, created_at: now,
@@ -182,6 +190,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [feedStories, setFeedStories] = useState<Story[]>([]);
   const [authUserId, setAuthUserId] = useState<string>('u-dev');
+  const [currentUserProfile, setCurrentUserProfile] = useState<{ fullName: string | null; username: string | null; avatar: string } | null>(null);
   const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
 
   // Fetch like statuses from Supabase for all loaded posts
@@ -204,12 +213,24 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     });
   }, [authUserId]); // Run once when auth is ready
 
-  // Get real auth user ID on mount
+  // Get real auth user ID + profile on mount (profile used to attribute like/comment notifications)
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (data?.user?.id) {
         setAuthUserId(data.user.id);
         logger.info('SocialContext', 'Got auth user ID', { userId: data.user.id });
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, username, avatar_url')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        if (profile) {
+          setCurrentUserProfile({
+            fullName: profile.full_name,
+            username: profile.username,
+            avatar: profile.avatar_url || '',
+          });
+        }
       }
     });
   }, []);
@@ -539,8 +560,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     if (!current.isLiked && authUserId && authUserId !== 'u-dev') {
       supabase.from('posts').select('user_id, image_url').eq('id', postId).single().then(({ data: post }: any) => {
         if (post?.user_id && post.user_id !== authUserId) {
-          const actorName = currentLoggedInUser?.fullName || currentLoggedInUser?.username || 'Someone';
-          const actorAvatar = (currentLoggedInUser as any)?.avatarUrl || '';
+          const actorName = currentUserProfile?.fullName || currentUserProfile?.username || 'Someone';
+          const actorAvatar = currentUserProfile?.avatar || '';
           supabase.from('notifications').insert({
             user_id: post.user_id, actor_id: authUserId, type: 'like',
             actor_name: actorName, actor_avatar: actorAvatar,
@@ -605,8 +626,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     if (authUserId && authUserId !== 'u-dev') {
       supabase.from('posts').select('user_id, image_url').eq('id', postId).single().then(({ data: post }: any) => {
         if (post?.user_id && post.user_id !== authUserId) {
-          const actorName = currentLoggedInUser?.fullName || currentLoggedInUser?.username || 'Someone';
-          const actorAvatar = (currentLoggedInUser as any)?.avatarUrl || '';
+          const actorName = currentUserProfile?.fullName || currentUserProfile?.username || 'Someone';
+          const actorAvatar = currentUserProfile?.avatar || '';
           supabase.from('notifications').insert({
             user_id: post.user_id, actor_id: authUserId, type: 'comment',
             actor_name: actorName, actor_avatar: actorAvatar,
@@ -888,15 +909,18 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       });
     };
 
-    // If the image is a local file:// path, upload to Supabase Storage first
+    // If the image is a local file:// path, upload to Supabase Storage first.
+    // persistableImageUri guarantees a refresh-safe value: hosted URL when
+    // storage works, or a base64 data URI fallback — never a temporary file://
+    // path (which is what caused feed images to go black after refresh).
     if (rawImageUrl && isLocalFileUri(rawImageUrl)) {
-      uploadImageToStorage(rawImageUrl, 'user-media', `posts/${authUserId}`)
-        .then((publicUrl) => {
-          logger.info('SocialContext', 'Local image uploaded to storage, creating post');
-          doCreatePost(publicUrl);
+      persistableImageUri(rawImageUrl, 'user-media', `posts/${authUserId}`)
+        .then((finalUrl) => {
+          logger.info('SocialContext', 'Post image made persistable', { hasImage: !!finalUrl });
+          doCreatePost(finalUrl);
         })
         .catch(() => {
-          logger.warn('SocialContext', 'Storage upload failed, creating post without image');
+          logger.warn('SocialContext', 'Could not persist image, creating post without image');
           doCreatePost(undefined);
         });
       return;
@@ -931,17 +955,19 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       });
     };
 
-    // Upload local images to Supabase Storage before creating the story
+    // Upload local images to Supabase Storage before creating the story.
+    // persistableImageUri falls back to a base64 data URI so the story image
+    // never disappears after refresh (never persists a temporary file:// path).
     if (imageUrl && isLocalFileUri(imageUrl)) {
       DatabaseService.getCurrentUserId().then((userId) => {
         if (!userId) { doCreateStory(undefined); return; }
-        uploadImageToStorage(imageUrl, 'user-media', `stories/${userId}`)
-          .then((publicUrl) => {
-            logger.info('SocialContext', 'Story image uploaded to storage');
-            doCreateStory(publicUrl);
+        persistableImageUri(imageUrl, 'user-media', `stories/${userId}`)
+          .then((finalUrl) => {
+            logger.info('SocialContext', 'Story image made persistable', { hasImage: !!finalUrl });
+            doCreateStory(finalUrl);
           })
           .catch(() => {
-            logger.warn('SocialContext', 'Storage upload failed, creating story without image');
+            logger.warn('SocialContext', 'Could not persist story image');
             doCreateStory(undefined);
           });
       });

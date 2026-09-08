@@ -3,7 +3,7 @@
  * Handles image uploads for posts, stories, and avatars.
  */
 import { supabase } from './supabase';
-import { isLocalFileUri } from './media';
+import { isLocalFileUri, safeImageUrl } from './media';
 
 /** Local file:// URIs that should be uploaded to Supabase Storage instead of stored directly */
 export function shouldUploadToStorage(uri: string | null | undefined): boolean {
@@ -64,4 +64,42 @@ export async function uploadImageToStorage(
   console.warn(`[storage] upload failed after ${retries} retries:`, lastError);
   // Fall back to local URI — the caller should handle this gracefully
   return localUri;
+}
+
+/**
+ * Guarantees a local image becomes a refresh-safe, cross-device persistable
+ * value. Tries Supabase Storage first (returns a hosted public URL). If storage
+ * is unavailable, embeds the image as a base64 data URI so it still survives
+ * feed refresh and app restarts instead of going blank.
+ *
+ * Never returns a transient device-local file:// path.
+ */
+export async function persistableImageUri(
+  localUri: string | undefined | null,
+  bucket: string,
+  folder: string,
+): Promise<string | undefined> {
+  if (!localUri || !isLocalFileUri(localUri)) {
+    // Already remote/data URI — pass through safe.
+    return safeImageUrl(localUri) ?? undefined;
+  }
+
+  try {
+    const hosted = await uploadImageToStorage(localUri, bucket, folder);
+    if (hosted && hosted !== localUri && !isLocalFileUri(hosted)) {
+      return hosted;
+    }
+  } catch {
+    // fall through to base64 embed
+  }
+
+  // Storage unavailable — read local file and embed as a data URI so the
+  // image persists across refresh and shows on any device.
+  try {
+    const { readAsStringAsync, EncodingType } = await import('expo-file-system');
+    const base64 = await readAsStringAsync(localUri, { encoding: EncodingType.Base64 });
+    return `data:image/jpeg;base64,${base64}`;
+  } catch {
+    return undefined;
+  }
 }
