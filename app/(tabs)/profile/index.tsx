@@ -781,11 +781,19 @@ export default function ProfileScreen() {
         onNavigate={(p: any) => setSelectedPost(p)}
         onDelete={() => {
           if (!selectedPost?.id) return;
-          supabase.from('posts').delete().eq('id', selectedPost.id).then(() => {
+          supabase.from('posts').delete().eq('id', selectedPost.id).then(({ error }) => {
+            if (error) {
+              console.log('[Profile] Delete post failed:', error.message);
+              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              Alert.alert('Could not delete', 'Something went wrong removing this post. Please try again.');
+              return;
+            }
             socialDeletePost(selectedPost.id);
             setUserPostsCount(prev => prev !== null ? prev - 1 : null);
+            setRefreshKey(k => k + 1); // re-query the grid so the deleted image disappears
             setSelectedPost(null);
             setViewerPosts([]);
+            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           });
         }}
         onReshare={() => {
@@ -1645,7 +1653,7 @@ const viewerStyles = StyleSheet.create({
   dismissBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
   // Keep backward compat
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  dismissArea: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
+  dismissArea: { ...StyleSheet.absoluteFill, zIndex: 0 },
   container: { width: '100%', alignItems: 'center', zIndex: 1 },
   closeButton: { position: 'absolute', top: 56, right: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   image: { width: Dimensions.get('window').width, height: Dimensions.get('window').width, backgroundColor: '#0a0a0a' },
