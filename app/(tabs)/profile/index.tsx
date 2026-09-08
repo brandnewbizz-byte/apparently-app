@@ -149,26 +149,6 @@ function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPos
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const removeLocal = (id: string) => setAllPosts(prev => prev.filter(p => p.id !== id));
-
-  const deleteImage = (post: any) => {
-    Alert.alert('Delete image?', 'Remove this image from your profile?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            removeLocal(post.id);
-            await supabase.from('posts').delete().eq('id', post.id);
-          } catch (e) {
-            console.log('[UserPosts] Delete failed:', e);
-          }
-        },
-      },
-    ]);
-  };
-
   // Load user's posts from Supabase — ensures persistence across sessions
   useEffect(() => {
     if (!authUser?.id) { setLoading(false); return; }
@@ -238,26 +218,6 @@ function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPos
             style={{ width: '100%', height: '100%', backgroundColor: '#1a1a2e' }}
             resizeMode="cover"
           />
-          {post.id && (
-            <TouchableOpacity
-              onPress={() => deleteImage(post)}
-              style={{
-                position: 'absolute',
-                top: 6,
-                right: 6,
-                zIndex: 2,
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                backgroundColor: 'rgba(0,0,0,0.65)',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-            >
-              <X size={15} color="#FFF" />
-            </TouchableOpacity>
-          )}
           {post.likes > 0 && (
             <View style={profileStyles.gridOverlay}>
               <Heart size={16} color="#FFF" fill="#FFF" />
