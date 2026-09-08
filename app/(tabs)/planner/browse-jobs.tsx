@@ -40,6 +40,7 @@ interface JobRequest {
   status: string;
   title: string | null;
   description: string | null;
+  plan_id?: string;
   pickup_location: string | null;
   dropoff_location: string | null;
   pickup_time: string | null;
@@ -131,6 +132,36 @@ export default function BrowseJobsScreen() {
       if (updateError) {
         console.error('[BrowseJobs] Error accepting job:', updateError);
         throw updateError;
+      }
+
+      // Notify the owner that their service request was grabbed
+      if (job.user_id && job.user_id !== user.id) {
+        try {
+          const { data: grabberProfile } = await supabase
+            .from('profiles')
+            .select('full_name, username, avatar_url')
+            .eq('id', user.id)
+            .maybeSingle();
+          const grabberName = grabberProfile?.full_name || grabberProfile?.username || 'Someone';
+          const grabberAvatar = grabberProfile?.avatar_url || '';
+          const typeLabel = JOB_TYPE_CONFIG[job.type]?.label || 'service request';
+          await supabase.from('notifications').insert({
+            user_id: job.user_id,
+            actor_id: user.id,
+            actor_name: grabberName,
+            actor_avatar: grabberAvatar,
+            type: 'job_grabbed',
+            title: `${grabberName} grabbed your ${typeLabel}`,
+            body: `grabbed your ${typeLabel}${job.title ? ' "' + job.title + '"' : ''}`,
+            data: { job_id: job.id, job_type: job.type, plan_id: job.plan_id },
+            read: false,
+            created_at: new Date().toISOString(),
+          });
+          console.log('[BrowseJobs] Owner notified for job:', job.id);
+        } catch (notifyErr) {
+          // Non-fatal: grabbing still succeeds even if notification fails
+          console.error('[BrowseJobs] Failed to notify owner:', notifyErr);
+        }
       }
 
       const planDate = job.tasks?.date || new Date().toISOString().split('T')[0];
