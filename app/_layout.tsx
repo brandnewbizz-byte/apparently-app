@@ -16,7 +16,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { OnboardingProvider, useOnboarding } from '@/contexts/OnboardingContext';
-import { LifeCrmProvider } from '@/contexts/LifeCrmContext';
 import { SocialProvider } from '@/contexts/SocialContext';
 import { ConnectionsProvider } from '@/contexts/ConnectionsContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
@@ -213,7 +212,6 @@ export default function RootLayout() {
                 <ThemeProvider>
                   <AuthProvider>
                     <OnboardingProvider>
-                      <LifeCrmProvider>
                         <UserPostsProvider>
                         <SocialProvider>
                           <ConnectionsProvider>
@@ -243,7 +241,6 @@ export default function RootLayout() {
                           </ConnectionsProvider>
                         </SocialProvider>
                         </UserPostsProvider>
-                      </LifeCrmProvider>
                     </OnboardingProvider>
                   </AuthProvider>
                 </ThemeProvider>
