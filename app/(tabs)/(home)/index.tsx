@@ -65,6 +65,11 @@ import { useServiceRequests, type ServiceRequest } from '@/contexts/ServiceReque
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// Marketplace OFF switch: when false, the browse/marketplace decks (Bundles,
+// Skill Deals, Service Requests) are hidden app-wide. Flip to true to restore
+// them later (Boss defers deleting the marketplace — hides it for now).
+const MARKETPLACE_ENABLED = false;
+
 interface BundlePlan {
   id: string;
   title: string;
@@ -1795,6 +1800,8 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
 
+        {MARKETPLACE_ENABLED && (
+        <>
         <View style={styles.bundleSection}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
@@ -1882,6 +1889,8 @@ export default function HomeScreen() {
             colors={colors}
           />
         </View>
+        </>
+        )}
 
         <View style={styles.bottomSpacing} />
       </ScrollView>
@@ -2420,7 +2429,7 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
   },
   grabbedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(16, 185, 129, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
