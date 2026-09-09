@@ -42,6 +42,7 @@ const ACCENT = {
 const KIND_COLOR: Record<string, { label: string; fg: string; bg: string }> = {
   bundle: { label: 'Bundle', fg: ACCENT.purple, bg: ACCENT.purpleDim },
   skill: { label: 'Skill', fg: ACCENT.blue, bg: 'rgba(59,130,246,0.14)' },
+  service: { label: 'Grab', fg: ACCENT.gold, bg: ACCENT.goldDim },
 };
 
 const STATUS_META: Record<string, { label: string; fg: string; bg: string }> = {
@@ -100,7 +101,7 @@ export default function OrdersScreen() {
       </View>
       <Text style={[styles.emptyTitle, { color: colors.text }]}>No grabs yet</Text>
       <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-        When someone grabs one of your bundles or skills, it shows up here so you can accept it and start the order.
+        When someone grabs one of your bundles, skills, or service requests, it shows up here so you can accept it and start the order.
       </Text>
       <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.border }]} onPress={refresh}>
         <Text style={{ color: colors.text, fontWeight: '600' }}>Refresh</Text>
@@ -141,7 +142,7 @@ export default function OrdersScreen() {
         {/* Item */}
         <View style={styles.itemRow}>
           <View style={[styles.itemIcon, { backgroundColor: kind.bg }]}>
-            {item.kind === 'bundle' ? <Package size={18} color={kind.fg} /> : <Wrench size={18} color={kind.fg} />}
+            {item.kind === 'bundle' ? <Package size={18} color={kind.fg} /> : item.kind === 'service' ? <Wrench size={18} color={kind.fg} /> : <Wrench size={18} color={kind.fg} />}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={2}>{item.itemTitle}</Text>
@@ -206,7 +207,7 @@ export default function OrdersScreen() {
               </Text>
             </TouchableOpacity>
           ) : (
-            <Text style={{ color: colors.textTertiary, fontSize: 12, marginTop: 2 }}>Grabs on your bundles & skills</Text>
+            <Text style={{ color: colors.textTertiary, fontSize: 12, marginTop: 2 }}>Grabs on your bundles, skills & services</Text>
           )}
         </View>
         <View style={[styles.headerBtn, { backgroundColor: 'transparent' }]}>

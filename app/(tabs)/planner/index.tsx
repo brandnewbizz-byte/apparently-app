@@ -31,6 +31,7 @@ import {
   Package,
   Truck,
   HelpCircle,
+  BellRing,
   Briefcase,
   LayoutGrid,
   Coffee,
@@ -56,6 +57,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePlanner, type Plan } from '@/contexts/PlannerContext';
 import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type ServiceRequest, type RequestStatus } from '@/contexts/ServiceRequestContext';
+import { useOrders } from '@/contexts/OrdersContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -749,6 +751,7 @@ export default function PlannerScreen() {
   const [showCreateRequest, setShowCreateRequest] = useState(false);
 
   const { requests, createRequest, deleteRequest, getRequestsByDate } = useServiceRequests();
+  const { pendingCount: pendingOrders } = useOrders();
 
   const datesWithPlans = useMemo(() => {
     const dates = new Set<string>();
@@ -1084,6 +1087,27 @@ export default function PlannerScreen() {
               </View>
             ) : (
               <>
+                {pendingOrders > 0 && (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 8,
+                      padding: 12, marginBottom: 12, borderRadius: 12,
+                      backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B55',
+                    }}
+                    onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); router.push('/orders' as any); }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B26' }}>
+                      <BellRing size={17} color="#D97706" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#B45309' }}>
+                        {pendingOrders} helper{pendingOrders > 1 ? 's' : ''} waiting
+                      </Text>
+                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>Someone offered to help your request — review & accept</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   {allRequests.length} request{allRequests.length > 1 ? 's' : ''}
                 </Text>

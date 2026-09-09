@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type OrderKind = 'bundle' | 'skill';
+export type OrderKind = 'bundle' | 'skill' | 'service';
 export type OrderStatus = 'requested' | 'accepted' | 'fulfilled' | 'declined';
 
 export interface GrabOrder {
@@ -36,17 +36,19 @@ const OrdersContext = createContext<OrdersContextValue | undefined>(undefined);
 
 const ORDERS_KEY = 'Apparently_GrabOrdersResolved_v1';
 
-const ORDER_TYPES: Record<string, OrderKind> = { bundle_grab: 'bundle', skill_grab: 'skill' };
+const ORDER_TYPES: Record<string, OrderKind> = { bundle_grab: 'bundle', skill_grab: 'skill', service_grab: 'service' };
 
 const ITEM_TABLE: Record<OrderKind, string> = {
   bundle: 'bundles',
   skill: 'skill_deals',
+  service: 'job_requests',
 };
 
 // Grab notification `data` carries the item id/title keyed differently per type.
 const itemFields: Record<OrderKind, { id: string; title: string }> = {
   bundle: { id: 'bundle_id', title: 'bundle_title' },
   skill: { id: 'skill_id', title: 'skill_title' },
+  service: { id: 'request_id', title: 'request_title' },
 };
 
 // ── Provider ───────────────────────────────────────────────────────────────
@@ -103,7 +105,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         .from('notifications')
         .select('id, actor_id, actor_name, actor_avatar, type, data, created_at')
         .eq('user_id', user.id)
-        .in('type', ['bundle_grab', 'skill_grab'])
+        .in('type', ['bundle_grab', 'skill_grab', 'service_grab'])
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -143,9 +145,24 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
   const meAvatar = useMemo(() => ((user as any)?.avatarUrl as string) || '', [user]);
 
+  // Bundle/skill grab resolves against the item row (bundles / skill_deals).
+  // A service grab resolves against the job_request the responder created
+  // (identified by request_id + responder), NOT the public service_requests row
+  // (we never hide a public request — many helpers may be considered).
   const setItemStatus = useCallback(async (order: GrabOrder, status: string) => {
     if (!order.itemId) return;
     try {
+      if (order.kind === 'service') {
+        await supabase
+          .from('job_requests')
+          .update({ status })
+          .eq('status', 'pending')
+          .match({
+            request_id: order.itemId,
+            user_id: order.buyerId, // the responder's grab
+          });
+        return;
+      }
       await supabase.from(ITEM_TABLE[order.kind]).update({ status }).eq('id', order.itemId);
     } catch (e) {
       logger.warn('OrdersContext', 'setItemStatus failed', { e });
@@ -156,15 +173,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     async (order: GrabOrder, subject: string, body: string, emoji: string) => {
       if (!order.buyerId) return;
       try {
+        const type =
+          order.kind === 'bundle' ? 'bundle_order'
+            : order.kind === 'skill' ? 'skill_order'
+            : 'service_order';
         await supabase.from('notifications').insert({
           user_id: order.buyerId,
           actor_id: user?.id,
           actor_name: meName,
           actor_avatar: meAvatar,
-          type: order.kind === 'bundle' ? 'bundle_order' : 'skill_order',
+          type,
           title: body,
           body,
-          data: { item_id: order.itemId, item_title: order.itemTitle, subject, emoji },
+          data: { item_id: order.itemId, item_title: order.itemTitle, subject, emoji, order_kind: order.kind },
           read: false,
           created_at: new Date().toISOString(),
         });
