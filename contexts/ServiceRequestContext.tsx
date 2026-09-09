@@ -58,11 +58,16 @@ export interface ServiceRequest {
   creatorId?: string;
   createdBy: { name: string; avatar: string };
   responders: number; // count of people who've responded
+  /** Seconds until the request expires (if time-limited); renders a countdown. */
+  expiresIn?: number;
+  /** Distance in miles from the viewer (if known). */
+  distance?: number;
 }
 
 interface ServiceRequestState {
   requests: ServiceRequest[];
   createRequest: (req: Omit<ServiceRequest, 'id' | 'status' | 'createdAt' | 'responders'>) => ServiceRequest;
+  grabRequest: (id: string) => void;
   updateRequestStatus: (id: string, status: RequestStatus) => void;
   deleteRequest: (id: string) => void;
   getRequestsByDate: (date: string) => ServiceRequest[];
@@ -83,6 +88,7 @@ function generateId(): string {
 export function ServiceRequestProvider({ children }: { children: React.ReactNode }) {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const { user } = useAuth();
 
   // Load requests: backend API (bypasses RLS) → Supabase → AsyncStorage
   useEffect(() => {
@@ -196,6 +202,124 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
     [isLoaded, saveRequests]
   );
 
+  /**
+   * Service-request "Grab" — the helper who wants to fulfill a request.
+   * Mirrors the bundle/skill grab flow:
+   *   1. guard own request
+   *   2. optimistic responders bump + local save
+   *   3. persist as a job_request (requester <-> responder)
+   *   4. notify the requester
+   *   5. find-or-create the private conversation AND send ONE DM with a service card
+   */
+  const grabRequest = useCallback((id: string) => {
+    const request = requests.find((r) => r.id === id);
+    if (request && user?.id && request.creatorId === user.id) {
+      logger.warn('ServiceRequestContext', 'Cannot grab own request');
+      return;
+    }
+    // Without a real requester we cannot open a private chat or notify — refuse.
+    if (!request?.creatorId || request.creatorId.startsWith('u-') || !user?.id || user.id.startsWith('u-')) {
+      logger.warn('ServiceRequestContext', 'Grab skipped: no real requester/responder', { id });
+      return;
+    }
+    setRequests((prev) => {
+      const updated = prev.map((r) =>
+        r.id === id ? { ...r, responders: (r.responders || 0) + 1 } : r
+      );
+      if (isLoaded) saveRequests(updated);
+      return updated;
+    });
+    const budgetAmount = request.budgetMax || request.budgetMin || 0;
+    const budgetLabel = request.budgetMax
+      ? `$${request.budgetMin}–$${request.budgetMax}`
+      : budgetAmount > 0 ? `$${budgetAmount}` : 'TBD';
+
+    // 3. Persist the grab as a job_request so it shows in the responder's "grabbed" list.
+    (async () => {
+      try {
+        const { error } = await supabase.from('job_requests').insert({
+          user_id: user.id,
+          requester_id: request.creatorId,
+          type: 'service_request',
+          title: request.title,
+          proposed_budget: budgetAmount,
+          status: 'pending',
+          request_id: request.id,
+          plan_details: { category: request.category, description: request.description },
+        });
+        if (error) logger.warn('ServiceRequestContext', 'job_request insert failed', { error });
+      } catch (e) {
+        logger.warn('ServiceRequestContext', 'job_request insert exception', { e });
+      }
+    })();
+
+    // 4 + 5. Notify requester + find-or-create conversation and send ONE grab DM.
+    const actorName = user.fullName || user.username || 'Someone';
+    const actorAvatar = (user as any)?.avatarUrl || '';
+    const serviceCard = {
+      type: 'service_card',
+      id: request.id,
+      title: request.title,
+      description: request.description || '',
+      category: request.category || '',
+      price: budgetAmount || '',
+      requester_name: request.createdBy?.name || '',
+    };
+
+    supabase.from('notifications').insert({
+      user_id: request.creatorId,
+      actor_id: user.id,
+      actor_name: actorName,
+      actor_avatar: actorAvatar,
+      type: 'service_grab',
+      title: `${actorName} offered to help with "${request.title}"`,
+      body: `offered to help with "${request.title}"`,
+      data: { request_id: request.id, request_title: request.title, item_id: request.id, item_title: request.title },
+      read: false,
+      created_at: new Date().toISOString(),
+    }).then(({ error }) => {
+      if (error) logger.warn('ServiceRequestContext', 'Notification insert failed', { error });
+    });
+
+    (async () => {
+      const [a, b] = [user.id, request.creatorId].sort();
+      try {
+        const { data: existing } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('participant_one', a)
+          .eq('participant_two', b)
+          .maybeSingle();
+        let conversationId = existing?.id;
+        if (!conversationId) {
+          const { data: created, error: createErr } = await supabase
+            .from('conversations')
+            .insert({ participant_one: a, participant_two: b })
+            .select('id')
+            .single();
+          if (createErr) {
+            logger.warn('ServiceRequestContext', 'Conversation create failed', { error: createErr });
+            return;
+          }
+          conversationId = created.id;
+        }
+        if (!conversationId) return;
+        const { error: msgErr } = await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          receiver_id: request.creatorId,
+          content: `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`,
+          metadata: { service_card: serviceCard },
+          created_at: new Date().toISOString(),
+          read: false,
+        });
+        if (msgErr) logger.warn('ServiceRequestContext', 'Grab DM insert failed', { error: msgErr });
+      } catch (e) {
+        logger.warn('ServiceRequestContext', 'Grab DM exception', { e });
+      }
+    })();
+  }, [requests, isLoaded, saveRequests, user?.id, user?.fullName, user?.username]);
+
   const updateRequestStatus = useCallback((id: string, status: RequestStatus) => {
     setRequests((prev) => {
       const updated = prev.map((r) => (r.id === id ? { ...r, status } : r));
@@ -235,6 +359,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
       value={{
         requests,
         createRequest,
+        grabRequest,
         updateRequestStatus,
         deleteRequest,
         getRequestsByDate,

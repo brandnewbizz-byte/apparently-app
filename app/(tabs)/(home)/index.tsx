@@ -52,7 +52,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner } from '@/contexts/PlannerContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useMessaging } from '@/contexts/MessagingContext';
 import { supabase } from '@/lib/supabase';
 import * as localApi from '@/lib/api';
 import * as ImagePicker from 'expo-image-picker';
@@ -1247,10 +1246,9 @@ export default function HomeScreen() {
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
-  const { sendMessage } = useMessaging();
   const { bundles: contextBundles, grabBundle } = useBundles();
   const { skills: contextSkills, grabSkill } = useSkills();
-  const { requests: serviceRequests } = useServiceRequests();
+  const { requests: serviceRequests, grabRequest } = useServiceRequests();
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -1398,12 +1396,18 @@ export default function HomeScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     console.log('Card action:', 'grab_bundle', bundle.id);
+    // Can only grab a bundle whose creator is known — never DM a synthetic user.
+    const creatorId = bundle.creatorId || (bundle as any).creator_id || '';
+    if (!creatorId || creatorId.startsWith('u-')) {
+      console.warn('Card action: skip grab_bundle (no real creator)', bundle.id);
+      return;
+    }
     setConfettiAmount(bundle.price);
     setShowConfetti(true);
+    // grabBundle() internally creates the conversation + notification + one DM
+    // with the real owner (sort-pair dedupe). No extra sendMessage here.
     grabBundle(bundle.id);
-    // Create conversation with bundle creator
-    sendMessage(bundle.creatorId || 'u-2', `👋 Hey! I'm interested in your bundle "${bundle.title}" for $${bundle.price}. Is it still available?`);
-  }, [sendMessage, grabBundle]);
+  }, [grabBundle]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {
     console.log('Card action:', 'skip_bundle', bundle.id);
@@ -1422,11 +1426,18 @@ export default function HomeScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     console.log('Card action:', 'grab_skill', skill.id);
+    // Can only grab a skill whose creator is known — never DM a synthetic user.
+    const creatorId = skill.creatorId || (skill as any).creator_id || '';
+    if (!creatorId || creatorId.startsWith('u-')) {
+      console.warn('Card action: skip grab_skill (no real creator)', skill.id);
+      return;
+    }
     setConfettiAmount(skill.price);
     setShowConfetti(true);
-    sendMessage(skill.creatorId || 'u-3', `💪 Interested in your "${skill.title}" skill offer for $${skill.price}. Let's connect!`);
+    // grabSkill() internally creates the conversation + notification + one DM
+    // with the real owner (sort-pair dedupe). No extra sendMessage here.
     grabSkill(skill.id);
-  }, [sendMessage, grabSkill]);
+  }, [grabSkill]);
 
   const handleSkipSkill = useCallback((skill: SkillDeal) => {
     console.log('Card action:', 'skip_skill', skill.id);
@@ -1445,26 +1456,20 @@ export default function HomeScreen() {
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
     }
     console.log('Card action:', 'grab_request', request.id);
+    // Can only grab a request whose requester is known — never DM a synthetic user
+    // and never re-use the old dead raw job_requests insert (P0.1). The context's
+    // grabRequest() persists the grab, notifies the requester, and sends ONE DM
+    // via the deduped conversation path so it can flow into Orders for fulfillment.
+    const requesterId = request.creatorId || '';
+    if (!requesterId || requesterId.startsWith('u-')) {
+      console.warn('Card action: skip grab_request (no real requester)', request.id);
+      return;
+    }
     const budgetAmount = request.budgetMax || request.budgetMin || 0;
     setConfettiAmount(budgetAmount);
     setShowConfetti(true);
-    // Persist grab as a job_request so it shows in grabbedBundles
-    if (user?.id) {
-      supabase.from('job_requests').insert({
-        user_id: user.id,
-        type: 'service_request',
-        title: request.title,
-        proposed_budget: budgetAmount,
-        status: 'pending',
-        request_id: request.id,
-        plan_details: { category: request.category, description: request.description },
-      }).then(({ error }) => {
-        if (error) console.warn('Grab request DB write failed:', error);
-      });
-    }
-    const budgetLabel = request.budgetMax ? `$${request.budgetMin}–$${request.budgetMax}` : budgetAmount > 0 ? `$${budgetAmount}` : 'TBD';
-    sendMessage(request.creatorId || 'u-4', `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`);
-  }, [sendMessage]);
+    grabRequest(request.id);
+  }, [grabRequest]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
     console.log('Card action:', 'skip_request', request.id);
