@@ -1112,6 +1112,16 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
           </View>
         )}
 
+        {/* Always-visible more-options (three-dot) on the open photo — opens actions incl. Delete */}
+        <TouchableOpacity
+          style={viewerStyles.topThreeDot}
+          activeOpacity={0.7}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={() => setShowOptions(true)}
+        >
+          <MoreHorizontal size={24} color="#FFF" />
+        </TouchableOpacity>
+
         {/* Swipeable image pager */}
         <Animated.View style={{ transform: [{ translateY }] }}>
           <FlatList
@@ -1615,6 +1625,19 @@ const profileStyles = StyleSheet.create({
 // ── Instagram Post Viewer Styles ──
 const viewerStyles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
+  // Always-visible more-options (three-dot) pinned top-right of open photo
+  topThreeDot: {
+    position: 'absolute',
+    top: 56,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
   // Image post
   igImage: { backgroundColor: '#111' },
   igSheet: {
