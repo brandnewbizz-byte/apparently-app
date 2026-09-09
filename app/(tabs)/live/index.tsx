@@ -27,7 +27,7 @@ export default function LiveScreen() {
   const { colors } = useTheme();
   const { user } = useAuth();
   const { handleScroll: handleTabBarScroll } = useTabBar();
-  const { rooms, createRoom, fetchRooms } = useRoom();
+  const { rooms, createRoom, fetchRooms, deleteRoom } = useRoom();
 
   // Only show user's own rooms
   const myRooms = useMemo(() => rooms.filter(r => r.creatorId === user?.id), [rooms, user?.id]);
@@ -150,6 +150,28 @@ export default function LiveScreen() {
     router.push(`/(tabs)/live/room/${room.id}` as any);
   }, [router]);
 
+  // ── Delete Room (channel) from list + DB ──
+  const handleDeleteRoom = useCallback((room: LiveRoom) => {
+    if (!room) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      'Delete Channel',
+      `Permanently delete "${room.name}" and its content? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteRoom(room.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [deleteRoom]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -252,7 +274,18 @@ export default function LiveScreen() {
                     ]}
                     activeOpacity={0.9}
                     onPress={() => handleJoinRoom(room)}
+                    onLongPress={() => handleDeleteRoom(room)}
                   >
+                    {/* ⋮ menu top-right — Delete channel (separate, always tappable) */}
+                    <View style={styles.roomMenuBtn}>
+                      <TouchableOpacity
+                        style={styles.roomMenuHit}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        onPress={() => handleDeleteRoom(room)}
+                      >
+                        <Text style={[styles.roomMenuDots, { color: '#FFF' }]}>⋯</Text>
+                      </TouchableOpacity>
+                    </View>
                     {/* Room cover image or status gradient */}
                     {room.coverImage ? (
                       <View style={styles.roomGradient}>
@@ -664,7 +697,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   roomCoverImg: {
-    ...StyleSheet.absoluteFillObject, width: '100%', height: '100%',
+    ...StyleSheet.absoluteFill, width: '100%', height: '100%',
+  },
+  // ⋮ menu on room card — Delete channel
+  roomMenuBtn: {
+    position: 'absolute', top: 6, right: 6, zIndex: 10,
+  },
+  roomMenuHit: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  roomMenuDots: {
+    fontSize: 20, fontWeight: '700', lineHeight: 24, textAlign: 'center',
   },
   roomLiveIndicator: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
