@@ -630,6 +630,25 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
     console.error('[getSpotFeed] Error fetching posts:', postsErr.message);
   }
 
+  // Server-authoritative like counts: read actual post_likes rows so the displayed
+  // count never drifts from what is really stored (posts.likes column is not maintained).
+  let likeCountById = new Map<string, number>();
+  if (posts && posts.length) {
+    const postIds = posts.map((p: any) => p.id);
+    const { data: likeRows, error: likesErr } = await supabase
+      .from('post_likes')
+      .select('post_id')
+      .in('post_id', postIds);
+    if (likesErr) {
+      console.error('[getSpotFeed] Error fetching like counts:', likesErr.message);
+    } else if (likeRows) {
+      likeCountById = (likeRows as { post_id: string }[]).reduce((m, r) => {
+        m.set(r.post_id, (m.get(r.post_id) || 0) + 1);
+        return m;
+      }, new Map<string, number>());
+    }
+  }
+
   // Fetch active bundles
   const { data: bundles, error: bundlesErr } = await supabase
     .from('bundles')
@@ -684,7 +703,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       description: featuredPost.content || undefined,
       sourceType: 'post',
       sourceId: featuredPost.id,
-      likes: featuredPost.likes || 0,
+      likes: likeCountById.get(featuredPost.id) ?? featuredPost.likes ?? 0,
       commentsCount: featuredPost.comments || 0,
       createdAt: featuredPost.created_at,
     });
@@ -712,7 +731,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       description: post.content || undefined,
       sourceType: 'post',
       sourceId: post.id,
-      likes: post.likes || 0,
+      likes: likeCountById.get(post.id) ?? post.likes ?? 0,
       commentsCount: post.comments || 0,
       createdAt: post.created_at,
     });
@@ -767,7 +786,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       duration: age,
       sourceType: 'post',
       sourceId: post.id,
-      likes: post.likes || 0,
+      likes: likeCountById.get(post.id) ?? post.likes ?? 0,
       commentsCount: post.comments || 0,
       createdAt: post.created_at,
     });
