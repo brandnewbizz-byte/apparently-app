@@ -83,11 +83,10 @@ export default function InboxScreen() {
             senderName: n.actor_name || 'Someone',
             senderAvatar: n.actor_avatar || '',
             data: n.data || {},
-            _raw: n,
             message: n.body || n.title || '',
             read: n.read,
             createdAt: n.created_at,
-            _raw: { ...extra, room_id: extra.room_id, caller_id: extra.caller_id },
+            _raw: n,
           };
         }));
       }
@@ -189,7 +188,12 @@ export default function InboxScreen() {
                 supabase.from('notifications').update({ read: true }).eq('id', n.id).then(() => {});
                 setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
                 // Navigate based on type
-                if (n.type === 'follow' || n.type === 'bundle_grab' || n.type === 'skill_grab') {
+                if (n.type === 'bundle_grab' || n.type === 'skill_grab') {
+                  // Someone grabbed my bundle/item — open the conversation with them.
+                  // This resolves to inbox/conversation/[participantId], which renders the
+                  // grabbed bundle/skill card AND has the composer to reply to that buyer.
+                  router.push(`/inbox/conversation/${n.senderId}` as any);
+                } else if (n.type === 'follow') {
                   router.push(`/user/${n.senderId}` as any);
                 } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
                   const ownerId = n.data?.post_user_id;

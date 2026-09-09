@@ -1,4 +1,4 @@
-import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle } from 'lucide-react-native';
+import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle, Tag } from 'lucide-react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
