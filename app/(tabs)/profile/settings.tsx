@@ -71,7 +71,7 @@ export default function SettingsScreen() {
         }
         const ext = (editingAvatar.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
         const safeExt = ['jpg','jpeg','png','gif','webp'].includes(ext) ? ext : 'jpg';
-        const mimeType = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp' }[safeExt] || 'image/jpeg';
+        const mimeType = ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp" } as Record<string, string>)[safeExt] || "image/jpeg";
         const path = `${user.id}_${Date.now()}.${safeExt}`;
         // Convert base64 to Uint8Array — fetch().blob() is unreliable in React Native
         const byteChars = atob(editingAvatarBase64);

@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   mediaContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   media: {
     width: SCREEN_WIDTH,

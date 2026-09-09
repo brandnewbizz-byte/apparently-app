@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.background,
   },
   backgroundPattern: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
   },
   orb: {

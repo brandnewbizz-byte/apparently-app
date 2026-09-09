@@ -230,7 +230,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
             dropoff_city: input.dropoff_city || null,
             dropoff_state: input.dropoff_state || null,
             plan: input.plan_details,
-            status: 'pending',
+            status: input.status || 'pending',
           };
 
           const { data, error } = await supabase
@@ -271,7 +271,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
           id: result?.id || `local-${Date.now()}`,
           user_id: authId || 'unknown',
           date: input.date,
-          status: 'pending',
+          status: input.status || 'pending',
           created_at: new Date().toISOString(),
         } as Plan;
       } catch (e2) {

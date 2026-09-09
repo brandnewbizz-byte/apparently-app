@@ -203,9 +203,10 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
     queryKey: ['myListings'],
     queryFn: async ({ signal }) => {
       try {
-        const hostId = await DatabaseService.getDefaultUserId();
+        const hostId = (await DatabaseService.getDefaultUserId()) ?? '';
         logger.info('BookingsContext', 'Fetching my listings for host', { hostId });
         
+        if (!hostId) return [];
         const dbListings = await DatabaseService.fetchUserListings(hostId, { signal });
         logger.info('BookingsContext', 'My listings query result', { value: dbListings?.length || 0 });
         
@@ -565,7 +566,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
       logger.info('BookingsContext', 'Starting rental submission to Supabase...');
 
       try {
-        const hostId = await DatabaseService.getOrCreateUserId();
+        const hostId = (await DatabaseService.getOrCreateUserId()) ?? '';
         logger.info('BookingsContext', 'Using host_id for listing', { hostId });
         
         const dbListing = await DatabaseService.createListing({

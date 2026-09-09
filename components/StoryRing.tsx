@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
   },
   plusIconContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.25)',

@@ -120,7 +120,7 @@ export default function SkillBuilderScreen() {
       imageUrl: coverImage || '',
       category: category || 'other',
       tags: tags.length ? tags : ['Skill'],
-      creator: { name: user?.fullName || user?.name || 'You', avatar: user?.avatar || '', rating: 5.0, reviews: 0 },
+      creator: { name: user?.fullName || user?.username || 'You', avatar: user?.avatar || '', rating: 5.0, reviews: 0 },
       creatorId: user?.id || '',
       availableCount: parseInt(availableCount, 10) || 20,
       providerLink: undefined,

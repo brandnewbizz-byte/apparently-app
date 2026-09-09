@@ -225,7 +225,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         category: bundle.category || '',
         price: bundle.price || '',
         image_url: bundle.imageUrl || '',
-        creator_name: bundle.creatorName || '',
+        creator_name: bundle.creator?.name || '',
       };
       // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';

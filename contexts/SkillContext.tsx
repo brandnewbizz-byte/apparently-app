@@ -200,7 +200,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
         category: skill.category || '',
         price: skill.price || '',
         image_url: skill.imageUrl || '',
-        creator_name: skill.creatorName || '',
+        creator_name: skill.creator?.name || '',
       };
       // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
