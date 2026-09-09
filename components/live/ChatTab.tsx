@@ -120,7 +120,7 @@ export default function ChatTab({ roomId, roomName }: ChatTabProps) {
       ...msg,
       id: tempId,
       sender_name: user?.fullName || user?.username || 'You',
-      sender_avatar: user?.avatar || null,
+      sender_avatar: user?.avatar || undefined,
     };
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);

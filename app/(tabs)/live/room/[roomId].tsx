@@ -1110,7 +1110,7 @@ export default function RoomScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  ambient: { ...StyleSheet.absoluteFillObject },
+  ambient: { ...StyleSheet.absoluteFill },
   connecting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   connectingRing: {
     width: 60, height: 60, borderRadius: 30,
@@ -1299,7 +1299,7 @@ const styles = StyleSheet.create({
 
   // ── Expanded Camera Overlay ──
   expandedCameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000', zIndex: 100, justifyContent: 'center', alignItems: 'center',
   },
   expandedCamera: {
@@ -1320,7 +1320,7 @@ const styles = StyleSheet.create({
 
   // ── Admin Panel ──
   adminOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99,
     justifyContent: 'flex-end',
   },

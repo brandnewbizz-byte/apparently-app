@@ -37,7 +37,7 @@ export default function CallScreen() {
   const isOutgoing = params.isOutgoing === 'true';
   const serverUrl = params.serverUrl || 'http://localhost:3000';
   const currentUserId = params.currentUserId || user?.id || '';
-  const currentUserName = params.currentUserName || (user as any)?.fullName || user?.name || 'You';
+  const currentUserName = params.currentUserName || (user as any)?.fullName || (user as any)?.username || 'You';
 
   const callConfig: CallConfig = useMemo(() => ({
     serverUrl,
@@ -94,7 +94,7 @@ export default function CallScreen() {
     endCall();
     setTimeout(() => {
       if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)/inbox');
+      else router.replace('/(tabs)/inbox' as never);
     }, 400);
   };
 

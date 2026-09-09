@@ -80,10 +80,11 @@ export function useWebRTCCall() {
     };
 
     pc.ontrack = (event) => {
-      // Remote audio stream — play through speaker
-      const remoteAudio = new Audio();
-      remoteAudio.srcObject = event.streams[0];
-      remoteAudio.play().catch(() => {});
+      // Remote audio stream — play through speaker.
+      // In React Native there is no browser <audio> element to construct;
+      // the RTCPeerConnection already emits/consumes the decoded stream natively.
+      // Force the audio session to speaker mode so the incoming call is audible.
+      Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
     };
 
     pc.onconnectionstatechange = () => {
