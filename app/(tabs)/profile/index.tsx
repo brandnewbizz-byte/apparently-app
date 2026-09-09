@@ -1072,17 +1072,28 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const renderSwipeItem = ({ item }: { item: any }) => {
     const imgUrl = item?.imageUrl || item?.image_url || item?.mediaUri || '';
     return (
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() => setShowComments(prev => !prev)}
-        style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}
-      >
-        <Image
-          source={{ uri: imgUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800' }}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
-        />
-      </TouchableOpacity>
+      <View style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setShowComments(prev => !prev)}
+          style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}
+        >
+          <Image
+            source={{ uri: imgUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800' }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
+        {/* Per-image three-dot: rendered after (on top of) this image so taps always land */}
+        <TouchableOpacity
+          style={viewerStyles.topThreeDot}
+          activeOpacity={0.7}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={() => setShowOptions(true)}
+        >
+          <MoreHorizontal size={24} color="#FFF" />
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -1111,16 +1122,6 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
             ))}
           </View>
         )}
-
-        {/* Always-visible more-options (three-dot) on the open photo — opens actions incl. Delete */}
-        <TouchableOpacity
-          style={viewerStyles.topThreeDot}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          onPress={() => setShowOptions(true)}
-        >
-          <MoreHorizontal size={24} color="#FFF" />
-        </TouchableOpacity>
 
         {/* Swipeable image pager */}
         <Animated.View style={{ transform: [{ translateY }] }}>
