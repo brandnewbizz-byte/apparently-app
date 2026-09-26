@@ -12,7 +12,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
-import { Audio } from 'expo-av';
+import { SafeAudio as Audio } from '@/lib/safe-av';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 

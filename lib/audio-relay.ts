@@ -11,7 +11,8 @@
  * Audio format: PCM 16-bit 16000 Hz mono, base64-encoded chunks (~40ms each).
  */
 
-import { Audio } from 'expo-av';
+import type { Audio as AudioTypes } from 'expo-av';
+import { SafeAudio as Audio } from '@/lib/safe-av';
 import { Platform } from 'react-native';
 
 // ── Types ──
@@ -46,7 +47,7 @@ export interface AudioRelayClient {
 
 // ── Audio session config ──
 
-const RECORDING_OPTIONS: Audio.RecordingOptions = {
+const RECORDING_OPTIONS: AudioTypes.RecordingOptions = {
   android: {
     extension: '.wav',
     outputFormat: Audio.AndroidOutputFormat.DEFAULT,
@@ -79,13 +80,13 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
 
   let ws: WebSocket | null = null;
   let connected = false;
-  let recording: Audio.Recording | null = null;
+  let recording: AudioTypes.Recording | null = null;
   let isRecording = false;
   let chunkInterval: ReturnType<typeof setInterval> | null = null;
   let chuckSequence = 0;
 
   // Speaker playback pool: one Audio.Sound per remote peer
-  const speakerPool = new Map<string, { sound: Audio.Sound; peerName: string; lastChunkAt: number }>();
+  const speakerPool = new Map<string, { sound: AudioTypes.Sound; peerName: string; lastChunkAt: number }>();
   const speakers: RemoteSpeaker[] = [];
 
   // ── Permission ──
@@ -301,9 +302,10 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
         playsInSilentModeIOS: true,
       });
 
-      recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(RECORDING_OPTIONS);
-      await recording.startAsync();
+      const rec = new Audio.Recording();
+      recording = rec;
+      await rec.prepareToRecordAsync(RECORDING_OPTIONS);
+      await rec.startAsync();
       isRecording = true;
 
       // Notify server
