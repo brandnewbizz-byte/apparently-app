@@ -783,12 +783,43 @@ export default function FeedScreen() {
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
 
-  // Load feed posts: show ALL posts (anyone's), newest first (latest on top)
+  // ── Network filter: feed shows only people you follow + people who follow you + yourself ──
+  const [networkIds, setNetworkIds] = useState<Set<string> | null>(null);
+  const loadNetwork = useCallback(async () => {
+    if (!authUser?.id) { setNetworkIds(null); return; }
+    const myId = authUser.id;
+    try {
+      const [{ data: following }, { data: followers }] = await Promise.all([
+        supabase.from('follows').select('following_id').eq('follower_id', myId),
+        supabase.from('follows').select('follower_id').eq('following_id', myId),
+      ]);
+      const ids = new Set<string>([myId]);
+      (following || []).forEach((f: any) => { if (f?.following_id) ids.add(f.following_id); });
+      (followers || []).forEach((f: any) => { if (f?.follower_id) ids.add(f.follower_id); });
+      setNetworkIds(ids);
+    } catch (_) {
+      // Fail closed: if the network query fails, only show the user's own posts.
+      setNetworkIds(new Set<string>([myId]));
+    }
+  }, [authUser?.id]);
+
+  useEffect(() => { loadNetwork(); }, [loadNetwork]);
+
+  // Load feed posts: show ONLY network posts (people you follow + people who follow you + yourself), newest first
   const lastPostCountRef = useRef('');
   const loadFeedPosts = useCallback(() => {
     const posts = getAllPosts();
     if (!posts || posts.length === 0) return;
     const allPosts: FeedPost[] = posts
+      .filter((p: any) => {
+        const authorId = p.user?.id || p.user_id;
+        if (!authorId) return false;
+        // Always show the user's own posts.
+        if (authUser?.id && authorId === authUser.id) return true;
+        // Until the network resolves, don't leak others' posts (fail closed).
+        if (!networkIds) return false;
+        return networkIds.has(authorId);
+      })
       .map((p: any) => ({
         id: p.id,
         type: p.type || 'photo',
@@ -809,7 +840,7 @@ export default function FeedScreen() {
     if (allPosts.length > 0 || userPosts.length > 0) {
       setUserPosts(allPosts);
     }
-  }, [getAllPosts]);
+  }, [getAllPosts, networkIds, authUser?.id]);
 
   // Run the loader whenever the posts provider signals new data (mount/refresh)
   useEffect(() => {
@@ -888,6 +919,8 @@ export default function FeedScreen() {
         await supabase.from('follows').insert({ follower_id: authUser!.id, following_id: targetUserId });
         setSearchFollowingIds(prev => new Set(prev).add(targetUserId));
       }
+      // Refresh the feed network so newly followed users' posts appear immediately.
+      loadNetwork();
     } catch (_) {}
   };
 
@@ -936,8 +969,10 @@ export default function FeedScreen() {
       addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
     });
 
-    // Add feed stories
+    // Add feed stories (network only)
     feedStories.forEach(s => {
+      const authorId = s.user?.id;
+      if (authorId && networkIds && !networkIds.has(authorId)) return;
       addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
     });
 
@@ -949,7 +984,7 @@ export default function FeedScreen() {
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       ),
     }));
-  }, [userStories, feedStories]);
+  }, [userStories, feedStories, networkIds]);
 
   const filteredPosts = useMemo(() => {
     // ── Deduplication: prefer context data over hardcoded ──
