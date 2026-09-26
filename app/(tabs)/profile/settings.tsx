@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
+import { syncUserAvatar } from '@/lib/avatar-sync';
 import { sanitizeBio, sanitizeFullName, sanitizeUsername } from '@/lib/sanitize';
 
 import { useTheme } from '@/contexts/ThemeContext';
@@ -105,6 +106,8 @@ export default function SettingsScreen() {
       // Update local editingAvatar to the final URL so the preview stays correct
       setEditingAvatar(finalAvatar);
       await refreshProfile();
+      // Propagate the new avatar to every denormalized snapshot (rooms, notifications, etc.)
+      syncUserAvatar(user.id, finalAvatar);
       Alert.alert('Saved', 'Profile updated.');
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to save');

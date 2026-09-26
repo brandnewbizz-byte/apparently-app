@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import { isLocalFileUri } from '@/lib/media';
 import { sanitizeBio, sanitizeFullName, sanitizeLocation } from '@/lib/sanitize';
+import { syncUserAvatar } from '@/lib/avatar-sync';
 import type { Session } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 
@@ -697,6 +698,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           error: 'Saved locally. We\'ll retry syncing to your profile later.',
         };
       }
+
+      // Propagate the new avatar to every denormalized snapshot
+      syncUserAvatar(userId, dataUri);
 
       return { success: true };
     } catch (e) {

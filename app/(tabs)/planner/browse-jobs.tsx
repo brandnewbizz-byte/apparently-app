@@ -139,11 +139,11 @@ export default function BrowseJobsScreen() {
         try {
           const { data: grabberProfile } = await supabase
             .from('profiles')
-            .select('full_name, username, avatar_url')
+            .select('full_name, username, avatar')
             .eq('id', user.id)
             .maybeSingle();
           const grabberName = grabberProfile?.full_name || grabberProfile?.username || 'Someone';
-          const grabberAvatar = grabberProfile?.avatar_url || '';
+          const grabberAvatar = grabberProfile?.avatar || '';
           const typeLabel = JOB_TYPE_CONFIG[job.type]?.label || 'service request';
           await supabase.from('notifications').insert({
             user_id: job.user_id,

@@ -40,11 +40,11 @@ async function processMentions(
   // Fetch the sender profile too, so we can attribute the mention to a real name/avatar.
   const { data: senderProfile } = await supabase
     .from('profiles')
-    .select('username, full_name, avatar_url')
+    .select('username, full_name, avatar')
     .eq('id', senderId)
     .maybeSingle();
   const senderName = senderProfile?.full_name || senderProfile?.username || 'Someone';
-  const senderAvatar = senderProfile?.avatar_url || '';
+  const senderAvatar = senderProfile?.avatar || '';
   const { data: profiles } = await supabase
     .from('profiles')
     .select('id, username, full_name')
@@ -221,14 +221,14 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         logger.info('SocialContext', 'Got auth user ID', { userId: data.user.id });
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, username, avatar_url')
+          .select('full_name, username, avatar')
           .eq('id', data.user.id)
           .maybeSingle();
         if (profile) {
           setCurrentUserProfile({
             fullName: profile.full_name,
             username: profile.username,
-            avatar: profile.avatar_url || '',
+            avatar: profile.avatar || '',
           });
         }
       }
