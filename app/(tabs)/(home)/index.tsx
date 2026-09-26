@@ -1563,6 +1563,17 @@ export default function HomeScreen() {
     }) : merged;
   }, [contextSkills, createdSkills, user?.id]);
 
+  const allRequests = useMemo(() => {
+    // Exclude own service requests — the homepage is for grabbing OTHER people's stuff.
+    const uid = user?.id;
+    return uid
+      ? (serviceRequests || []).filter((r) => {
+          const cid = r.creatorId || (r as any).creator_id || (r as any).requester_id || '';
+          return cid !== uid;
+        })
+      : (serviceRequests || []);
+  }, [serviceRequests, user?.id]);
+
   // ─── Create Handlers ───
   const resetDealForm = () => {
     setDealTitle('');
@@ -1852,7 +1863,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={serviceRequests && serviceRequests.length > 0 ? serviceRequests : []}
+            requests={allRequests}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}
