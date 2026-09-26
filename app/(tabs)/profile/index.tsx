@@ -294,7 +294,8 @@ export default function ProfileScreen() {
       const { data: follows } = await supabase
         .from('follows')
         .select(joinCol)
-        .eq(filterCol, user.id);
+        .eq(filterCol, user.id)
+        .neq(joinCol, user.id);
       if (follows && follows.length > 0) {
         const ids = follows.map((f: any) => f[joinCol]);
         const { data: profiles } = await supabase
@@ -387,9 +388,9 @@ export default function ProfileScreen() {
 
       // Fire all 4 queries in parallel — no data dependency between them
       const [jobsResult, postsResult, reviewsResult, followersResult, followingResult] = await Promise.all([
-        supabase.from('job_requests').select('proposed_budget, status').eq('seller_id', user.id),
-        supabase.from('social_posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
-        supabase.from('user_reviews').select('rating').eq('reviewed_user_id', user.id),
+        supabase.from('user_grabs').select('price, status').eq('provider_id', user.id),
+        supabase.from('posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
+        supabase.from('user_reviews').select('rating').eq('target_user_id', user.id),
         // count queries: more reliable than .or() with UUIDs, excludes self-follow
         supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', user.id).neq('follower_id', user.id),
         supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', user.id).neq('following_id', user.id),
@@ -404,7 +405,7 @@ export default function ProfileScreen() {
       if (jobs) {
         const completed = jobs.filter((j: any) => j.status === 'completed');
         setCompletedCount(completed.length);
-        const earnings = completed.reduce((sum: number, j: any) => sum + Number(j.proposed_budget || 0), 0);
+        const earnings = completed.reduce((sum: number, j: any) => sum + Number(j.price || 0), 0);
         setTotalEarnings(earnings);
       }
 
@@ -447,15 +448,22 @@ export default function ProfileScreen() {
     try {
       setLoadingBundles(true);
       const { data, error } = await supabase
-        .from('job_requests')
-        .select('id, title, proposed_budget, pickup_time, status, booked_at, plan_details')
+        .from('user_grabs')
+        .select('id, title, price, pickup_time, status, booked_at, item_type')
         .eq('user_id', user.id)
-        .eq('type', 'plan_for_hire')
         .order('booked_at', { ascending: false });
       if (error) {
         console.log('[Profile] Error fetching grabbed bundles:', error.message);
       } else {
-        setGrabbedBundles(data || []);
+        setGrabbedBundles((data || []).map((g: any) => ({
+          id: g.id,
+          title: g.title || 'Plan',
+          proposed_budget: Number(g.price || 0),
+          pickup_time: g.pickup_time || null,
+          status: g.status || 'pending',
+          booked_at: g.booked_at || '',
+          plan_details: null,
+        })));
       }
     } catch (err) {
       console.log('[Profile] Exception fetching grabbed bundles:', err);
