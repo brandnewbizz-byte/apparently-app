@@ -3,7 +3,6 @@ import React, {
 } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { Platform, Alert } from 'react-native';
 
 // ── Types ──
@@ -201,7 +200,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'plans',
+        table: 'plan_sync',
         filter: `room_id=eq.${plan.roomId}`,
       }, (payload: any) => {
         const remote = payload.new?.data;
@@ -224,20 +223,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const newPlan: PlanData = { ...defaultPlan(roomId, user?.id), ...data, id: nextId(), updatedAt: new Date().toISOString() };
     setPlan(newPlan);
     try {
-      await supabase.from('plans').upsert({
-        id: newPlan.id, room_id: roomId, title: newPlan.title, goal: newPlan.goal,
-        description: sanitizeBundleDesc(newPlan.description), project_type: newPlan.projectType,
-        start_date: newPlan.startDate, target_date: newPlan.targetDate,
-        stage: newPlan.stage, progress: newPlan.progress, owner_id: user?.id,
-        data: JSON.stringify(newPlan), updated_at: newPlan.updatedAt,
-      });
+      if (user?.id) {
+        await supabase.from('plan_sync').insert({
+          plan_id: newPlan.id, room_id: roomId,
+          user_id: user.id, user_name: user.fullName || '',
+          section: 'full', data: newPlan, version: 1,
+        });
+      }
     } catch {}
   }, [user]);
 
   const loadPlan = useCallback(async (roomId: string) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.from('plans').select('*').eq('room_id', roomId).single();
+      const { data, error } = await supabase.from('plan_sync')
+        .select('*').eq('room_id', roomId).eq('section', 'full')
+        .order('version', { ascending: false }).limit(1).maybeSingle();
       if (!error && data?.data) {
         setPlan(typeof data.data === 'string' ? JSON.parse(data.data) : data.data);
       }
@@ -256,35 +257,25 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       saveVersionRef.current = newVersion;
 
       try {
-        supabase.from('plan_sync').insert({
-          id: `v_${p.id}_${newVersion}`,
-          room_id: p.roomId,
-          plan_id: p.id,
-          section: 'full',
-          field: 'data',
-          value: JSON.stringify(p),
-          version: newVersion,
-          edited_by: user?.id || '',
-          edited_by_name: user?.fullName || '',
-          created_at: new Date().toISOString(),
-        }).then(() => {});
-
-        supabase.from('plans').upsert({
-          id: p.id, room_id: p.roomId, title: p.title, goal: p.goal,
-          description: sanitizeBundleDesc(p.description), project_type: p.projectType,
-          start_date: p.startDate, target_date: p.targetDate,
-          stage: p.stage, progress: p.progress, owner_id: p.ownerId,
-          data: JSON.stringify(p), updated_at: new Date().toISOString(),
-        }).then(() => {});
-
-        // Log to room history if summary provided
-        if (summary) {
-          supabase.from('room_history').insert({
-            room_id: p.roomId, user_id: user?.id || '',
-            user_name: user?.fullName || '', action: 'plan_edited',
-            detail: summary,
-            metadata: JSON.stringify({ version: newVersion, planId: p.id }),
+        if (user?.id) {
+          supabase.from('plan_sync').insert({
+            plan_id: p.id,
+            room_id: p.roomId,
+            user_id: user.id,
+            user_name: user.fullName || '',
+            section: 'full',
+            data: p,
+            version: newVersion,
           }).then(() => {});
+
+          // Log to room history if summary provided
+          if (summary) {
+            supabase.from('room_history').insert({
+              room_id: p.roomId, user_id: user.id,
+              user_name: user.fullName || '', action: 'plan_edited',
+              detail: summary,
+            }).then(() => {});
+          }
         }
       } catch {}
       setIsSaving(false);
@@ -300,29 +291,26 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       saveVersionRef.current = newVersion;
       setIsSaving(true);
 
-      supabase.from('plan_sync').insert({
-        id: `v_${prev.id}_${newVersion}`,
-        room_id: prev.roomId, plan_id: prev.id,
-        section: 'full', field: 'data',
-        value: JSON.stringify(prev), version: newVersion,
-        edited_by: user?.id || '', edited_by_name: user?.fullName || '',
-        created_at: new Date().toISOString(),
-      }).then(() => {});
+      if (user?.id) {
+        supabase.from('plan_sync').insert({
+          plan_id: prev.id,
+          room_id: prev.roomId,
+          user_id: user.id,
+          user_name: user.fullName || '',
+          section: 'full',
+          data: prev,
+          version: newVersion,
+        }).then(() => setIsSaving(false));
 
-      supabase.from('plans').upsert({
-        id: prev.id, room_id: prev.roomId, title: prev.title,
-        goal: prev.goal, description: sanitizeBundleDesc(prev.description), project_type: prev.projectType,
-        start_date: prev.startDate, target_date: prev.targetDate,
-        stage: prev.stage, progress: prev.progress, owner_id: prev.ownerId,
-        data: JSON.stringify(prev), updated_at: new Date().toISOString(),
-      }).then(() => setIsSaving(false));
-
-      if (summary) {
-        supabase.from('room_history').insert({
-          room_id: prev.roomId, user_id: user?.id || '',
-          user_name: user?.fullName || '', action: 'plan_edited',
-          detail: summary,
-        }).then(() => {});
+        if (summary) {
+          supabase.from('room_history').insert({
+            room_id: prev.roomId, user_id: user.id,
+            user_name: user.fullName || '', action: 'plan_edited',
+            detail: summary,
+          }).then(() => {});
+        }
+      } else {
+        setIsSaving(false);
       }
 
       return prev;
@@ -339,7 +327,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (data) {
         setVersions(data.map((r: any) => ({
           id: r.id, planId: r.plan_id, version: r.version,
-          editedBy: r.edited_by, editedByName: r.edited_by_name,
+          editedBy: r.user_id, editedByName: r.user_name,
           createdAt: r.created_at,
         })));
       }
@@ -349,9 +337,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const rollbackToVersion = useCallback(async (versionId: string) => {
     try {
       const { data } = await supabase.from('plan_sync')
-        .select('value').eq('id', versionId).single();
-      if (data?.value) {
-        const restored = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+        .select('data').eq('id', versionId).single();
+      if (data?.data) {
+        const restored = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
         setPlan(restored);
         saveNow(`Rolled back to version ${versionId}`);
       }
@@ -738,29 +726,20 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           storageUsedBytes: (prev.storageUsedBytes || 0) + fileSize,
           updatedAt: new Date().toISOString(),
         };
-        // Immediately upsert to plans table — file references must survive app restarts/updates
-        supabase.from('plans').upsert({
-          id: updated.id, room_id: updated.roomId, title: updated.title, goal: updated.goal,
-          description: sanitizeBundleDesc(updated.description), project_type: updated.projectType,
-          start_date: updated.startDate, target_date: updated.targetDate,
-          stage: updated.stage, progress: updated.progress, owner_id: updated.ownerId,
-          data: JSON.stringify(updated), updated_at: updated.updatedAt,
-        }).then(({ error }) => {
-          if (error) console.log('[uploadFile] plan upsert error:', error.message);
-        });
-        // Also log a version snapshot
-        supabase.from('plan_sync').insert({
-          id: `v_${updated.id}_file_${fileId}`,
-          room_id: updated.roomId, plan_id: updated.id,
-          section: 'full', field: 'data',
-          value: JSON.stringify(updated),
-          version: Date.now(),
-          edited_by: user?.id || '',
-          edited_by_name: user?.fullName || '',
-          created_at: new Date().toISOString(),
-        }).then(({ error }) => {
-          if (error) console.log('[uploadFile] plan_sync insert error:', error.message);
-        });
+        // Persist plan snapshot so file references survive app restarts/updates
+        if (user?.id) {
+          supabase.from('plan_sync').insert({
+            plan_id: updated.id,
+            room_id: updated.roomId,
+            user_id: user.id,
+            user_name: user.fullName || '',
+            section: 'full',
+            data: updated,
+            version: Date.now(),
+          }).then(({ error }) => {
+            if (error) console.log('[uploadFile] plan_sync insert error:', error.message);
+          });
+        }
         return updated;
       });
 

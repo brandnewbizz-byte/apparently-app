@@ -872,11 +872,10 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     try {
       supabase.from('room_history').insert({
         room_id: currentRoom?.id,
-        user_id: entry.userId,
-        user_name: entry.userName,
+        user_id: entry.userId || null,
+        user_name: entry.userName || '',
         action: entry.action,
         detail: entry.detail,
-        metadata: JSON.stringify({ timestamp: entry.timestamp }),
       }).then(() => {}).then(() => {}, () => {});
     } catch {}
   }, [currentRoom?.id]);

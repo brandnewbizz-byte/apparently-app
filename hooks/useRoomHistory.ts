@@ -109,11 +109,10 @@ export function useRoomHistory(opts: UseRoomHistoryOptions): UseRoomHistoryRetur
     try {
       await supabase.from('room_history').insert({
         room_id: roomId,
-        user_id: '',
+        user_id: null,
         user_name: '',
         action,
         detail,
-        metadata: metadata ? JSON.stringify(metadata) : null,
       });
     } catch {}
   }, [roomId, enabled, limit]);
