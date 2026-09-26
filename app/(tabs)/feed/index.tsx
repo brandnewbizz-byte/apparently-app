@@ -167,7 +167,7 @@ function PostDetailModal({
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
   const [commentText, setCommentText] = useState('');
-  const { interactions, toggleLike } = useSocial();
+  const { interactions, toggleLike, addComment } = useSocial();
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const [kbHeight, setKbHeight] = useState(0);
@@ -213,6 +213,9 @@ function PostDetailModal({
     };
     setLocalComments((prev) => [newComment, ...prev]);
     setCommentText('');
+    // Persist the comment to Supabase + SocialContext so it survives reload
+    // and notifies the post author. addComment manages optimistic state.
+    addComment(post.id, trimmed);
   };
 
   const badge = (() => {
@@ -822,15 +825,16 @@ export default function FeedScreen() {
       })
       .map((p: any) => ({
         id: p.id,
-        type: p.type || 'photo',
+        type: (p.postKind === 'sell' ? 'marketplace' : (p.mediaType === 'video' || p.videoUrl || p.video_url) ? 'video' : (p.imageUrl || p.image_url) ? 'photo' : 'text') as PostType,
         author: { name: p.user?.name || p.author_name || 'Unknown', avatar: p.user?.avatar || '', userId: p.user?.id || p.user_id },
         category: p.category || 'General',
         timestamp: p.timestamp || p.created_at || '',
         caption: p.content || p.caption || '',
-        media: p.imageUrl || p.image_url || p.mediaUri || '',
+        media: p.imageUrl || p.image_url || p.mediaUri || p.videoUrl || p.video_url || '',
+        videoUrl: p.videoUrl || p.video_url,
         likes: p.likes || 0,
         tags: p.tags || [],
-        stats: { saves: p.saves || 0, comments: (p.comments || []).length },
+        stats: { saves: p.shares || 0, comments: p.comments || 0 },
       }))
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     // Only update if post list actually changed
