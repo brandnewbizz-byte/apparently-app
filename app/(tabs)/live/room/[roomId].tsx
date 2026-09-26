@@ -265,7 +265,7 @@ function RoomContent() {
   });
   const { hideTabBar, showTabBar } = useTabBar();
   const {
-    rooms, joinRoom, leaveRoom,
+    rooms, joinRoom, leaveRoom, addParticipant,
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
     startPresenting, stopPresenting,
@@ -447,10 +447,14 @@ function RoomContent() {
     setInviteLoading(false);
   }, [user?.id]);
 
-  const sendRoomInvite = useCallback(async (targetUserId: string, targetName: string) => {
-    if (!user?.id || !roomId) return;
+  const sendRoomInvite = useCallback(async (target: any) => {
+    if (!user?.id || !roomId || !target?.id) return;
+    const targetUserId = target.id;
+    const targetName = target.full_name || target.username || 'User';
     const actorName = user?.fullName || user?.username || 'Someone';
     const actorAvatar = user?.avatar || '';
+    // Add them to the room's participant list + persist to Supabase.
+    addParticipant(roomId, { id: targetUserId, fullName: targetName, avatar: target.avatar || null });
     await supabase.from('notifications').insert({
       user_id: targetUserId,
       actor_id: user.id,
@@ -466,8 +470,8 @@ function RoomContent() {
       read: false,
       created_at: new Date().toISOString(),
     });
-    Alert.alert('Invited', `Invitation sent to ${targetName}`);
-  }, [user?.id, user, roomId, room?.name]);
+    Alert.alert('Invited', `${targetName} added to the room`);
+  }, [user?.id, user, roomId, room?.name, addParticipant]);
 
   // Debounced search
   useEffect(() => {
@@ -1072,7 +1076,7 @@ function RoomContent() {
                   <TouchableOpacity
                     style={styles.inviteBtn}
                     onPress={() => {
-                      sendRoomInvite(item.id, item.full_name || item.username || 'User');
+                      sendRoomInvite(item);
                       setShowInviteModal(false);
                       setInviteSearch('');
                       setInviteResults([]);

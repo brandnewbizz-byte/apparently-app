@@ -276,7 +276,8 @@ export default function InboxScreen() {
                     const raw = n._raw || {};
                     supabase.from('notifications').delete().eq('id', n.id).then(() => {});
                     setNotifs(prev => prev.filter(x => x.id !== n.id));
-                    if (raw.room_id) router.push(`/(tabs)/live/room/${raw.room_id}` as any);
+                    const inviteRoomId = raw.data?.room_id || raw.room_id;
+                    if (inviteRoomId) router.push(`/(tabs)/live/room/${inviteRoomId}` as any);
                   }}
                 >
                   <Check size={16} color="#10B981" />

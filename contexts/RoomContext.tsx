@@ -89,6 +89,7 @@ interface RoomContextValue {
   }) => Promise<LiveRoom | null>;
   joinRoom: (roomId: string) => void;
   leaveRoom: (roomId: string) => void;
+  addParticipant: (roomId: string, target: { id: string; fullName?: string | null; avatar?: string | null }) => void;
   isInRoom: (roomId: string) => boolean;
   goLive: (roomId: string) => void;
   endLive: (roomId: string) => void;
@@ -347,6 +348,23 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     return newRoom;
   }, [user]);
 
+  // Persist a single participant into the rooms.participants JSON column
+  // (read-modify-write so we never clobber existing members).
+  const persistParticipant = useCallback((roomId: string, participant: RoomParticipant) => {
+    if (!isTableReady.current) return;
+    supabase.from('rooms').select('participants').eq('id', roomId).single()
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        let existing: RoomParticipant[] = [];
+        try {
+          existing = typeof data.participants === 'string' ? JSON.parse(data.participants) : (data.participants || []);
+        } catch { existing = []; }
+        if (existing.some((p: any) => p.userId === participant.userId)) return;
+        const next = [...existing, participant];
+        supabase.from('rooms').update({ participants: JSON.stringify(next) }).eq('id', roomId).then(() => {}, () => {});
+      }, () => {});
+  }, []);
+
   // ── Join room ──
   const joinRoom = useCallback((roomId: string) => {
     setRooms(prev => {
@@ -363,9 +381,10 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         ],
       };
       setCurrentRoom(withUser);
+      persistParticipant(roomId, makeParticipant(user));
       return prev.map(r => r.id === roomId ? withUser : r);
     });
-  }, [user]);
+  }, [user, persistParticipant]);
 
   const leaveRoom = useCallback((roomId: string) => {
     if (!user) return;
@@ -382,6 +401,40 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
       };
     }));
   }, [user]);
+
+  // ── Add / invite a participant (host action) ──
+  const addParticipant = useCallback((roomId: string, target: { id: string; fullName?: string | null; avatar?: string | null }) => {
+    if (!target?.id) return;
+    const participant: RoomParticipant = {
+      userId: target.id,
+      fullName: target.fullName || 'Anonymous',
+      avatar: target.avatar || null,
+      isSpeaking: false,
+      hasCamera: false,
+      role: 'contributor',
+      isMuted: false,
+      followMode: false,
+      handRaised: false,
+    };
+    const apply = (r: LiveRoom): LiveRoom =>
+      r.participants.some(p => p.userId === participant.userId)
+        ? r
+        : {
+            ...r,
+            participants: [...r.participants, participant],
+            activityLog: [{
+              id: seededId(),
+              userId: user?.id || '',
+              userName: user?.fullName || '',
+              action: 'user_invited',
+              detail: `${participant.fullName} was invited to the room`,
+              timestamp: new Date().toISOString(),
+            }, ...r.activityLog],
+          };
+    setRooms(prev => prev.map(r => (r.id === roomId ? apply(r) : r)));
+    setCurrentRoom(prev => (prev && prev.id === roomId ? apply(prev) : prev));
+    persistParticipant(roomId, participant);
+  }, [user, persistParticipant]);
 
   const isInRoom = useCallback((roomId: string) => currentRoom?.id === roomId, [currentRoom]);
 
@@ -840,7 +893,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
 
   const value: RoomContextValue = {
     rooms, currentRoom, isLoading,
-    fetchRooms, createRoom, joinRoom, leaveRoom, isInRoom,
+    fetchRooms, createRoom, joinRoom, leaveRoom, addParticipant, isInRoom,
     goLive, endLive, deleteRoom, generateInviteLink, isRoomLocked, toggleRoomLock,
     startSpeaking, stopSpeaking, toggleCamera,
     toggleRaiseHand,
