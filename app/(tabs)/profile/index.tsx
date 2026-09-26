@@ -46,12 +46,14 @@ import {
   TextInput,
   Dimensions,
   Alert,
+  Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
+import { safeImageUrl } from '@/lib/media';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
@@ -156,7 +158,7 @@ function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPos
   const [error, setError] = useState(false);
 
   // Load user's posts from Supabase — ensures persistence across sessions
-  useEffect(() => {
+  const loadPosts = useCallback(() => {
     if (!authUser?.id) { setLoading(false); return; }
     setError(false);
     supabase
@@ -168,19 +170,34 @@ function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPos
       .limit(100)
       .then(({ data, error: err }) => {
         if (err) { console.log('[UserPosts] Supabase error:', err.message); setError(true); setLoading(false); return; }
-        if (!data || data.length === 0) { setLoading(false); return; }
-        setAllPosts(data.map(p => ({
-          id: p.id,
-          imageUrl: p.image_url,
-          caption: p.content,
-          likes: p.likes || 0,
-          timestamp: p.created_at,
-          type: 'photo',
-          isOwnPost: true,
-        })));
+        // Filter blank posts (no caption AND no valid image) so dead file:// rows don't render as empty tiles
+        const mapped = (data || [])
+          .map(p => ({
+            id: p.id,
+            imageUrl: safeImageUrl(p.image_url) || '',
+            caption: p.content || '',
+            likes: p.likes || 0,
+            timestamp: p.created_at,
+            type: 'photo',
+            isOwnPost: true,
+          }))
+          .filter(p => (p.caption || '').trim() !== '' || p.imageUrl);
+        setAllPosts(mapped);
         setLoading(false);
       });
-  }, [authUser?.id, refreshKey]);
+  }, [authUser?.id]);
+
+  useEffect(() => { loadPosts(); }, [loadPosts, refreshKey]);
+
+  // Live wiring: refresh the grid whenever any of this user's posts changes
+  useEffect(() => {
+    if (!authUser?.id) return;
+    const channel = supabase
+      .channel(`profile-posts-${authUser.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `user_id=eq.${authUser.id}` }, () => loadPosts())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [authUser?.id, loadPosts]);
 
   if (loading) {
     return (
@@ -296,7 +313,7 @@ export default function ProfileScreen() {
   };
 
   // Helper: get deduplicated post count matching the grid display
-  const { getAllPosts, deletePost: socialDeletePost } = useSocial();
+  const { getAllPosts, deletePost: socialDeletePost, updatePost: socialUpdatePost } = useSocial();
   const { userPosts } = useUserPosts();
   const getAllPostsForCount = useCallback(() => {
     const posts = getAllPosts() || [];
@@ -830,6 +847,21 @@ export default function ProfileScreen() {
             }
           });
         }}
+        onEdit={(newCaption: string) => {
+          if (!selectedPost?.id) return;
+          const caption = newCaption.trim();
+          supabase.from('posts').update({ content: caption }).eq('id', selectedPost.id).then(({ error }) => {
+            if (error) {
+              console.log('[Profile] Edit post failed:', error.message);
+              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              Alert.alert('Could not update', 'Something went wrong saving your changes. Please try again.');
+              return;
+            }
+            socialUpdatePost(selectedPost.id, caption);
+            setRefreshKey(k => k + 1); // re-query the grid so the edited caption reflects
+            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          });
+        }}
         colors={colors}
       />
 
@@ -948,7 +980,7 @@ export default function ProfileScreen() {
 // ═══════════════════════════════════════════════════════════════════════════
 // Instagram-Style Fullscreen Post Viewer (profile)
 // ═══════════════════════════════════════════════════════════════════════════
-function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, onReshare, colors }: {
+function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, onReshare, onEdit, colors }: {
   visible: boolean;
   post: any;
   allPosts?: any[];
@@ -956,11 +988,13 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   onNavigate?: (post: any) => void;
   onDelete?: () => void;
   onReshare?: () => void;
+  onEdit?: (newCaption: string) => void;
   colors: any;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
   const bgOpacity = useRef(new Animated.Value(1)).current;
   const { toggleLike: socialLike, addComment: socialComment } = useSocial();
+  const { user: authUser } = useAuth();
   const flatListRef = useRef<FlatList>(null);
 
   const [liked, setLiked] = useState(false);
@@ -971,6 +1005,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const [activeIndex, setActiveIndex] = useState(0);
   const [showComments, setShowComments] = useState(true);
   const [showOptions, setShowOptions] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editText, setEditText] = useState('');
 
   const postsList = allPosts && allPosts.length > 0 ? allPosts : (post ? [post] : []);
   const currentPost = postsList[activeIndex] || post;
@@ -1231,25 +1267,66 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
         onPress={() => setShowOptions(false)}
       >
         <View style={[viewerStyles.optionSheet, { backgroundColor: '#1C1C1E' }]}>
+          {onEdit && (
+            <TouchableOpacity
+              style={viewerStyles.optionItem}
+              onPress={() => {
+                setShowOptions(false);
+                setTimeout(() => {
+                  setEditText(caption || '');
+                  setShowEdit(true);
+                }, 350);
+              }}
+            >
+              <Edit3 size={20} color="#FFFFFF" />
+              <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Edit Post</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={viewerStyles.optionItem}
+            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
             onPress={() => {
               setShowOptions(false);
-              setTimeout(() => {
-                Alert.alert(
-                  'Delete Post',
-                  'This action cannot be undone. Are you sure?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
-                  ]
-                );
-              }, 350);
+              Share.share({ message: caption ? `Check out this post: ${caption}` : 'Check out this post on Apparently' }).catch(() => {});
             }}
           >
-            <Trash2 size={20} color="#EF4444" />
-            <Text style={[viewerStyles.optionText, { color: '#EF4444' }]}>Delete Post</Text>
+            <Forward size={20} color="#FFFFFF" />
+            <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Share Post</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
+            onPress={() => {
+              setShowOptions(false);
+              if (!postId) return;
+              supabase.from('reports').insert({ post_id: postId, reported_by: authUser?.id || null, reason: 'Reported post' }).then(({ error }) => {
+                if (error) { Alert.alert('Could not report', error.message); }
+                else { Alert.alert('Reported', 'Thanks — we will review this post.'); }
+              });
+            }}
+          >
+            <BellRing size={20} color="#FFFFFF" />
+            <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Report Post</Text>
+          </TouchableOpacity>
+          {onDelete && (
+            <TouchableOpacity
+              style={viewerStyles.optionItem}
+              onPress={() => {
+                setShowOptions(false);
+                setTimeout(() => {
+                  Alert.alert(
+                    'Delete Post',
+                    'This action cannot be undone. Are you sure?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
+                    ]
+                  );
+                }, 350);
+              }}
+            >
+              <Trash2 size={20} color="#EF4444" />
+              <Text style={[viewerStyles.optionText, { color: '#EF4444' }]}>Delete Post</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
             onPress={() => setShowOptions(false)}
@@ -1257,6 +1334,36 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
             <X size={20} color="#999" />
             <Text style={[viewerStyles.optionText, { color: '#999' }]}>Cancel</Text>
           </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+
+    {/* Edit caption modal */}
+    <Modal visible={showEdit} transparent animationType="fade" onRequestClose={() => setShowEdit(false)}>
+      <TouchableOpacity style={viewerStyles.optionOverlay} activeOpacity={1} onPress={() => setShowEdit(false)}>
+        <View style={[viewerStyles.editSheet, { backgroundColor: '#1C1C1E' }]}>
+          <Text style={[viewerStyles.optionText, { color: '#FFFFFF', marginBottom: 12, fontWeight: '700' }]}>Edit caption</Text>
+          <TextInput
+            style={viewerStyles.editInput}
+            multiline
+            value={editText}
+            onChangeText={setEditText}
+            placeholder="Write a caption..."
+            placeholderTextColor="#777"
+            maxLength={2000}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 16 }}>
+            <TouchableOpacity onPress={() => setShowEdit(false)}>
+              <Text style={[viewerStyles.optionText, { color: '#999' }]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => {
+              const next = editText.trim();
+              setShowEdit(false);
+              if (onEdit) onEdit(next);
+            }}>
+              <Text style={[viewerStyles.optionText, { color: '#22C55E', fontWeight: '700' }]}>Save</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     </Modal>
@@ -1670,6 +1777,24 @@ const viewerStyles = StyleSheet.create({
   optionSheet: {
     borderRadius: 16,
     overflow: 'hidden',
+  },
+  editSheet: {
+    width: '88%',
+    maxWidth: 420,
+    borderRadius: 16,
+    backgroundColor: '#1C1C1E',
+    padding: 20,
+  },
+  editInput: {
+    minHeight: 90,
+    maxHeight: 200,
+    borderRadius: 10,
+    backgroundColor: '#2A2A2E',
+    color: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    textAlignVertical: 'top',
   },
   optionItem: {
     flexDirection: 'row',

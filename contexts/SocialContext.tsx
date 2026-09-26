@@ -817,8 +817,18 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   }, [ensureStoryInteraction]);
 
   const updatePost = useCallback((postId: string, content: string) => {
-    logger.info('SocialContext', 'Post update requested', { postId });
-  }, []);
+    const safeContent = sanitizeCaption(content);
+    setFeedPosts(prev => prev.map(p => (p.id === postId ? { ...p, content: safeContent } : p)));
+    setUserPosts(prev => prev.map(p => (p.id === postId ? { ...p, content: safeContent } : p)));
+    DatabaseService.updatePost(postId, { content: safeContent }).then(updated => {
+      if (updated) {
+        logger.info('SocialContext', 'Updated post in Supabase', { postId });
+        queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+        queryClient.invalidateQueries({ queryKey: ['userPosts'] });
+      }
+    });
+    logger.info('SocialContext', 'Updated post', { postId });
+  }, [queryClient]);
 
   const deletePost = useCallback((postId: string) => {
     const updated = { ...interactions };
