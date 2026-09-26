@@ -172,11 +172,6 @@ const LIVE_UPDATES: Array<{ name: string; action: string; amount: number; servic
   { name: 'Chris R.', action: 'booked', amount: 320, service: 'Logo Design', time: '23 min ago' },
 ];
 
-const BUNDLE_SET_TABS = [
-  { key: 'recommend', label: 'For You' },
-  { key: 'hot', label: 'Hot' },
-];
-
 interface SwipeableBundlesProps {
   bundles: BundlePlan[];
   onGrab: (bundle: BundlePlan) => void;
@@ -1253,7 +1248,6 @@ export default function HomeScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [liveUpdateIndex, setLiveUpdateIndex] = useState(0);
-  const [bundleSetIndex, setBundleSetIndex] = useState(0);
   const [savedBundles, setSavedBundles] = useState<BundlePlan[]>([]);
   const [savedSkills, setSavedSkills] = useState<SkillDeal[]>([]);
   const [savedRequests, setSavedRequests] = useState<ServiceRequest[]>([]);
@@ -1357,25 +1351,17 @@ export default function HomeScreen() {
     enabled: isAuthenticated,
   });
 
-  // Compute bundle sets from context
-  const bundleSets = useMemo(() => {
+  // Discovery bundles (all available bundles, default order)
+  const discoveryBundles = useMemo(() => {
     const availableBundles = contextBundles.filter((b) => b.status === 'available' || b.status === 'active' || b.status === 'draft' || b.status === 'published');
-    const forYou = availableBundles.map(userBundleToPlan);
-    const hot = [...availableBundles].sort((a, b) => b.grabCount - a.grabCount).map(userBundleToPlan);
-    return [
-      { ...BUNDLE_SET_TABS[0], data: forYou },
-      { ...BUNDLE_SET_TABS[1], data: hot },
-    ];
+    return availableBundles.map(userBundleToPlan);
   }, [contextBundles]);
-
-  const currentBundleSet = bundleSets[bundleSetIndex];
 
   useEffect(() => {
     console.log('Grid load:', {
-      bundles: currentBundleSet.key,
       grabbedCount: grabbedBundles?.length || 0,
     });
-  }, [currentBundleSet.key, grabbedBundles?.length]);
+  }, [grabbedBundles?.length]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1530,7 +1516,7 @@ export default function HomeScreen() {
   const allBundles = useMemo(() => {
     const seen = new Set<string>();
     const deduped: BundlePlan[] = [];
-    for (const source of [currentBundleSet.data, myGrabbedBundles, createdBundles]) {
+    for (const source of [discoveryBundles, myGrabbedBundles, createdBundles]) {
       for (const b of source) {
         if (!seen.has(b.id)) {
           seen.add(b.id);
@@ -1544,7 +1530,7 @@ export default function HomeScreen() {
       const cid = b.creatorId || (b as any).creator_id || '';
       return cid !== uid;
     }) : deduped;
-  }, [currentBundleSet.data, myGrabbedBundles, createdBundles, user?.id]);
+  }, [discoveryBundles, myGrabbedBundles, createdBundles, user?.id]);
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])
@@ -1813,33 +1799,12 @@ export default function HomeScreen() {
               <Gift size={20} color="#7B61FF" />
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Bundles</Text>
             </View>
-            <View style={styles.bundleTabs}>
-              {bundleSets.map((set, i) => (
-                <TouchableOpacity
-                  key={set.key}
-                  style={[
-                    styles.bundleTab,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                    i === bundleSetIndex && styles.bundleTabActive
-                  ]}
-                  onPress={() => setBundleSetIndex(i)}
-                >
-                  <Text style={[
-                    styles.bundleTabText,
-                    { color: colors.textTertiary },
-                    i === bundleSetIndex && styles.bundleTabTextActive
-                  ]}>
-                    {set.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {savedBundles.length > 0 && (
-                <View style={styles.savedBundleBadge}>
-                  <Bookmark size={10} color="#FFF" />
-                  <Text style={styles.savedBundleBadgeText}>{savedBundles.length}</Text>
-                </View>
-              )}
-            </View>
+            {savedBundles.length > 0 && (
+              <View style={styles.savedBundleBadge}>
+                <Bookmark size={10} color="#FFF" />
+                <Text style={styles.savedBundleBadgeText}>{savedBundles.length}</Text>
+              </View>
+            )}
           </View>
 
           <SwipeableBundles
