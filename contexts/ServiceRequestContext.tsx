@@ -234,37 +234,32 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
       ? `$${request.budgetMin}–$${request.budgetMax}`
       : budgetAmount > 0 ? `$${budgetAmount}` : 'TBD';
 
-    // 3. Persist the grab as a job_request so it shows in the responder's "grabbed" list.
+    // 3. Persist the grab as a user_grabs row so it shows in the responder's "grabbed" list.
     (async () => {
       try {
-        const { error } = await supabase.from('job_requests').insert({
+        const now = new Date().toISOString();
+        const { error } = await supabase.from('user_grabs').insert({
           user_id: user.id,
-          requester_id: request.creatorId,
-          type: 'service_request',
+          provider_id: request.creatorId,
+          item_id: request.id,
+          item_type: 'service_request',
           title: request.title,
-          proposed_budget: budgetAmount,
+          price: budgetAmount,
           status: 'pending',
-          request_id: request.id,
-          plan_details: { category: request.category, description: request.description },
+          provider_name: request.createdBy?.name || '',
+          created_at: now,
+          updated_at: now,
+          booked_at: now,
         });
-        if (error) logger.warn('ServiceRequestContext', 'job_request insert failed', { error });
+        if (error) logger.warn('ServiceRequestContext', 'user_grabs insert failed', { error });
       } catch (e) {
-        logger.warn('ServiceRequestContext', 'job_request insert exception', { e });
+        logger.warn('ServiceRequestContext', 'user_grabs insert exception', { e });
       }
     })();
 
     // 4 + 5. Notify requester + find-or-create conversation and send ONE grab DM.
     const actorName = user.fullName || user.username || 'Someone';
     const actorAvatar = (user as any)?.avatarUrl || '';
-    const serviceCard = {
-      type: 'service_card',
-      id: request.id,
-      title: request.title,
-      description: request.description || '',
-      category: request.category || '',
-      price: budgetAmount || '',
-      requester_name: request.createdBy?.name || '',
-    };
 
     supabase.from('notifications').insert({
       user_id: request.creatorId,
@@ -307,9 +302,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
-          receiver_id: request.creatorId,
           content: `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`,
-          metadata: { service_card: serviceCard },
           created_at: new Date().toISOString(),
           read: false,
         });

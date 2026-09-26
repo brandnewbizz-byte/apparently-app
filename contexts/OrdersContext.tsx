@@ -153,14 +153,12 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     if (!order.itemId) return;
     try {
       if (order.kind === 'service') {
+        // Service grabs live in user_grabs (item_id = service request id, user_id = responder).
         await supabase
-          .from('job_requests')
+          .from('user_grabs')
           .update({ status })
-          .eq('status', 'pending')
-          .match({
-            request_id: order.itemId,
-            user_id: order.buyerId, // the responder's grab
-          });
+          .eq('item_id', order.itemId)
+          .eq('user_id', order.buyerId);
         return;
       }
       await supabase.from(ITEM_TABLE[order.kind]).update({ status }).eq('id', order.itemId);

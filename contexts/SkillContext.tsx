@@ -192,17 +192,29 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     // Create inbox notification + auto-create DM for the skill owner
     if (skill?.creatorId && user?.id && skill.creatorId !== user.id) {
       const grabMessage = `👋 I'm interested in your skill "${skill.title}" — let's chat!`;
-      const skillCard = {
-        type: 'skill_card',
-        id: skill.id,
-        title: skill.title,
-        description: skill.description || '',
-        category: skill.category || '',
-        price: skill.price || '',
-        image_url: skill.imageUrl || '',
-        creator_name: skill.creator?.name || '',
-      };
-      // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
+      // 1. Persist the grab as a user_grabs row (responder's "grabbed" list).
+      (async () => {
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase.from('user_grabs').insert({
+            user_id: user.id,
+            provider_id: skill.creatorId,
+            item_id: skill.id,
+            item_type: 'skill',
+            title: skill.title,
+            price: Number(skill.price || 0),
+            status: 'pending',
+            provider_name: skill.creator?.name || '',
+            created_at: now,
+            updated_at: now,
+            booked_at: now,
+          });
+          if (error) logger.warn('SkillContext', 'user_grabs insert failed', { error });
+        } catch (e) {
+          logger.warn('SkillContext', 'user_grabs insert exception', { e });
+        }
+      })();
+      // 2. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
       const actorAvatar = (user as any)?.avatarUrl || '';
       supabase.from('notifications').insert({
@@ -254,7 +266,6 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           conversation_id: conversationId,
           sender_id: user.id,
           content: grabMessage,
-          metadata: { skill_card: skillCard },
           created_at: new Date().toISOString(),
           read: false,
         });

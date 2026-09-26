@@ -1005,15 +1005,6 @@ export default function PlannerScreen() {
         </View>
       )}
 
-      {mode !== 'allplans' && (
-        <MonthCalendar
-          selectedDate={selectedDate}
-          onSelectDate={setSelectedDate}
-          datesWithPlans={datesWithPlans}
-          colors={colors}
-        />
-      )}
-
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -1022,6 +1013,15 @@ export default function PlannerScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
+        {mode !== 'allplans' && (
+          <MonthCalendar
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            datesWithPlans={datesWithPlans}
+            colors={colors}
+          />
+        )}
+
         {mode === 'allplans' ? (
           <View style={styles.plansList}>
             {plansByDate.length === 0 ? (

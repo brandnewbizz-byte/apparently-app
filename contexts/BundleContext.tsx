@@ -217,17 +217,29 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
       const grabMessage = `👋 I'm interested in your bundle "${bundle.title}" — let's chat!`;
-      const bundleCard = {
-        type: 'bundle_card',
-        id: bundle.id,
-        title: bundle.title,
-        description: bundle.description || '',
-        category: bundle.category || '',
-        price: bundle.price || '',
-        image_url: bundle.imageUrl || '',
-        creator_name: bundle.creator?.name || '',
-      };
-      // 1. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
+      // 1. Persist the grab as a user_grabs row (responder's "grabbed" list).
+      (async () => {
+        try {
+          const now = new Date().toISOString();
+          const { error } = await supabase.from('user_grabs').insert({
+            user_id: user.id,
+            provider_id: bundle.creatorId,
+            item_id: bundle.id,
+            item_type: 'bundle',
+            title: bundle.title,
+            price: Number(bundle.price || 0),
+            status: 'pending',
+            provider_name: bundle.creator?.name || '',
+            created_at: now,
+            updated_at: now,
+            booked_at: now,
+          });
+          if (error) logger.warn('BundleContext', 'user_grabs insert failed', { error });
+        } catch (e) {
+          logger.warn('BundleContext', 'user_grabs insert exception', { e });
+        }
+      })();
+      // 2. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
       const actorAvatar = (user as any)?.avatarUrl || '';
       supabase.from('notifications').insert({
@@ -279,7 +291,6 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           conversation_id: conversationId,
           sender_id: user.id,
           content: grabMessage,
-          metadata: { bundle_card: bundleCard },
           created_at: new Date().toISOString(),
           read: false,
         });
