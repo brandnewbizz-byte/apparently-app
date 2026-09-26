@@ -194,19 +194,22 @@ export default function UserProfileScreen() {
       ? { field: 'follower_id', val: userId }
       : { field: 'following_id', val: userId };
 
-    const { data, error } = await supabase
+    const { data: follows } = await supabase
       .from('follows')
-      .select(`${joinField}, profiles:${joinField}(id, full_name, username, avatar)`)
+      .select(joinField)
       .eq(field, userId)
       .neq(selfExclude.field, selfExclude.val)
       .limit(50);
 
-    if (!error && data) {
-      const users = data
-        .map((f: any) => f.profiles)
-        .filter(Boolean)
-        .filter((u: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.id === u.id) === i);
-      setDetailUsers(users);
+    if (follows && follows.length > 0) {
+      const ids = follows.map((f: any) => f[joinField]);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, avatar')
+        .in('id', ids);
+      setDetailUsers(profiles || []);
+    } else {
+      setDetailUsers([]);
     }
     setDetailLoading(false);
   }, [userId]);
