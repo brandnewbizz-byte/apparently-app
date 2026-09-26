@@ -328,18 +328,22 @@ export default function ProfileScreen() {
     return uniqueSocial.length + userPosts.length;
   }, [getAllPosts, userPosts]);
   
-  // Direct Supabase post count — always matches the grid (same query, same filter)
+  // Direct Supabase post count — applies the SAME blank-post filter as the grid so the header number matches what's actually shown
   const [userPostsCount, setUserPostsCount] = useState<number | null>(null);
   const fetchPostCount = useCallback(async () => {
     if (!user?.id) return;
-    const { count, error } = await supabase
+    const { data, error } = await supabase
       .from('posts')
-      .select('id', { count: 'exact', head: true })
+      .select('id, content, image_url')
       .eq('user_id', user.id)
-      .or('post_kind.is.null,post_kind.neq.reshare');
-    if (!error && count !== null) setUserPostsCount(count);
+      .or('post_kind.is.null,post_kind.neq.reshare')
+      .limit(100);
+    if (!error && data) {
+      const valid = (data || []).filter(p => (p.content || '').trim() !== '' || safeImageUrl(p.image_url));
+      setUserPostsCount(valid.length);
+    }
   }, [user?.id]);
-  useEffect(() => { fetchPostCount(); }, [fetchPostCount]);
+  useEffect(() => { fetchPostCount(); }, [fetchPostCount, refreshKey]);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -1256,11 +1260,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
           </View>
         </Animated.View>
         )}
-      </Animated.View>
-    </Modal>
-
-    {/* Options action sheet */}
-    <Modal visible={showOptions} transparent animationType="fade" onRequestClose={() => setShowOptions(false)}>
+    {/* Options action sheet (overlay inside the viewer modal) */}
+    {showOptions && (
       <TouchableOpacity
         style={viewerStyles.optionOverlay}
         activeOpacity={1}
@@ -1336,11 +1337,11 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
-    </Modal>
+    )}
 
-    {/* Edit caption modal */}
-    <Modal visible={showEdit} transparent animationType="fade" onRequestClose={() => setShowEdit(false)}>
-      <TouchableOpacity style={viewerStyles.optionOverlay} activeOpacity={1} onPress={() => setShowEdit(false)}>
+    {/* Edit caption (overlay inside the viewer modal) */}
+    {showEdit && (
+      <TouchableOpacity style={viewerStyles.editOverlay} activeOpacity={1} onPress={() => setShowEdit(false)}>
         <View style={[viewerStyles.editSheet, { backgroundColor: '#1C1C1E' }]}>
           <Text style={[viewerStyles.optionText, { color: '#FFFFFF', marginBottom: 12, fontWeight: '700' }]}>Edit caption</Text>
           <TextInput
@@ -1366,6 +1367,8 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
           </View>
         </View>
       </TouchableOpacity>
+    )}
+      </Animated.View>
     </Modal>
   </>
   );
@@ -1768,11 +1771,20 @@ const viewerStyles = StyleSheet.create({
     backgroundColor: '#1a1a1a', borderRadius: 20, padding: 24, alignItems: 'center',
   },
   optionOverlay: {
-    flex: 1,
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'flex-end',
     paddingBottom: 40,
     paddingHorizontal: 16,
+    zIndex: 30,
+  },
+  editOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    zIndex: 40,
   },
   optionSheet: {
     borderRadius: 16,
