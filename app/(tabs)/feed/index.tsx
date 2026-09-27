@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   Dimensions,
   FlatList,
   Image as RNImage,
@@ -609,6 +610,34 @@ export default function FeedScreen() {
   // ── Full-screen snap paging: measured viewport height for each 'page' ──
   const [feedHeight, setFeedHeight] = useState(0);
 
+  // ── Scroll-away header: hides on scroll up, reappears on scroll down ──
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const headerHeight = useRef(0);
+  const headerVisible = useRef(true);
+  const lastHeaderScrollY = useRef(0);
+
+  const showHeader = useCallback(() => {
+    if (!headerVisible.current) {
+      headerVisible.current = true;
+      Animated.spring(headerTranslateY, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
+    }
+  }, [headerTranslateY]);
+
+  const hideHeader = useCallback(() => {
+    if (headerVisible.current && headerHeight.current > 0) {
+      headerVisible.current = false;
+      Animated.spring(headerTranslateY, { toValue: -headerHeight.current, useNativeDriver: true, tension: 100, friction: 12 }).start();
+    }
+  }, [headerTranslateY]);
+
+  const handleHeaderScroll = useCallback((currentY: number) => {
+    const diff = currentY - lastHeaderScrollY.current;
+    if (currentY <= 0) showHeader();
+    else if (diff > 10) hideHeader();
+    else if (diff < -5) showHeader();
+    lastHeaderScrollY.current = currentY;
+  }, [showHeader, hideHeader]);
+
   // Load saved post IDs from Supabase
   useEffect(() => {
     if (!authUser?.id) return;
@@ -1028,8 +1057,11 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      {/* Header — scroll-away overlay (hides on scroll up, shows on scroll down) */}
+      <Animated.View
+        onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
+        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }, styles.headerOverlay, { transform: [{ translateY: headerTranslateY }] }]}
+      >
         <View style={styles.headerRow}>
           {/* Filter tabs — page identity (left), icon-free, active underline */}
           <View style={styles.filterTabs}>
@@ -1067,6 +1099,18 @@ export default function FeedScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Tag filter active indicator */}
+        {tagFilter && (
+          <View style={[styles.tagFilterBar, { borderBottomColor: colors.border }]}>
+            <View style={[styles.tagFilterPill, { backgroundColor: colors.accent + '15' }]}>
+              <Text style={[styles.tagFilterText, { color: colors.accent }]}>#{tagFilter}</Text>
+              <TouchableOpacity onPress={() => setTagFilter(null)}>
+                <X size={12} color={colors.accent} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* ── Stories Row (fixed header) ── */}
         {storyUsers.length > 0 && (
@@ -1140,24 +1184,12 @@ export default function FeedScreen() {
           </View>
         )}
 
-      </View>
-
-      {/* Tag filter active indicator */}
-      {tagFilter && (
-        <View style={[styles.tagFilterBar, { borderBottomColor: colors.border }]}>
-          <View style={[styles.tagFilterPill, { backgroundColor: colors.accent + '15' }]}>
-            <Text style={[styles.tagFilterText, { color: colors.accent }]}>#{tagFilter}</Text>
-            <TouchableOpacity onPress={() => setTagFilter(null)}>
-              <X size={12} color={colors.accent} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      </Animated.View>
 
       {isInitialLoad ? (
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: insets.bottom + 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
         >
           <SkeletonCard count={5} shimmerColor={colors.accent + '30'} baseColor={colors.surface} />
@@ -1189,7 +1221,11 @@ export default function FeedScreen() {
           )}
           contentContainerStyle={{ paddingBottom: 0 }}
           showsVerticalScrollIndicator={false}
-          onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            handleTabBarScroll(y);
+            handleHeaderScroll(y);
+          }}
           scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
           pagingEnabled
@@ -1302,12 +1338,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   // Header
   header: { paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Filters
   filterTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  filterTab: { paddingHorizontal: 10, paddingVertical: 4, alignItems: 'center' },
+  filterTab: { flex: 1, alignItems: 'center', paddingVertical: 4 },
   filterTabText: { fontSize: 15, fontWeight: '600' },
   filterTabIndicator: { height: 2, borderRadius: 1, marginTop: 3, alignSelf: 'stretch' },
   // Card
