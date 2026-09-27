@@ -183,7 +183,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
           const messages: Message[] = (msgs || []).map((m: any) => ({
             id: m.id, text: m.content || '', content: m.content,
-            senderId: m.sender_id, receiverId: otherId,
+            senderId: m.sender_id,
+            receiverId: m.receiver_id || (m.sender_id === authUser.id ? otherId : authUser.id),
             timestamp: m.created_at, read: m.read,
             metadata: m.metadata || undefined,
           }));
@@ -339,7 +340,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             .order('created_at', { ascending: true });
           const messages: Message[] = (msgs || []).map((m: any) => ({
             id: m.id, text: m.content || '', content: m.content,
-            senderId: m.sender_id, receiverId: otherId,
+            senderId: m.sender_id,
+            receiverId: m.receiver_id || (m.sender_id === me ? otherId : me),
             timestamp: m.created_at, read: m.read,
             metadata: m.metadata || undefined,
           }));

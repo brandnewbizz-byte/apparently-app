@@ -8,6 +8,7 @@ import * as localApi from '@/lib/api';
 import type { DbUser } from '@/lib/database.types';
 import type { MarketplaceProfile } from '@/mocks/data';
 import { logger } from '@/lib/logger';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
 export type ConnectionStatus = 'pending' | 'approved' | 'rejected';
@@ -239,6 +240,85 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     }
   }, [query.data]);
 
+  // Load real connection requests (incoming + outgoing) from Supabase so the
+  // Requests tab reflects requests that actually reach other users.
+  useEffect(() => {
+    const me = authUser?.id;
+    if (!me || me === 'u-dev') return;
+
+    (async () => {
+      try {
+        const [incoming, outgoing] = await Promise.all([
+          supabase.from('connection_requests').select('*').eq('target_user_id', me).eq('status', 'pending'),
+          supabase.from('connection_requests').select('*').eq('user_id', me).eq('status', 'pending'),
+        ]);
+        const rows = [...(incoming.data || []), ...(outgoing.data || [])];
+        if (!rows.length) return;
+
+        const counterpartIds = rows.map((r: any) => (r.user_id === me ? r.target_user_id : r.user_id));
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name, username, avatar')
+          .in('id', [...new Set(counterpartIds)]);
+        const pm = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+        const baseProfile = (id: string, name = 'User'): MarketplaceProfile => ({
+          id,
+          name,
+          username: '',
+          avatar: '',
+          location: '',
+          distance: 0,
+          skills: [],
+          bio: '',
+          lookingFor: 'networking',
+          category: '',
+          verified: false,
+          rating: 0,
+          reviewCount: 0,
+          availability: 'offline',
+        });
+        const meProfile: MarketplaceProfile = {
+          ...baseProfile(me, 'You'),
+          username: 'you',
+          location: 'New York, NY',
+          skills: ['Networking'],
+          bio: 'Looking to connect!',
+          rating: 5.0,
+          availability: 'available',
+        };
+
+        const requests: ConnectionRequest[] = rows.map((r: any) => {
+          const isIncoming = r.target_user_id === me;
+          const cid = isIncoming ? r.user_id : r.target_user_id;
+          const p = pm.get(cid);
+          const counterpart = p
+            ? { ...baseProfile(cid, p.full_name || p.username || 'User'), username: p.username || '', avatar: p.avatar || '' }
+            : baseProfile(cid);
+          return {
+            id: r.id,
+            fromUserId: r.user_id,
+            toUserId: r.target_user_id,
+            fromProfile: isIncoming ? counterpart : meProfile,
+            toProfile: isIncoming ? meProfile : counterpart,
+            status: r.status as ConnectionStatus,
+            message: r.message || undefined,
+            createdAt: r.created_at,
+            updatedAt: r.created_at,
+          };
+        });
+
+        setState(prev => {
+          const existing = new Set(prev.requests.map(x => x.id));
+          const fresh = requests.filter(x => !existing.has(x.id));
+          return fresh.length ? { ...prev, requests: [...prev.requests, ...fresh] } : prev;
+        });
+      } catch (e) {
+        logger.warn('ConnectionsContext', 'Supabase request sync failed', { error: String(e) });
+      }
+    })();
+  }, [authUser?.id]);
+
   const { mutate: saveState } = saveMutation;
 
   const persistState = useCallback((next: ConnectionsState) => {
@@ -296,6 +376,27 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     };
     persistState(updated);
     logger.info('ConnectionsContext', 'Sent request to', { name: toProfile.name });
+
+    // Persist to Supabase so the recipient actually receives + can approve/reject it.
+    if (CURRENT_USER_ID && CURRENT_USER_ID !== 'u-dev') {
+      (async () => {
+        try {
+          const { data: row } = await supabase
+            .from('connection_requests')
+            .insert({ user_id: CURRENT_USER_ID, target_user_id: toProfile.id, message: message || null, status: 'pending', created_at: now })
+            .select('id')
+            .single();
+          if (row?.id) {
+            setState(prev => ({
+              ...prev,
+              requests: prev.requests.map(r => (r.id === newRequest.id ? { ...r, id: row.id } : r)),
+            }));
+          }
+        } catch (e) {
+          logger.warn('ConnectionsContext', 'Persist connection request failed', { error: String(e) });
+        }
+      })();
+    }
     return newRequest;
   }, [state, persistState]);
 
@@ -358,6 +459,17 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     };
     persistState(updated);
     logger.info('ConnectionsContext', 'Approved request from', { name: request.fromProfile.name });
+
+    // Persist approval to Supabase so the sender sees the request was accepted.
+    if (CURRENT_USER_ID && CURRENT_USER_ID !== 'u-dev') {
+      (async () => {
+        try {
+          await supabase.from('connection_requests').update({ status: 'approved' }).eq('id', requestId);
+        } catch (e) {
+          logger.warn('ConnectionsContext', 'Persist approve failed', { error: String(e) });
+        }
+      })();
+    }
   }, [state, persistState]);
 
   const rejectRequest = useCallback((requestId: string) => {
@@ -372,6 +484,17 @@ export const [ConnectionsProvider, useConnections] = createContextHook(() => {
     };
     persistState(updated);
     logger.info('ConnectionsContext', 'Rejected request', { requestId });
+
+    // Persist rejection to Supabase.
+    if (CURRENT_USER_ID && CURRENT_USER_ID !== 'u-dev') {
+      (async () => {
+        try {
+          await supabase.from('connection_requests').update({ status: 'rejected' }).eq('id', requestId);
+        } catch (e) {
+          logger.warn('ConnectionsContext', 'Persist reject failed', { error: String(e) });
+        }
+      })();
+    }
   }, [state, persistState]);
 
   const deleteRequest = useCallback((requestId: string) => {

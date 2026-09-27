@@ -196,8 +196,8 @@ export default function InboxScreen() {
                 } else if (n.type === 'follow') {
                   router.push(`/user/${n.senderId}` as any);
                 } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
-                  const ownerId = n.data?.post_user_id;
-                  if (ownerId) router.push(`/user/${ownerId}` as any);
+                  // Open the actor's profile (who liked/commented/mentioned you).
+                  router.push(`/user/${n.senderId}` as any);
                 }
               }}
             >
