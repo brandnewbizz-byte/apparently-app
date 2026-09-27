@@ -1,4 +1,4 @@
-import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Star, Phone, Video } from 'lucide-react-native';
+import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Phone } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -349,7 +349,7 @@ export default function InboxScreen() {
           activeOpacity={0.8}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/inbox/${conv.participantId}` as any);
+            router.push(`/inbox/conversation/${conv.participantId}` as any);
           }}
           onLongPress={() => {
             Alert.alert('Delete Thread', `Remove conversation with ${conv.participantName}?`, [

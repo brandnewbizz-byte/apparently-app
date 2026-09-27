@@ -10,7 +10,6 @@ import {
   Platform,
   ScrollView,
   Image,
-  Linking,
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -45,22 +44,78 @@ export default function ConversationScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const conversation = getConversation(participantId || '');
+  const [fetchedProfile, setFetchedProfile] = useState<{ name: string; username: string; avatar: string } | null>(null);
+
+  // Fetch the participant's profile directly so name/avatar show correctly even
+  // for brand-new conversations (where no MessagingContext entry exists yet).
+  useEffect(() => {
+    if (!participantId || conversation) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, avatar')
+        .eq('id', participantId)
+        .maybeSingle();
+      if (!cancelled && data) {
+        setFetchedProfile({
+          name: data.full_name || data.username || 'Unknown',
+          username: data.username || 'unknown',
+          avatar: data.avatar || '',
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [participantId, conversation]);
+
   const participant = {
     id: participantId || '',
-    name: conversation?.participantName || 'Unknown',
-    username: conversation?.participantUsername || 'unknown',
-    avatar: conversation?.participantAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+    name: conversation?.participantName || fetchedProfile?.name || 'Unknown',
+    username: conversation?.participantUsername || fetchedProfile?.username || 'unknown',
+    avatar: conversation?.participantAvatar || fetchedProfile?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
     isVerified: false,
     followersCount: 0,
   };
 
-  const myAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
+  const myAvatar = (authUser as any)?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
 
   useEffect(() => {
     if (participantId) {
       markConversationAsRead(participantId);
     }
   }, [participantId, markConversationAsRead]);
+
+  const startCall = async () => {
+    if (!authUser?.id || !participantId) return;
+    const callRoomId = `call-${Date.now()}`;
+    try {
+      await supabase.from('notifications').insert({
+        user_id: participantId,
+        actor_id: authUser.id,
+        type: 'call_request',
+        title: `${(authUser as any)?.fullName || 'Someone'} is calling you`,
+        body: 'is calling you...',
+        data: { room_id: callRoomId, caller_id: authUser.id },
+        read: false,
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('[Call] notification insert failed', e);
+    }
+    router.push({
+      pathname: '/call/[roomId]' as any,
+      params: {
+        roomId: callRoomId,
+        callerId: authUser.id,
+        callerName: (authUser as any)?.fullName || 'You',
+        targetId: participantId,
+        targetName: participant.name,
+        isOutgoing: '1',
+        currentUserId: authUser.id,
+        currentUserName: (authUser as any)?.fullName || 'You',
+      },
+    } as any);
+  };
 
   // ── Voice recording ──
   const startRecording = async () => {
@@ -174,7 +229,34 @@ export default function ConversationScreen() {
     setMentionQuery('');
   };
 
-  const filteredUsers: { id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[] = [];
+  const [mentionUsers, setMentionUsers] = useState<{ id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[]>([]);
+
+  // Fetch mention suggestions when the user types @ (e.g. "@john").
+  useEffect(() => {
+    if (!mentionQuery || mentionQuery.length < 2) {
+      setMentionUsers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, avatar')
+        .or(`full_name.ilike.%${mentionQuery}%,username.ilike.%${mentionQuery}%`)
+        .limit(5);
+      if (!cancelled) {
+        setMentionUsers((data || []).map((u: any) => ({
+          id: u.id,
+          name: u.full_name || u.username || '',
+          username: u.username || '',
+          avatar: u.avatar || '',
+          isVerified: false,
+          followersCount: 0,
+        })));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mentionQuery]);
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -385,13 +467,10 @@ export default function ConversationScreen() {
         <TouchableOpacity
           style={[styles.callButton, { backgroundColor: colors.accent + '20' }]}
           onPress={() => {
-            if (Platform.OS === 'web') {
-              Alert.alert('Call', `Call ${participant.name}?`);
-            } else {
-              Linking.openURL(`tel:555-123-4567`).catch(() => {
-                Alert.alert('Unable to Call', 'Phone calls are not supported on this device.');
-              });
-            }
+            Alert.alert('Call', `Call ${participant.name}?`, [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Call', onPress: startCall },
+            ]);
           }}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
@@ -447,14 +526,14 @@ export default function ConversationScreen() {
           })}
         </ScrollView>
 
-        {showMentionSuggestions && filteredUsers.length > 0 && (
+        {showMentionSuggestions && mentionUsers.length > 0 && (
           <View style={[styles.mentionSuggestions, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.mentionSuggestionsContent}
             >
-              {filteredUsers.map((user) => (
+              {mentionUsers.map((user) => (
                 <TouchableOpacity
                   key={user.id}
                   style={[styles.mentionSuggestion, { backgroundColor: colors.background, borderColor: colors.border }]}

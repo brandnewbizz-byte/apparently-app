@@ -15,7 +15,7 @@ export default function InboxLayout() {
       }}
     >
       <Stack.Screen name="index" />
-      <Stack.Screen name="[notificationId]" />
+      <Stack.Screen name="conversation/[participantId]" />
     </Stack>
   );
 }

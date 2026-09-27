@@ -91,7 +91,7 @@ export default function OrdersScreen() {
       return;
     }
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/inbox/${order.buyerId}` as any);
+    router.push(`/inbox/conversation/${order.buyerId}` as any);
   };
 
   const renderEmpty = () => (

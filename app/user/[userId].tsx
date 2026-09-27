@@ -371,7 +371,7 @@ export default function UserProfileScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.followBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
-                      onPress={() => router.push(`/inbox/${userId}` as any)}
+                      onPress={() => router.push(`/inbox/conversation/${userId}` as any)}
                     >
                       <MessageCircle size={18} color="#FFFFFF" />
                       <Text style={[styles.followBtnText, { color: '#FFFFFF' }]}>Message</Text>
