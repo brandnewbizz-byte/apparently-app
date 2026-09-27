@@ -1031,8 +1031,26 @@ export default function FeedScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <View style={styles.headerRow}>
-          <View>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Feed</Text>
+          {/* Filter tabs — page identity (left), icon-free, active underline */}
+          <View style={styles.filterTabs}>
+            {FILTERS.map((f) => {
+              const isActive = activeFilter === f.key;
+              return (
+                <TouchableOpacity
+                  key={f.key}
+                  style={styles.filterTab}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setActiveFilter(f.key);
+                  }}
+                >
+                  <Text style={[styles.filterTabText, { color: isActive ? colors.text : colors.textTertiary }]}>
+                    {f.label}
+                  </Text>
+                  <View style={[styles.filterTabIndicator, { backgroundColor: isActive ? colors.accent : 'transparent' }]} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -1048,28 +1066,6 @@ export default function FeedScreen() {
               <MessageCircle size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Filter tabs — segmented, icon-free, active underline */}
-        <View style={[styles.filterTabs, { borderBottomColor: colors.border }]}>
-          {FILTERS.map((f) => {
-            const isActive = activeFilter === f.key;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={styles.filterTab}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveFilter(f.key);
-                }}
-              >
-                <Text style={[styles.filterTabText, { color: isActive ? colors.text : colors.textTertiary }]}>
-                  {f.label}
-                </Text>
-                <View style={[styles.filterTabIndicator, { backgroundColor: isActive ? colors.accent : 'transparent' }]} />
-              </TouchableOpacity>
-            );
-          })}
         </View>
 
         {/* ── Stories Row (fixed header) ── */}
@@ -1305,16 +1301,15 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   // Header
-  header: { paddingHorizontal: 16, paddingBottom: 6, borderBottomWidth: 1 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  header: { paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Filters
-  filterTabs: { flexDirection: 'row', paddingHorizontal: 12, marginTop: 10, marginBottom: 4, borderBottomWidth: 1 },
-  filterTab: { flex: 1, alignItems: 'center', paddingBottom: 8 },
-  filterTabText: { fontSize: 14, fontWeight: '600' },
-  filterTabIndicator: { height: 2, borderRadius: 1, marginTop: 6, alignSelf: 'stretch' },
+  filterTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  filterTab: { paddingHorizontal: 10, paddingVertical: 4, alignItems: 'center' },
+  filterTabText: { fontSize: 15, fontWeight: '600' },
+  filterTabIndicator: { height: 2, borderRadius: 1, marginTop: 3, alignSelf: 'stretch' },
   // Card
   card: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
