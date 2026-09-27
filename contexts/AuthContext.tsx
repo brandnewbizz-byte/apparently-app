@@ -7,7 +7,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import { isLocalFileUri } from '@/lib/media';
-import { sanitizeBio, sanitizeFullName, sanitizeLocation } from '@/lib/sanitize';
+import { generateUsername, sanitizeBio, sanitizeFullName, sanitizeLocation } from '@/lib/sanitize';
 import { syncUserAvatar } from '@/lib/avatar-sync';
 import type { Session } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
@@ -128,10 +128,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     // otherwise keep the current avatar.
     const dbAvatar = dbProfile.avatar;
     const resolvedAvatar = (dbAvatar && dbAvatar.length > 0) ? dbAvatar : currentUser.avatar;
+    // Auto-assign a generic unique username if the account never chose one.
+    let username = dbProfile.username ?? currentUser.username ?? null;
+    if (!username || !username.trim()) {
+      username = generateUsername(userId);
+      supabase
+        .from('profiles')
+        .upsert({ id: userId, username }, { onConflict: 'id' })
+        .then(({ error }) => {
+          if (error) logger.error('Auth', 'username auto-assign upsert error', { message: error.message });
+        });
+    }
     const updated: UserProfile = {
       ...currentUser,
       fullName: dbProfile.full_name ?? currentUser.fullName,
-      username: dbProfile.username ?? currentUser.username,
+      username,
       bio: dbProfile.bio ?? currentUser.bio,
       location: dbProfile.location ?? currentUser.location,
       avatar: resolvedAvatar,
@@ -149,7 +160,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       const dbName = dbProfile?.full_name ?? null;
       const phone = dbProfile?.phone ?? cached?.phone ?? null;
-      const username = dbProfile?.username ?? cached?.username ?? null;
+      let username = dbProfile?.username ?? cached?.username ?? null;
+      if (!username || !username.trim()) {
+        username = generateUsername(userId);
+        supabase
+          .from('profiles')
+          .upsert({ id: userId, username }, { onConflict: 'id' })
+          .then(({ error }) => {
+            if (error) logger.error('Auth', 'username auto-assign (build) upsert error', { message: error.message });
+          });
+      }
       const bio = dbProfile?.bio ?? cached?.bio ?? null;
       const location = dbProfile?.location ?? cached?.location ?? null;
 

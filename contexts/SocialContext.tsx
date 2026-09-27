@@ -9,7 +9,7 @@ import { Post, Story } from '@/mocks/data';
 import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import { isLocalFileUri } from '@/lib/media';
-import { sanitizeCaption } from '@/lib/sanitize';
+import { sanitizeCaption, generateUsername } from '@/lib/sanitize';
 import { persistableImageUri } from '@/lib/storage';
 import { queueAction, dequeueAction } from '@/lib/offlineQueue';
 import { useOfflineRetry } from '@/hooks/useOfflineRetry';
@@ -887,7 +887,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
                   user: {
                     id: p.user_id,
                     name: joinedUser?.name || p.author_name || 'Unknown',
-                    username: joinedUser?.username || p.author_username || 'unknown',
+                    username: joinedUser?.username || p.author_username || generateUsername(p.user_id),
                     avatar: joinedUser?.avatar || p.author_avatar || '',
                     isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
                     followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
@@ -996,7 +996,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           user: {
             id: p.user_id,
             name: joinedUser?.name || p.author_name || 'Unknown',
-            username: joinedUser?.username || p.author_username || 'unknown',
+            username: joinedUser?.username || p.author_username || generateUsername(p.user_id),
             avatar: joinedUser?.avatar || p.author_avatar || '',
             isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
             followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,

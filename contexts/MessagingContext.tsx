@@ -7,6 +7,7 @@ import { Post } from '@/mocks/data';
 import { logger } from '@/lib/logger';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { generateUsername } from '@/lib/sanitize';
 
 export interface SharedPost {
   post: Post;
@@ -161,7 +162,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             if (profile) {
               profileName = profile.full_name || profile.username || 'User';
               profileAvatar = profile.avatar || '';
-              profileUsername = profile.username || 'user';
+              profileUsername = profile.username || generateUsername(otherId);
             }
           } catch {
             // Fall back to defaults
@@ -334,7 +335,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             if (p) {
               profileName = p.full_name || p.username || 'User';
               profileAvatar = p.avatar || '';
-              profileUsername = p.username || 'user';
+              profileUsername = p.username || generateUsername(otherId);
             }
           } catch {}
           const { data: msgs } = await supabase
@@ -399,7 +400,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       participantId,
       participantName: participantInfo?.name || 'Unknown User',
       participantAvatar: participantInfo?.avatar || '',
-      participantUsername: participantInfo?.username || 'unknown',
+      participantUsername: participantInfo?.username || generateUsername(participantId),
       messages: [],
       lastMessageAt: new Date().toISOString(),
       unreadCount: 0,

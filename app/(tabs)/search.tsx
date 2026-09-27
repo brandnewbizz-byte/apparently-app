@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { generateUsername } from '@/lib/sanitize';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -139,7 +140,7 @@ export default function SearchScreen() {
         const mapped: UserResult[] = ((userRes.data as ProfileRow[]) || []).map(p => ({
           id: p.id,
           name: p.full_name || p.username || 'User',
-          username: p.username || '',
+          username: p.username || generateUsername(p.id),
           avatar: p.avatar || '',
           is_verified: false,
           bio: p.bio || undefined,
@@ -320,7 +321,7 @@ export default function SearchScreen() {
           <View style={styles.nameRow}>
             <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{item.user?.name || 'User'}</Text>
             <AtSign size={12} color={colors.textTertiary} />
-            <Text style={[styles.metaText, { color: colors.textTertiary }]}>{item.user?.username || 'unknown'}</Text>
+            <Text style={[styles.metaText, { color: colors.textTertiary }]}>{item.user?.username || generateUsername(item.user_id)}</Text>
           </View>
           <Text style={[styles.postPreview, { color: colors.textSecondary }]} numberOfLines={2}>{item.content}</Text>
           <View style={styles.postMeta}>

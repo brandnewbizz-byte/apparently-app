@@ -971,7 +971,7 @@ export default function ProfileScreen() {
                     )}
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text }} numberOfLines={1}>{item.full_name || 'Unknown'}</Text>
-                      <Text style={{ fontSize: 13, color: colors.textSecondary }}>@{item.username || 'unknown'}</Text>
+                      <Text style={{ fontSize: 13, color: colors.textSecondary }}>@{item.username || 'user'}</Text>
                     </View>
                     <ChevronRight size={20} color={colors.textSecondary} />
                   </TouchableOpacity>
@@ -1024,7 +1024,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const currentPost = postsList[activeIndex] || post;
   const postId = currentPost?.id || '';
   const imageUrl = currentPost?.imageUrl || currentPost?.image_url || currentPost?.mediaUri || '';
-  const authorName = currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || '@user';
+  const authorName = currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || currentPost?.user?.username || 'User';
   const caption = currentPost?.caption || currentPost?.content || '';
   const timestamp = currentPost?.timestamp || currentPost?.created_at || '';
 
@@ -1240,7 +1240,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
               <Text style={viewerStyles.noComments}>No comments yet. Be the first!</Text>
             ) : (
               comments.map((c, i) => {
-                const authorName = c.author_id === 'me' ? 'you' : (c.profiles?.full_name || c.profiles?.username || 'user');
+                const authorName = c.author_id === 'me' ? 'you' : (c.profiles?.username || c.profiles?.full_name || 'user');
                 return (
                 <View key={c.id || i} style={viewerStyles.commentRow}>
                   <Text style={viewerStyles.commentUser}>@{authorName}</Text>

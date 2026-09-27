@@ -62,6 +62,17 @@ export function sanitizeUsername(username: string | null | undefined): string {
   return truncate(cleaned, MAX_USERNAME_LENGTH);
 }
 
+/**
+ * Generate a generic, deterministic username for accounts that never chose one.
+ * Derived from the user's UUID so it is unique per account (two different
+ * UUIDs collide only if their first 10 hex chars match — 40 bits of entropy).
+ * Must stay in sync with the `profiles` trigger `auto_generate_username`.
+ */
+export function generateUsername(userId: string | null | undefined): string {
+  const hex = (userId || '').replace(/-/g, '').toLowerCase();
+  return `user_${hex.slice(0, 10)}`;
+}
+
 export function sanitizeLocation(location: string | null | undefined): string {
   if (!location) return '';
   return truncate(clean(location), MAX_LOCATION_LENGTH);

@@ -22,6 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { Audio as AudioTypes } from 'expo-av';
 import { SafeAudio as Audio } from '@/lib/safe-av';
 import { supabase } from '@/lib/supabase';
+import { generateUsername } from '@/lib/sanitize';
 
 
 export default function ConversationScreen() {
@@ -60,7 +61,7 @@ export default function ConversationScreen() {
       if (!cancelled && data) {
         setFetchedProfile({
           name: data.full_name || data.username || 'Unknown',
-          username: data.username || 'unknown',
+          username: data.username || generateUsername(participantId),
           avatar: data.avatar || '',
         });
       }
@@ -71,7 +72,7 @@ export default function ConversationScreen() {
   const participant = {
     id: participantId || '',
     name: conversation?.participantName || fetchedProfile?.name || 'Unknown',
-    username: conversation?.participantUsername || fetchedProfile?.username || 'unknown',
+    username: conversation?.participantUsername || fetchedProfile?.username || generateUsername(participantId),
     avatar: conversation?.participantAvatar || fetchedProfile?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
     isVerified: false,
     followersCount: 0,
@@ -246,7 +247,7 @@ export default function ConversationScreen() {
         setMentionUsers((data || []).map((u: any) => ({
           id: u.id,
           name: u.full_name || u.username || '',
-          username: u.username || '',
+          username: u.username || generateUsername(u.id),
           avatar: u.avatar || '',
           isVerified: false,
           followersCount: 0,
