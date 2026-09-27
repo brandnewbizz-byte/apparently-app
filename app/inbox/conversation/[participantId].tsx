@@ -19,7 +19,8 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Audio } from 'expo-av';
+import type { Audio as AudioTypes } from 'expo-av';
+import { SafeAudio as Audio } from '@/lib/safe-av';
 import { supabase } from '@/lib/supabase';
 
 
@@ -37,8 +38,8 @@ export default function ConversationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const recordingRef = useRef<AudioTypes.Recording | null>(null);
+  const soundRef = useRef<AudioTypes.Sound | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -122,7 +123,7 @@ export default function ConversationScreen() {
       await Audio.requestPermissionsAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.prepareToRecordAsync((Audio as any).RecordingOptionsPresets?.HIGH_QUALITY);
       await rec.startAsync();
       recordingRef.current = rec;
       setIsRecording(true);
