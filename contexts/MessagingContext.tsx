@@ -44,6 +44,7 @@ export interface Message {
       image_url?: string;
       creator_name?: string;
     };
+    voice_note?: { url: string; duration: number };
   };
 }
 
@@ -62,7 +63,7 @@ interface MessagingState {
   conversations: Conversation[];
   isLoading: boolean;
   sharePostToUsers: (post: Post, userIds: string[], message?: string) => void;
-  sendMessage: (participantId: string, text: string) => void;
+  sendMessage: (participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }, metadata?: Message['metadata']) => void;
   getConversation: (participantId: string) => Conversation | undefined;
   markConversationAsRead: (participantId: string) => void;
   getTotalUnreadCount: () => number;
@@ -166,15 +167,6 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             // Fall back to defaults
           }
 
-          const existingConv = existing.find(e => e.id === cv.id);
-          if (existingConv) {
-            // Refresh participant info for existing conversations (was stale 'User')
-            existingConv.participantName = profileName;
-            existingConv.participantAvatar = profileAvatar;
-            existingConv.participantUsername = profileUsername;
-            continue;
-          }
-
           const { data: msgs } = await supabase
             .from('messages')
             .select('*')
@@ -188,6 +180,18 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             timestamp: m.created_at, read: m.read,
             metadata: m.metadata || undefined,
           }));
+
+          const existingConv = existing.find(e => e.id === cv.id);
+          if (existingConv) {
+            // Refresh participant info + messages for existing conversations.
+            existingConv.participantName = profileName;
+            existingConv.participantAvatar = profileAvatar;
+            existingConv.participantUsername = profileUsername;
+            existingConv.messages = messages;
+            existingConv.lastMessageAt = messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at;
+            existingConv.unreadCount = messages.filter(m => !m.read && m.receiverId === authUser.id).length;
+            continue;
+          }
 
           existing.push({
             id: cv.id, participantId: otherId,
@@ -450,7 +454,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     persistState(updatedConversations);
   }, [conversations, getOrCreateConversation, persistState]);
 
-  const sendMessage = useCallback((participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }) => {
+  const sendMessage = useCallback((participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }, metadata?: Message['metadata']) => {
     if (!text.trim()) return;
     const me = authUser?.id || '';
     if (!me) return;
@@ -474,6 +478,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       receiverId: participantId,
       timestamp,
       read: false,
+      metadata,
     };
     conversation.messages = [...conversation.messages, optimistic];
     conversation.lastMessageAt = timestamp;
@@ -519,6 +524,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             receiver_id: participantId,
             content: text,
             read: false,
+            metadata: metadata || null,
           })
           .select('id, content, created_at')
           .maybeSingle();

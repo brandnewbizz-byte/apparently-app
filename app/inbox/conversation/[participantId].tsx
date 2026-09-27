@@ -37,7 +37,6 @@ export default function ConversationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [voiceMessages, setVoiceMessages] = useState<{ id: string; audioUrl: string; duration: number; timestamp: string }[]>([]);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -154,9 +153,7 @@ export default function ConversationScreen() {
       const { data: urlData } = supabase.storage.from('messages').getPublicUrl(filePath);
       const audioUrl = urlData?.publicUrl;
       if (audioUrl && participantId) {
-        const newVoiceMsg = { id: Date.now().toString(), audioUrl, duration: dur, timestamp: 'Just now' };
-        setVoiceMessages(p => [newVoiceMsg, ...p]);
-        sendMessage(participantId, `🎤 Voice note • ${dur}s`);
+        sendMessage(participantId, `🎤 Voice note • ${dur}s`, undefined, { voice_note: { url: audioUrl, duration: dur } });
       }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to send voice note');
@@ -420,6 +417,21 @@ export default function ConversationScreen() {
               {renderBundleCard((message as any).metadata?.bundle_card || (message as any).metadata?.skill_card, isMe)}
             </>
           )}
+          {(message as any).metadata?.voice_note && (
+            <TouchableOpacity
+              style={styles.voicePlayButton}
+              onPress={() => togglePlayAudio((message as any).metadata.voice_note.url, message.id)}
+            >
+              {playingAudioId === message.id ? (
+                <PauseCircle size={24} color={isMe ? '#FFFFFF' : colors.accent} />
+              ) : (
+                <PlayCircle size={24} color={isMe ? '#FFFFFF' : colors.accent} />
+              )}
+              <Text style={[styles.voiceDuration, { color: isMe ? '#FFFFFF' : colors.text }]}>
+                {(message as any).metadata.voice_note.duration}s
+              </Text>
+            </TouchableOpacity>
+          )}
           {message.text.trim() && (
             <Text style={[styles.messageText, isMe ? styles.myMessageText : { color: colors.textSecondary }]}>
               {textWithMentions}
@@ -503,27 +515,7 @@ export default function ConversationScreen() {
           ) : (
             messages.map(renderMessage)
           )}
-          {voiceMessages.length > 0 && voiceMessages.map((vm) => {
-            const isPlaying = playingAudioId === vm.id;
-            return (
-              <View key={vm.id} style={[styles.messageContainer, styles.myMessageContainer]}>
-                <Image source={{ uri: myAvatar }} style={styles.messageAvatar} />
-                <View style={[styles.messageBubble, styles.myMessageBubble, { backgroundColor: colors.accent }]}>
-                  <TouchableOpacity
-                    style={styles.voicePlayButton}
-                    onPress={() => togglePlayAudio(vm.audioUrl, vm.id)}
-                  >
-                    {isPlaying ? (
-                      <PauseCircle size={24} color="#FFFFFF" />
-                    ) : (
-                      <PlayCircle size={24} color="#FFFFFF" />
-                    )}
-                    <Text style={styles.voiceDuration}>{vm.duration}s</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })}
+
         </ScrollView>
 
         {showMentionSuggestions && mentionUsers.length > 0 && (
