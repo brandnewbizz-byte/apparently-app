@@ -40,12 +40,6 @@ export default function InboxScreen() {
 
   const [activeTab, setActiveTab] = useState<'notifications' | 'messages' | 'requests'>('notifications');
   const [refreshing, setRefreshing] = useState(false);
-  // Direct Supabase conversation fetch — bridges the AsyncStorage/Supabase disconnection
-  const [supabaseConvs, setSupabaseConvs] = useState<any[]>([]);
-  useEffect(() => {
-    if (!user?.id) return;
-    fetchSupabaseConvs();
-  }, [user?.id, messaging.conversations.length]);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -60,40 +54,36 @@ export default function InboxScreen() {
   // Fetch bundle grab / call notifications from Supabase
   const [notifs, setNotifs] = useState<any[]>([]);
 
+  const fetchNotifs = useCallback(async () => {
+    if (!user?.id) return;
+    // DB columns: user_id (recipient), actor_id/actor_name/actor_avatar (sender)
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (!error && data) {
+      // actor_name and actor_avatar are already stored on the notification — no profile fetch needed
+      setNotifs(data.map((n: any) => ({
+        id: n.id,
+        type: n.type,
+        senderId: n.actor_id,
+        senderName: n.actor_name || 'Someone',
+        senderAvatar: n.actor_avatar || '',
+        data: n.data || {},
+        message: n.body || n.title || '',
+        read: n.read,
+        createdAt: n.created_at,
+        _raw: n,
+      })));
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     if (!user?.id) return;
-
-    const fetchNotifs = async () => {
-      // DB columns: user_id (recipient), actor_id/actor_name/actor_avatar (sender)
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (!error && data) {
-        // actor_name and actor_avatar are already stored on the notification — no profile fetch needed
-        setNotifs(data.map((n: any) => {
-          const extra = n.data || {};
-          return {
-            id: n.id,
-            type: n.type,
-            senderId: n.actor_id,
-            senderName: n.actor_name || 'Someone',
-            senderAvatar: n.actor_avatar || '',
-            data: n.data || {},
-            message: n.body || n.title || '',
-            read: n.read,
-            createdAt: n.created_at,
-            _raw: n,
-          };
-        }));
-      }
-    };
-
     fetchNotifs();
-
     const sub = supabase
       .channel('notifs-inbox')
       .on('postgres_changes', {
@@ -103,33 +93,14 @@ export default function InboxScreen() {
         filter: `user_id=eq.${user.id}`,
       }, () => fetchNotifs())
       .subscribe();
-
     return () => { sub.unsubscribe(); };
-  }, [user?.id]);
-
-  const fetchSupabaseConvs = useCallback(async () => {
-    if (!user?.id) return;
-    const { data } = await supabase.from('conversations').select('*')
-      .or(`participant_one.eq.${user.id},participant_two.eq.${user.id}`)
-      .order('last_message_at', { ascending: false }).limit(30);
-    if (!data || data.length === 0) { setSupabaseConvs([]); return; }
-    const otherIds = data.map(cv => cv.participant_one === user.id ? cv.participant_two : cv.participant_one);
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name, username, avatar')
-      .in('id', [...new Set(otherIds)]);
-    const pm = new Map((profiles || []).map(p => [p.id, p]));
-    const enriched = data.map(cv => {
-      const oid = cv.participant_one === user.id ? cv.participant_two : cv.participant_one;
-      const p = pm.get(oid);
-      return { ...cv, _name: p?.full_name || p?.username || 'User', _avatar: p?.avatar || '', _username: p?.username || 'user', _otherId: oid };
-    });
-    setSupabaseConvs(enriched);
-  }, [user?.id]);
+  }, [user?.id, fetchNotifs]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.all([
-        fetchSupabaseConvs(),
+        fetchNotifs(),
         (connections as any).refresh?.() || Promise.resolve(),
         (messaging as any).refresh?.() || Promise.resolve(),
       ]);
@@ -137,7 +108,7 @@ export default function InboxScreen() {
       // contexts may not expose refresh methods — fall through
     }
     setRefreshing(false);
-  }, [connections, messaging, fetchSupabaseConvs]);
+  }, [connections, messaging, fetchNotifs]);
 
   const formatTimeAgo = (timestamp: string) => {
     const now = new Date();
@@ -301,27 +272,7 @@ export default function InboxScreen() {
 
   // ─── Messages Tab ───
 
-  // Merge Supabase conversations with AsyncStorage ones (dedup by id)
-  const allConversations = React.useMemo(() => {
-    const seen = new Set(messaging.conversations.map(c => c.id));
-    const extras: any[] = [];
-    for (const cv of supabaseConvs) {
-      if (!seen.has(cv.id)) {
-        const oid = (cv as any)._otherId || (cv.participant_one === user?.id ? cv.participant_two : cv.participant_one);
-        extras.push({
-          id: cv.id,
-          participantId: oid,
-          participantName: (cv as any)._name || 'User',
-          participantAvatar: (cv as any)._avatar || '',
-          participantUsername: (cv as any)._username || 'user',
-          messages: [{ content: 'Tap to view conversation' }],
-          lastMessageAt: cv.last_message_at || cv.created_at,
-          unreadCount: 0,
-        });
-      }
-    }
-    return [...messaging.conversations, ...extras];
-  }, [messaging.conversations, supabaseConvs, user?.id]);
+  const allConversations = React.useMemo(() => messaging.conversations, [messaging.conversations]);
 
   const renderMessages = () => {
     if (allConversations.length === 0) {
@@ -500,10 +451,8 @@ export default function InboxScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Inbox</Text>
-
         {/* Tab switcher */}
-        <View style={styles.tabRow}>
+        <View style={[styles.segmented, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           {TABS.map((tab) => {
             const active = activeTab === tab.id;
             const Icon = tab.icon;
@@ -511,21 +460,17 @@ export default function InboxScreen() {
             return (
               <TouchableOpacity
                 key={tab.id}
-                style={[
-                  styles.tab,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                  active && { backgroundColor: colors.accentGlow, borderColor: colors.accent },
-                ]}
+                style={[styles.segment, active && { backgroundColor: colors.accent }]}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setActiveTab(tab.id);
                 }}
               >
-                <Icon size={16} color={active ? colors.accent : colors.textSecondary} />
-                <Text style={[styles.tabLabel, { color: active ? colors.accent : colors.textSecondary }]}>{tab.label}</Text>
+                <Icon size={16} color={active ? '#FFF' : colors.textSecondary} />
+                <Text style={[styles.segmentLabel, { color: active ? '#FFF' : colors.textSecondary }]}>{tab.label}</Text>
                 {badge > 0 && (
-                  <View style={[styles.tabBadge, { backgroundColor: active ? colors.accent : colors.border }]}>
-                    <Text style={styles.tabBadgeText}>{badge}</Text>
+                  <View style={[styles.segmentBadge, { backgroundColor: active ? 'rgba(255,255,255,0.92)' : colors.accent }]}>
+                    <Text style={[styles.segmentBadgeText, { color: active ? colors.accent : '#FFF' }]}>{badge}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -555,16 +500,12 @@ export default function InboxScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
-  title: { fontSize: 26, fontWeight: '700', marginBottom: 14 },
-  tabRow: { flexDirection: 'row', gap: 8 },
-  tab: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1,
-  },
-  tabLabel: { fontSize: 13, fontWeight: '600' },
-  tabBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8 },
-  tabBadgeText: { fontSize: 10, fontWeight: '700', color: '#FFF' },
+  header: { paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1 },
+  segmented: { flexDirection: 'row', borderRadius: 12, padding: 4, borderWidth: 1 },
+  segment: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 9 },
+  segmentLabel: { fontSize: 13, fontWeight: '600' },
+  segmentBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  segmentBadgeText: { fontSize: 10, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollInner: { padding: 16, paddingBottom: 100 },
   empty: { alignItems: 'center', paddingVertical: 60, gap: 10 },
