@@ -170,6 +170,22 @@ export default function InboxScreen() {
     return <I size={20} color={colors.accent} />;
   };
 
+  // Rich preview for grab notifications — show WHAT was grabbed, not just "grabbed something"
+  const notifPreview = (n: any) => {
+    const d = n.data || {};
+    if (n.type === 'bundle_grab') return d.bundle_title ? `grabbed your bundle "${d.bundle_title}"` : 'grabbed your bundle';
+    if (n.type === 'skill_grab') return d.skill_title ? `grabbed your skill "${d.skill_title}"` : 'grabbed your skill';
+    if (n.type === 'service_grab') return d.request_title ? `offered to help with "${d.request_title}"` : 'offered to help with your request';
+    if (n.type === 'job_grabbed') return d.job_title ? `grabbed your ${d.job_label || 'job'} "${d.job_title}"` : (d.job_label ? `grabbed your ${d.job_label}` : 'grabbed your job');
+    if (n.type === 'follow') return 'started following you';
+    if (n.type === 'comment') return 'commented on your post';
+    if (n.type === 'like') return 'liked your post';
+    if (n.type === 'mention') return 'mentioned you';
+    if (n.type === 'call_request') return 'wants to call you';
+    if (n.type === 'room_invite') return 'invited you to a room';
+    return n.message;
+  };
+
   // ─── Notifications Tab ───
 
   const renderNotifications = () => {
@@ -266,7 +282,7 @@ export default function InboxScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {n.type === 'bundle_grab' ? 'grabbed your bundle' : n.type === 'skill_grab' ? 'grabbed your skill' : n.type === 'follow' ? 'started following you' : n.type === 'comment' ? 'commented on your post' : n.type === 'like' ? 'liked your post' : n.type === 'mention' ? 'mentioned you' : n.type === 'call_request' ? 'wants to call you' : n.type === 'room_invite' ? 'invited you to a room' : n.type === 'service_grab' ? 'offered to help with your request' : n.type === 'job_grabbed' ? 'grabbed your job' : n.message}
+                  {notifPreview(n)}
                 </Text>
               </View>
               {/* Post thumbnail for like/comment/mention */}

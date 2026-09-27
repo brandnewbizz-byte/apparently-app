@@ -153,7 +153,7 @@ export default function BrowseJobsScreen() {
             type: 'job_grabbed',
             title: `${grabberName} grabbed your ${typeLabel}`,
             body: `grabbed your ${typeLabel}${job.title ? ' "' + job.title + '"' : ''}`,
-            data: { job_id: job.id, job_type: job.type, plan_id: job.plan_id },
+            data: { job_id: job.id, job_type: job.type, plan_id: job.plan_id, job_title: job.title || '', job_label: typeLabel },
             read: false,
             created_at: new Date().toISOString(),
           });
