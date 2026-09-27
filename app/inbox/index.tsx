@@ -1,4 +1,4 @@
-import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Phone } from 'lucide-react-native';
+import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Phone, Heart, MessageSquare, AtSign, ShoppingBag, Briefcase, Video } from 'lucide-react-native';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -125,6 +125,51 @@ export default function InboxScreen() {
   // Notifications count
   const notificationCount = notifs.filter(n => !n.read).length;
 
+  // ─── Notification sub-tab filter + type icons ───
+  const NOTIF_FILTERS = [
+    { id: 'all' as const, label: 'All' },
+    { id: 'social' as const, label: 'Social' },
+    { id: 'grabs' as const, label: 'Grabs' },
+    { id: 'calls' as const, label: 'Calls' },
+  ];
+  const [notifFilter, setNotifFilter] = useState<'all' | 'social' | 'grabs' | 'calls'>('all');
+
+  const notifCategory = (type: string): 'social' | 'grabs' | 'calls' => {
+    if (type === 'like' || type === 'comment' || type === 'mention' || type === 'follow') return 'social';
+    if (type === 'bundle_grab' || type === 'skill_grab' || type === 'service_grab' || type === 'job_grabbed') return 'grabs';
+    return 'calls';
+  };
+
+  const filteredNotifs = notifFilter === 'all'
+    ? notifs
+    : notifs.filter(n => notifCategory(n.type) === notifFilter);
+
+  const markAllRead = async () => {
+    const unreadIds = notifs.filter(n => !n.read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    supabase.from('notifications').update({ read: true }).in('id', unreadIds).then(() => {});
+    setNotifs(prev => prev.map(n => unreadIds.includes(n.id) ? { ...n, read: true } : n));
+  };
+
+  const NOTIF_ICONS: Record<string, any> = {
+    like: Heart,
+    comment: MessageSquare,
+    mention: AtSign,
+    follow: UserPlus,
+    bundle_grab: ShoppingBag,
+    skill_grab: Briefcase,
+    service_grab: Briefcase,
+    job_grabbed: Briefcase,
+    call_request: Phone,
+    room_invite: Video,
+  };
+
+  const renderNotifIcon = (type: string) => {
+    const I = NOTIF_ICONS[type] || Bell;
+    return <I size={20} color={colors.accent} />;
+  };
+
   // ─── Notifications Tab ───
 
   const renderNotifications = () => {
@@ -144,7 +189,37 @@ export default function InboxScreen() {
 
     return (
       <>
-        {notifs.map((n) => (
+        {/* Notification filter sub-tabs */}
+        <View style={[styles.notifFilterRow, { borderBottomColor: colors.border }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 18, paddingRight: 8 }}>
+            {NOTIF_FILTERS.map((f) => {
+              const active = notifFilter === f.id;
+              return (
+                <TouchableOpacity key={f.id} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setNotifFilter(f.id); }} style={styles.notifFilterTab}>
+                  <Text style={[styles.notifFilterText, { color: active ? colors.text : colors.textTertiary, fontWeight: active ? '700' : '600' }]}>{f.label}</Text>
+                  {active && <View style={[styles.notifFilterIndicator, { backgroundColor: colors.accent }]} />}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {notificationCount > 0 && (
+            <TouchableOpacity onPress={markAllRead} style={styles.markReadBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Check size={14} color={colors.accent} />
+              <Text style={[styles.markReadText, { color: colors.accent }]}>Mark all read</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {filteredNotifs.length === 0 ? (
+          <View style={styles.empty}>
+            <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
+              <Bell size={40} color={colors.textTertiary} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>Nothing here</Text>
+            <Text style={[styles.emptySub, { color: colors.textTertiary }]}>No notifications in this category</Text>
+          </View>
+        ) : (
+        filteredNotifs.map((n) => (
           <View
             key={`notif-${n.id}`}
             style={[styles.card, { backgroundColor: n.read ? colors.surface : colors.accent + '08', borderColor: n.read ? colors.border : colors.accent + '40' }]}
@@ -159,14 +234,14 @@ export default function InboxScreen() {
                 supabase.from('notifications').update({ read: true }).eq('id', n.id).then(() => {});
                 setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
                 // Navigate based on type
-                if (n.type === 'bundle_grab' || n.type === 'skill_grab') {
+                if (n.type === 'bundle_grab' || n.type === 'skill_grab' || n.type === 'service_grab') {
                   // Someone grabbed my bundle/item — open the conversation with them.
                   // This resolves to inbox/conversation/[participantId], which renders the
                   // grabbed bundle/skill card AND has the composer to reply to that buyer.
                   router.push(`/inbox/conversation/${n.senderId}` as any);
                 } else if (n.type === 'follow') {
                   router.push(`/user/${n.senderId}` as any);
-                } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
+                } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention' || n.type === 'job_grabbed') {
                   // Open the actor's profile (who liked/commented/mentioned you).
                   router.push(`/user/${n.senderId}` as any);
                 }
@@ -177,7 +252,7 @@ export default function InboxScreen() {
                   <Image source={{ uri: n.senderAvatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
                 ) : (
                   <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent + '20', alignItems: 'center', justifyContent: 'center' }}>
-                    <Bell size={20} color={colors.accent} />
+                    {renderNotifIcon(n.type)}
                   </View>
                 )}
               </View>
@@ -191,7 +266,7 @@ export default function InboxScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {n.type === 'bundle_grab' ? 'grabbed your bundle' : n.type === 'skill_grab' ? 'grabbed your skill' : n.type === 'follow' ? 'started following you' : n.type === 'comment' ? 'commented on your post' : n.type === 'like' ? 'liked your post' : n.type === 'mention' ? 'mentioned you' : n.type === 'call_request' ? 'wants to call you' : n.type === 'room_invite' ? 'invited you to a room' : n.message}
+                  {n.type === 'bundle_grab' ? 'grabbed your bundle' : n.type === 'skill_grab' ? 'grabbed your skill' : n.type === 'follow' ? 'started following you' : n.type === 'comment' ? 'commented on your post' : n.type === 'like' ? 'liked your post' : n.type === 'mention' ? 'mentioned you' : n.type === 'call_request' ? 'wants to call you' : n.type === 'room_invite' ? 'invited you to a room' : n.type === 'service_grab' ? 'offered to help with your request' : n.type === 'job_grabbed' ? 'grabbed your job' : n.message}
                 </Text>
               </View>
               {/* Post thumbnail for like/comment/mention */}
@@ -265,7 +340,7 @@ export default function InboxScreen() {
               </View>
             )}
           </View>
-        ))}
+        )))}
       </>
     );
   };
@@ -506,6 +581,12 @@ const styles = StyleSheet.create({
   segmentLabel: { fontSize: 13, fontWeight: '600' },
   segmentBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
   segmentBadgeText: { fontSize: 10, fontWeight: '700' },
+  notifFilterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10, marginBottom: 12, borderBottomWidth: 1 },
+  notifFilterTab: { paddingVertical: 6, alignItems: 'center' },
+  notifFilterText: { fontSize: 13 },
+  notifFilterIndicator: { height: 3, borderRadius: 2, marginTop: 4, width: '100%' },
+  markReadBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  markReadText: { fontSize: 12, fontWeight: '600' },
   scroll: { flex: 1 },
   scrollInner: { padding: 16, paddingBottom: 100 },
   empty: { alignItems: 'center', paddingVertical: 60, gap: 10 },
