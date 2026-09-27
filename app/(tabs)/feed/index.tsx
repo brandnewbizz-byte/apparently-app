@@ -343,6 +343,7 @@ function PostCard({
   onReport,
   onHide,
   isSaved: isSavedProp,
+  height,
 }: {
   post: FeedPost;
   colors: any;
@@ -356,6 +357,7 @@ function PostCard({
   onReport: (postId: string) => void;
   onHide: (postId: string) => void;
   isSaved?: boolean;
+  height?: number;
 }) {
   const [saved, setSaved] = useState(isSavedProp ?? false);
   // Sync with parent if savedIds changes externally
@@ -437,7 +439,7 @@ function PostCard({
   };
 
   return (
-    <View style={[igCardStyles.card, { backgroundColor: colors.surface }]}>
+    <View style={[igCardStyles.card, { backgroundColor: colors.surface, height: height ?? undefined, marginBottom: height ? 0 : 16 }]}>
       {/* Header — Instagram style: circle avatar + username + location */}
       <View style={igCardStyles.header}>
         <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
@@ -461,16 +463,14 @@ function PostCard({
         </TouchableOpacity>
       </View>
 
-      {/* Media — Reels-style 9:16 portrait container */}
+      {/* Media — Reels-style full-screen fill */}
       {post.media ? (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)} style={height ? { flex: 1 } : undefined}>
           <RNImage
             source={{ uri: post.media }}
             style={[
               igCardStyles.media,
-              {
-                height: FEED_MEDIA_HEIGHT,
-              },
+              height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
             ]}
             resizeMode="cover"
           />
@@ -495,8 +495,8 @@ function PostCard({
 
       {/* Text-only post: larger caption area */}
       {!post.media && post.caption ? (
-        <View style={igCardStyles.textOnlyArea}>
-          <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={6}>
+        <View style={[igCardStyles.textOnlyArea, height ? { flex: 1 } : undefined]}>
+          <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={height ? 20 : 6}>
             {post.caption}
           </Text>
         </View>
@@ -610,6 +610,8 @@ export default function FeedScreen() {
   const [showStoriesViewer, setShowStoriesViewer] = useState(false);
   const [storyViewerStartIndex, setStoryViewerStartIndex] = useState(0);
   const [showCreateStory, setShowCreateStory] = useState(false);
+  // ── Full-screen snap paging: measured viewport height for each 'page' ──
+  const [feedHeight, setFeedHeight] = useState(0);
 
   // Load saved post IDs from Supabase
   useEffect(() => {
@@ -1155,6 +1157,122 @@ export default function FeedScreen() {
             );
           })}
         </ScrollView>
+
+        {/* ── Stories Row (fixed header) ── */}
+        {storyUsers.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              marginBottom: 6,
+              gap: 8,
+            }}
+          >
+            <StoryRing
+              avatar={userAvatar}
+              name="Your Story"
+              hasUnviewed={false}
+              isAddStory
+              onPress={() => setShowCreateStory(true)}
+            />
+            {storyUsers.map((storyUser, idx) => (
+              <StoryRing
+                key={storyUser.userId}
+                avatar={storyUser.avatar}
+                name={storyUser.name === 'You' ? 'Your Story' : storyUser.name}
+                hasUnviewed
+                onPress={() => {
+                  setStoryViewerStartIndex(idx);
+                  setShowStoriesViewer(true);
+                }}
+              />
+            ))}
+          </ScrollView>
+        )}
+
+        {/* ── Mentions Strip (fixed header) ── */}
+        {mentionThumbs.length > 0 && (
+          <View style={{ marginBottom: 6 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, paddingHorizontal: 16, marginBottom: 8 }}>Mentions</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+            >
+              {mentionThumbs.map((t) => (
+                <TouchableOpacity
+                  key={t.id}
+                  activeOpacity={0.85}
+                  onPress={() => { setViewerMedia(t.mediaUrl); setViewerMediaIsVideo(t.isVideo); }}
+                  style={{ width: 76, height: 76, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border, position: 'relative' }}
+                >
+                  {t.isVideo && VideoPlayer ? (
+                    <VideoPlayer
+                      source={{ uri: t.mediaUrl }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="cover"
+                      shouldPlay={false}
+                      isMuted
+                    />
+                  ) : (
+                    <RNImage source={{ uri: t.mediaUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  )}
+                  {t.isVideo && (
+                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' }}>
+                      <Play size={18} color="#FFF" fill="#FFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ── Search Bar (fixed header) ── */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.border }}>
+            <Search size={16} color={colors.textTertiary} />
+            <TextInput
+              style={{ flex: 1, marginLeft: 8, fontSize: 14, color: colors.text }}
+              placeholder="Search posts and users..."
+              placeholderTextColor={colors.textTertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <X size={16} color={colors.textTertiary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* ── User Search Results (fixed header) ── */}
+        {searchUsers.length > 0 && (
+          <View style={{ paddingHorizontal: 16, marginBottom: 6 }}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textTertiary, marginBottom: 8 }}>Users</Text>
+            {searchUsers.map((u: any) => (
+              <TouchableOpacity key={u.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 }}
+                onPress={() => { router.push(`/user/${u.id}` as any); setSearchQuery(''); }}>
+                <RNImage source={{ uri: u.avatar }} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.border }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{u.name}</Text>
+                  <Text style={{ fontSize: 13, color: colors.textTertiary }}>@{u.username}</Text>
+                </View>
+                {u.id !== authUser?.id && (
+                  <TouchableOpacity onPress={() => handleToggleFollow(u.id)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: searchFollowingIds.has(u.id) ? colors.border : colors.accent }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: searchFollowingIds.has(u.id) ? colors.text : '#fff' }}>
+                      {searchFollowingIds.has(u.id) ? 'Following' : 'Follow'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Tag filter active indicator */}
@@ -1178,6 +1296,7 @@ export default function FeedScreen() {
           <SkeletonCard count={5} shimmerColor={colors.accent + '30'} baseColor={colors.surface} />
         </ScrollView>
       ) : (
+        <View style={{ flex: 1 }} onLayout={(e) => { const h = e.nativeEvent.layout.height; if (h > 0 && Math.abs(h - feedHeight) > 1) setFeedHeight(h); }}>
         <FlatList
           data={filteredPosts}
           keyExtractor={(item) => item.id}
@@ -1185,6 +1304,7 @@ export default function FeedScreen() {
             <PostCard
               post={item}
               colors={colors}
+              height={feedHeight || undefined}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1200,188 +1320,18 @@ export default function FeedScreen() {
               isSaved={savedIds.has(item.id)}
             />
           )}
-          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+          contentContainerStyle={{ paddingBottom: 0 }}
           showsVerticalScrollIndicator={false}
           onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
           scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        ListHeaderComponent={() => (
-          <View>
-            <View style={{ height: 6 }} />
+          pagingEnabled
+          decelerationRate="fast"
+          snapToInterval={feedHeight || undefined}
+          snapToAlignment="start"
+          disableIntervalMomentum
 
-            {/* ── Stories Row ── */}
-            {storyUsers.length > 0 && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 4,
-                  marginBottom: 12,
-                  gap: 8,
-                }}
-              >
-                {/* Your Story / Add Story */}
-                <StoryRing
-                  avatar={userAvatar}
-                  name="Your Story"
-                  hasUnviewed={false}
-                  isAddStory
-                  onPress={() => setShowCreateStory(true)}
-                />
-                {/* Other users' stories */}
-                {storyUsers.map((storyUser, idx) => (
-                  <StoryRing
-                    key={storyUser.userId}
-                    avatar={storyUser.avatar}
-                    name={storyUser.name === 'You' ? 'Your Story' : storyUser.name}
-                    hasUnviewed
-                    onPress={() => {
-                      setStoryViewerStartIndex(idx);
-                      setShowStoriesViewer(true);
-                    }}
-                  />
-                ))}
-              </ScrollView>
-            )}
-
-            {/* ── Mentions Strip ── */}
-            {mentionThumbs.length > 0 && (
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, paddingHorizontal: 16, marginBottom: 8 }}>Mentions</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
-                >
-                  {mentionThumbs.map((t) => (
-                    <TouchableOpacity
-                      key={t.id}
-                      activeOpacity={0.85}
-                      onPress={() => { setViewerMedia(t.mediaUrl); setViewerMediaIsVideo(t.isVideo); }}
-                      style={{ width: 76, height: 76, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border, position: 'relative' }}
-                    >
-                      {t.isVideo && VideoPlayer ? (
-                        <VideoPlayer
-                          source={{ uri: t.mediaUrl }}
-                          style={{ width: '100%', height: '100%' }}
-                          resizeMode="cover"
-                          shouldPlay={false}
-                          isMuted
-                        />
-                      ) : (
-                        <RNImage source={{ uri: t.mediaUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                      )}
-                      {t.isVideo && (
-                        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' }}>
-                          <Play size={18} color="#FFF" fill="#FFF" />
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* ── Search Bar ── */}
-            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.border }}>
-                <Search size={16} color={colors.textTertiary} />
-                <TextInput
-                  style={{ flex: 1, marginLeft: 8, fontSize: 14, color: colors.text }}
-                  placeholder="Search posts and users..."
-                  placeholderTextColor={colors.textTertiary}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  returnKeyType="search"
-                />
-                {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')}>
-                    <X size={16} color={colors.textTertiary} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* ── User Search Results ── */}
-            {searchUsers.length > 0 && (
-              <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textTertiary, marginBottom: 8 }}>Users</Text>
-                {searchUsers.map((u: any) => (
-                  <TouchableOpacity key={u.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 }}
-                    onPress={() => { router.push(`/user/${u.id}` as any); setSearchQuery(''); }}>
-                    <RNImage source={{ uri: u.avatar }} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.border }} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{u.name}</Text>
-                      <Text style={{ fontSize: 13, color: colors.textTertiary }}>@{u.username}</Text>
-                    </View>
-                    {u.id !== authUser?.id && (
-                      <TouchableOpacity onPress={() => handleToggleFollow(u.id)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: searchFollowingIds.has(u.id) ? colors.border : colors.accent }}>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: searchFollowingIds.has(u.id) ? colors.text : '#fff' }}>
-                          {searchFollowingIds.has(u.id) ? 'Following' : 'Follow'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* ── For You Row ── */}
-            {activeFilter === 'all' && !tagFilter && (
-              <View style={{ marginBottom: 16 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 10 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Sparkles size={15} color={colors.accent} />
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>For You</Text>
-                  </View>
-                  <Text style={{ fontSize: 12, color: colors.textTertiary }}>
-                    {filteredPosts.length} opportunities
-                  </Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
-                  {filteredPosts.slice(0, 5).map((post) => (
-                    <TouchableOpacity
-                      key={`fy-${post.id}`}
-                      style={{
-                        width: 160,
-                        borderRadius: 14,
-                        backgroundColor: colors.surface,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        padding: 12,
-                        gap: 6,
-                      }}
-                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedPost(post); }}
-                    >
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' }}>
-                        {post.type === 'marketplace' ? 'For Sale' : post.type}
-                      </Text>
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }} numberOfLines={2}>
-                        {post.caption}
-                      </Text>
-                      {post.location ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                          <MapPin size={10} color={colors.textTertiary} />
-                          <Text style={{ fontSize: 11, color: colors.textTertiary }} numberOfLines={1}>{post.location}</Text>
-                        </View>
-                      ) : null}
-                      {post.price != null && (
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, marginTop: 'auto' }}>
-                          ${post.price}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            <View style={{ height: 4 }} />
-          </View>
-        )}
-        ListEmptyComponent={() => (
+                ListEmptyComponent={() => (
           <View style={styles.emptyState}>
             <FileText size={48} color={colors.textTertiary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No posts yet</Text>
@@ -1390,7 +1340,8 @@ export default function FeedScreen() {
             </Text>
           </View>
         )}
-      />
+        />
+        </View>
       )}
 
       {/* Post Detail Modal */}
