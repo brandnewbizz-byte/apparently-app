@@ -393,7 +393,7 @@ export default function LiveScreen() {
               <View style={[styles.infoBullet, { backgroundColor: colors.accent + '20' }]}>
                 <Sparkles size={14} color={colors.accent} />
               </View>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={[styles.infoTitle, { color: colors.text }]}>How rooms work</Text>
                 <Text style={[styles.infoDesc, { color: colors.textTertiary }]}>
                   Press-hold mic to talk · Tap camera for video · Build plans & share resources together
@@ -655,7 +655,7 @@ const styles = StyleSheet.create({
     marginTop: 12, paddingVertical: 8, paddingHorizontal: 12,
     borderRadius: 10,
   },
-  taglineText: { fontSize: 13, fontWeight: '500' },
+  taglineText: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
 
   // ── Section ──
   section: { paddingHorizontal: 16, paddingTop: 20 },
@@ -727,7 +727,7 @@ const styles = StyleSheet.create({
   roomTopicRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10,
   },
-  roomTopicText: { fontSize: 12, fontWeight: '600' },
+  roomTopicText: { fontSize: 12, fontWeight: '600', flex: 1 },
   roomCardFooter: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
@@ -750,7 +750,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginTop: 2,
   },
   infoTitle: { fontSize: 15, fontWeight: '600', marginBottom: 3 },
-  infoDesc: { fontSize: 13, lineHeight: 19, paddingRight: 8 },
+  infoDesc: { fontSize: 13, lineHeight: 19 },
 
   // ── Modal ──
   modalRoot: { flex: 1 },
