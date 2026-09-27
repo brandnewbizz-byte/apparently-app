@@ -592,10 +592,6 @@ export default function FeedScreen() {
   const { addUserPost } = useUserPosts();
   const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts } = useSocial();
   const [activeFilter, setActiveFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchUsers, setSearchUsers] = useState<any[]>([]);
-  const [searchFollowingIds, setSearchFollowingIds] = useState<Set<string>>(new Set());
-  const [searchUserLoading, setSearchUserLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -736,69 +732,6 @@ export default function FeedScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  // ── User search (debounced with request ordering) ──
-  const searchRequestIdRef = useRef(0);
-  useEffect(() => {
-    if (!searchQuery || searchQuery.trim().length < 2) {
-      setSearchUsers([]);
-      return;
-    }
-    const requestId = ++searchRequestIdRef.current;
-    const timer = setTimeout(async () => {
-      setSearchUserLoading(true);
-      const pattern = `%${searchQuery.trim()}%`;
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, username, avatar')
-        .or(`full_name.ilike.${pattern},username.ilike.${pattern}`)
-        .limit(8);
-      // Map profiles format to expected user format
-      const mapped = (data || []).map((p: any) => ({
-        id: p.id,
-        name: p.full_name || p.username || 'User',
-        username: p.username || '',
-        avatar: p.avatar || '',
-      }));
-      // Discard stale results if a newer request was already fired
-      if (requestId !== searchRequestIdRef.current) return;
-      if (mapped.length > 0) {
-        setSearchUsers(mapped);
-        if (authUser?.id) {
-          const ids = mapped.map((u: any) => u.id).filter((id: string) => id !== authUser.id);
-          if (ids.length > 0) {
-            const { data: followData } = await supabase
-              .from('follows')
-              .select('following_id')
-              .eq('follower_id', authUser.id)
-              .in('following_id', ids);
-            // Also check request ordering for the follow-data sub-query
-            if (requestId === searchRequestIdRef.current) {
-              setSearchFollowingIds(new Set((followData || []).map((f: any) => f.following_id)));
-            }
-          }
-        }
-      }
-      if (requestId === searchRequestIdRef.current) setSearchUserLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, authUser?.id]);
-
-  const handleToggleFollow = async (targetUserId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const isFollowing = searchFollowingIds.has(targetUserId);
-    try {
-      if (isFollowing) {
-        await supabase.from('follows').delete().eq('follower_id', authUser!.id).eq('following_id', targetUserId);
-        setSearchFollowingIds(prev => { const n = new Set(prev); n.delete(targetUserId); return n; });
-      } else {
-        await supabase.from('follows').insert({ follower_id: authUser!.id, following_id: targetUserId });
-        setSearchFollowingIds(prev => new Set(prev).add(targetUserId));
-      }
-      // Refresh the feed network so newly followed users' posts appear immediately.
-      loadNetwork();
-    } catch (_) {}
-  };
-
   // ── Transform stories into StoryUser[] format for StoriesViewer ──
   const storyUsers = useMemo((): StoryUser[] => {
     // Combine user stories and feed stories, group by user
@@ -881,13 +814,9 @@ export default function FeedScreen() {
     let all = deduped;
     if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      all = all.filter(p => (p.caption || '').toLowerCase().includes(q) || p.tags?.some(t => t.toLowerCase().includes(q)));
-    }
     // Keep newest-first order (posts are pre-sorted in loadFeedPosts)
     return all;
-  }, [activeFilter, userPosts, tagFilter, searchQuery]);
+  }, [activeFilter, userPosts, tagFilter]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1230,49 +1159,6 @@ export default function FeedScreen() {
           </View>
         )}
 
-        {/* ── Search Bar (fixed header) ── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.border }}>
-            <Search size={16} color={colors.textTertiary} />
-            <TextInput
-              style={{ flex: 1, marginLeft: 8, fontSize: 14, color: colors.text }}
-              placeholder="Search posts and users..."
-              placeholderTextColor={colors.textTertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              returnKeyType="search"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <X size={16} color={colors.textTertiary} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* ── User Search Results (fixed header) ── */}
-        {searchUsers.length > 0 && (
-          <View style={{ paddingHorizontal: 16, marginBottom: 6 }}>
-            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textTertiary, marginBottom: 8 }}>Users</Text>
-            {searchUsers.map((u: any) => (
-              <TouchableOpacity key={u.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 }}
-                onPress={() => { router.push(`/user/${u.id}` as any); setSearchQuery(''); }}>
-                <RNImage source={{ uri: u.avatar }} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.border }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{u.name}</Text>
-                  <Text style={{ fontSize: 13, color: colors.textTertiary }}>@{u.username}</Text>
-                </View>
-                {u.id !== authUser?.id && (
-                  <TouchableOpacity onPress={() => handleToggleFollow(u.id)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: searchFollowingIds.has(u.id) ? colors.border : colors.accent }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: searchFollowingIds.has(u.id) ? colors.text : '#fff' }}>
-                      {searchFollowingIds.has(u.id) ? 'Following' : 'Follow'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
       </View>
 
       {/* Tag filter active indicator */}
