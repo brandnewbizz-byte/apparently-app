@@ -192,6 +192,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [authUserId, setAuthUserId] = useState<string>('u-dev');
   const [currentUserProfile, setCurrentUserProfile] = useState<{ fullName: string | null; username: string | null; avatar: string } | null>(null);
   const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
+  // API-backed feed cache — the single source getAllPosts() prefers when non-empty.
+  const [apiPosts, setApiPosts] = useState<Post[] | null>(null);
+  const apiLoaded = useRef(false);
 
   // Fetch like statuses from Supabase for all loaded posts
   useEffect(() => {
@@ -274,6 +277,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               } : currentUser,
               content: p.content,
               imageUrl: p.image_url,
+              videoUrl: (p as any).video_url,
+              mediaType: (p as any).media_type as 'image' | 'video' | undefined,
               timestamp: p.timestamp,
               likes: p.likes,
               comments: p.comments,
@@ -441,39 +446,6 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userPosts'] });
-    },
-  });
-
-
-
-  const createPostMutation = useMutation({
-    mutationFn: async (post: { content: string; imageUrl?: string }) => {
-      const userId = await DatabaseService.getCurrentUserId();
-      if (userId) {
-        const dbPost = await DatabaseService.createPost({
-          user_id: userId,
-          content: post.content,
-          image_url: post.imageUrl,
-          timestamp: 'Just now',
-          likes: 0,
-          comments: 0,
-          shares: 0,
-        });
-        if (dbPost) {
-          logger.info('SocialContext', 'Created post in Supabase', { id: dbPost.id });
-          // Process @mentions in post content
-          if (userId && userId !== 'u-dev') {
-            processMentions(userId, post.content, dbPost.id, 'post').catch((e) =>
-              logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
-            );
-          }
-          return dbPost;
-        }
-      }
-      return null;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
     },
   });
 
@@ -838,6 +810,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const updatedUserPosts = userPosts.filter(p => p.id !== postId);
     setUserPosts(updatedUserPosts);
     persistUserPostsMutation(updatedUserPosts);
+
+    // Purge the deleted post from every in-memory cache immediately so it never
+    // lingers as a blank/stale card in the feed (getAllPosts prefers apiPosts,
+    // which was previously never cleared on delete).
+    setApiPosts(prev => (prev ? prev.filter(p => p.id !== postId) : prev));
+    setFeedPosts(prev => prev.filter(p => p.id !== postId));
     
     DatabaseService.deletePost(postId).then(success => {
       if (success) {
@@ -849,8 +827,6 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Deleted post', { postId });
   }, [interactions, persistState, userPosts, persistUserPostsMutation, queryClient]);
 
-  const createPostMutate = createPostMutation.mutate;
-
   const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => {
     const isVideo = options?.mediaType === 'video';
     const videoUrl = isVideo ? imageUrl : undefined;
@@ -859,63 +835,84 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
     const doCreatePost = (finalImageUrl: string | undefined) => {
       logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
-      createPostMutate({ content: safeContent, imageUrl: finalImageUrl });
-      queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-      localApi.createPost(authUserId, content, isVideo ? videoUrl : finalImageUrl, options).then((saved) => {
-        logger.info('SocialContext', 'Post saved to local API', { id: saved?.id });
-        if (options?.postKind === 'sell') {
-          localApi.createProduct({
-            seller_id: authUserId,
-            seller_name: 'You',
-            seller_avatar: '',
-            seller_username: 'you',
-            title: content.slice(0, 100),
-            description: content,
-            price: 0,
-            accepts_swap: true,
-            condition: 'good',
-            category: options?.category || 'General',
-            images: finalImageUrl ? [{ id: '1', uri: finalImageUrl }] : [],
-            location: 'Local',
-          }).then(() => {
-            logger.info('SocialContext', 'Sell post also created as marketplace product');
-          }).catch((e) => {
-            logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
-          });
+
+      // Resolve the real authenticated user id at write time. Using the
+      // session (not the 'u-dev' fallback) guarantees the post lands under the
+      // user's own profile, so it shows up in the profile grid.
+      DatabaseService.getCurrentUserId().then((userId) => {
+        if (!userId) {
+          logger.warn('SocialContext', 'createPost blocked - no user session');
+          return;
         }
-        apiLoaded.current = false;
-        localApi.getPosts().then((rawPosts: any[]) => {
-          const mapped: Post[] = rawPosts.map((p: any) => {
-            const joinedUser = p.user;
-            return {
-              id: p.id,
-              user: {
-                id: p.user_id,
-                name: joinedUser?.name || p.author_name || 'Unknown',
-                username: joinedUser?.username || p.author_username || 'unknown',
-                avatar: joinedUser?.avatar || p.author_avatar || '',
-                isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
-                followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
-                relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
-              },
-              content: p.content,
-              imageUrl: p.image_url,
-              videoUrl: p.video_url,
-              mediaType: p.media_type as 'image' | 'video' | undefined,
-              timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
-              likes: p.likes || 0,
-              comments: p.comments || 0,
-              shares: p.shares || 0,
-              category: p.category || undefined,
-              postKind: p.post_kind || 'post',
-              renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-            };
+
+        // Single write path to Supabase `posts` (no duplicate insert).
+        localApi.createPost(userId, safeContent, isVideo ? videoUrl : finalImageUrl, options)
+          .then((saved) => {
+            logger.info('SocialContext', 'Post saved to backend', { id: saved?.id });
+            queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+
+            if (saved?.id) {
+              processMentions(userId, safeContent, saved.id, 'post').catch((e) =>
+                logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
+              );
+            }
+
+            if (options?.postKind === 'sell') {
+              localApi.createProduct({
+                seller_id: userId,
+                seller_name: 'You',
+                seller_avatar: '',
+                seller_username: 'you',
+                title: content.slice(0, 100),
+                description: content,
+                price: 0,
+                accepts_swap: true,
+                condition: 'good',
+                category: options?.category || 'General',
+                images: finalImageUrl ? [{ id: '1', uri: finalImageUrl }] : [],
+                location: 'Local',
+              }).then(() => {
+                logger.info('SocialContext', 'Sell post also created as marketplace product');
+              }).catch((e) => {
+                logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
+              });
+            }
+
+            apiLoaded.current = false;
+            localApi.getPosts().then((rawPosts: any[]) => {
+              const mapped: Post[] = rawPosts.map((p: any) => {
+                const joinedUser = p.user;
+                return {
+                  id: p.id,
+                  user: {
+                    id: p.user_id,
+                    name: joinedUser?.name || p.author_name || 'Unknown',
+                    username: joinedUser?.username || p.author_username || 'unknown',
+                    avatar: joinedUser?.avatar || p.author_avatar || '',
+                    isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
+                    followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
+                    relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
+                  },
+                  content: p.content,
+                  imageUrl: p.image_url,
+                  videoUrl: p.video_url,
+                  mediaType: p.media_type as 'image' | 'video' | undefined,
+                  timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
+                  likes: p.likes || 0,
+                  comments: p.comments || 0,
+                  shares: p.shares || 0,
+                  category: p.category || undefined,
+                  postKind: p.post_kind || 'post',
+                  renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
+                };
+              });
+              setApiPosts(mapped);
+              setInteractions(buildDefaultState(mapped));
+            });
+          })
+          .catch((err) => {
+            logger.warn('SocialContext', 'Failed to save post to backend', { message: err?.message });
           });
-          setApiPosts(mapped);
-          setInteractions(buildDefaultState(mapped));
-        });
-      }).catch(err => {
-        logger.info('SocialContext', 'Failed to save post to local API', { message: err.message });
       });
     };
 
@@ -937,7 +934,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }
 
     doCreatePost(rawImageUrl);
-  }, [createPostMutate, queryClient, authUserId]);
+  }, [queryClient, authUserId]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
     logger.info('SocialContext', 'Creating story...');
@@ -988,9 +985,6 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   }, [queryClient]);
 
   // ─── API-backed data loading ───
-  const [apiPosts, setApiPosts] = useState<Post[] | null>(null);
-  const apiLoaded = useRef(false);
-
   useEffect(() => {
     if (apiLoaded.current) return;
     apiLoaded.current = true;
@@ -1010,6 +1004,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           },
           content: p.content,
           imageUrl: p.image_url,
+          videoUrl: p.video_url,
+          mediaType: p.media_type as 'image' | 'video' | undefined,
           timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
           likes: p.likes || 0,
           comments: p.comments || 0,
@@ -1030,9 +1026,14 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   }, []);
 
   const getAllPosts = useCallback((): Post[] => {
-    if (apiPosts && apiPosts.length > 0) return [...apiPosts];
-    if (feedPosts && feedPosts.length > 0) return [...feedPosts];
-    return [];
+    const source = (apiPosts && apiPosts.length > 0) ? apiPosts : feedPosts;
+    // Drop blank posts (no caption text and no media). These are failed uploads
+    // or leftover rows from deleted posts, and must never render as empty cards.
+    return source.filter((p) => {
+      const hasText = !!(p.content && p.content.trim());
+      const hasMedia = !!(p.imageUrl || p.videoUrl);
+      return hasText || hasMedia;
+    });
   }, [apiPosts, feedPosts]);
 
   const getAllStories = useCallback((): Story[] => {

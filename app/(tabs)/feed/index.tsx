@@ -448,6 +448,8 @@ function PostCard({
   onMediaTap,
   onShare,
   onDelete,
+  onReport,
+  onHide,
   isSaved: isSavedProp,
 }: {
   post: FeedPost;
@@ -462,6 +464,8 @@ function PostCard({
   onMediaTap: (uri: string) => void;
   onShare: (post: FeedPost) => void;
   onDelete?: (postId: string) => void;
+  onReport: (postId: string) => void;
+  onHide: (postId: string) => void;
   isSaved?: boolean;
 }) {
   const [saved, setSaved] = useState(isSavedProp ?? false);
@@ -491,12 +495,16 @@ function PostCard({
 
   const handleMenuPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const isOwnPost = !!(currentUser?.id && post.author.userId === currentUser.id);
     const options: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
-      { text: 'Report', style: 'destructive', onPress: () => { Alert.alert('Report submitted', 'Thank you. We will review this content.'); } },
-      { text: 'Hide', onPress: () => { onDelete?.(post.id); } },
-      { text: 'Copy Link', onPress: () => { Share.share({ message: `Check this out: ${post.caption}` }); } },
+      { text: 'Report', style: 'destructive', onPress: () => onReport(post.id) },
     ];
-    if (onDelete) {
+    // Hide is for other people's posts (remove from your feed); delete is for your own.
+    if (!isOwnPost) {
+      options.push({ text: 'Hide', onPress: () => onHide(post.id) });
+    }
+    options.push({ text: 'Copy Link', onPress: () => { Share.share({ message: `Check this out: ${post.caption}` }); } });
+    if (isOwnPost) {
       options.push({
         text: 'Delete Post',
         style: 'destructive',
@@ -509,7 +517,7 @@ function PostCard({
               {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: () => onDelete(post.id),
+                onPress: () => onDelete?.(post.id),
               },
             ],
             { cancelable: true },
@@ -786,11 +794,16 @@ export default function FeedScreen() {
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
   const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
 
+  const queryClient = useQueryClient();
+  const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
+  // ── Mentions strip: posts where someone I follow @-mentioned me ──
+  const [mentionThumbs, setMentionThumbs] = useState<{ id: string; mediaUrl: string; isVideo: boolean; postId: string }[]>([]);
+
   // ── Network filter: feed shows only people you follow + people who follow you + yourself ──
   const [networkIds, setNetworkIds] = useState<Set<string> | null>(null);
   const loadNetwork = useCallback(async () => {
-    if (!authUser?.id) { setNetworkIds(null); return; }
-    const myId = authUser.id;
+    const myId = authUser?.id;
+    if (!myId) { setNetworkIds(null); return; }
     try {
       const [{ data: following }, { data: followers }] = await Promise.all([
         supabase.from('follows').select('following_id').eq('follower_id', myId),
@@ -808,6 +821,41 @@ export default function FeedScreen() {
 
   useEffect(() => { loadNetwork(); }, [loadNetwork]);
 
+  // ── Mentions: fetch notifications where someone I follow @-mentioned me, resolve media ──
+  const loadMentions = useCallback(async () => {
+    const myId = authUser?.id;
+    if (!myId) { setMentionThumbs([]); return; }
+    try {
+      const [{ data: following }, { data: mentions }] = await Promise.all([
+        supabase.from('follows').select('following_id').eq('follower_id', myId),
+        supabase.from('notifications').select('id, actor_id, data').eq('user_id', myId).eq('type', 'mention').order('created_at', { ascending: false }).limit(50),
+      ]);
+      const followingIds = new Set((following || []).map((f: any) => f.following_id).filter(Boolean));
+      if (followingIds.size === 0) { setMentionThumbs([]); return; }
+      const myMentions = (mentions || []).filter((n: any) => followingIds.has(n?.actor_id) && n?.data?.content_id);
+      if (myMentions.length === 0) { setMentionThumbs([]); return; }
+      const contentIds = [...new Set(myMentions.map((n: any) => n.data.content_id))];
+      const { data: posts } = await supabase.from('posts').select('*').in('id', contentIds);
+      const postMap = new Map((posts || []).map((p: any) => [p.id, p]));
+      const thumbs: { id: string; mediaUrl: string; isVideo: boolean; postId: string }[] = [];
+      for (const m of myMentions) {
+        const p = postMap.get(m.data.content_id);
+        if (!p) continue;
+        const videoUrl = (p as any).video_url || (p as any).videoUrl;
+        const imageUrl = (p as any).image_url || (p as any).imageUrl;
+        const mediaUrl = videoUrl || imageUrl;
+        if (!mediaUrl) continue; // media-only
+        const isVideo = ((p as any).media_type === 'video') || !!videoUrl;
+        thumbs.push({ id: m.id, mediaUrl, isVideo, postId: p.id });
+      }
+      setMentionThumbs(thumbs);
+    } catch (_) {
+      setMentionThumbs([]);
+    }
+  }, [authUser?.id]);
+
+  useEffect(() => { loadMentions(); }, [loadMentions]);
+
   // Load feed posts: show ONLY network posts (people you follow + people who follow you + yourself), newest first
   const lastPostCountRef = useRef('');
   const loadFeedPosts = useCallback(() => {
@@ -818,7 +866,7 @@ export default function FeedScreen() {
         const authorId = p.user?.id || p.user_id;
         if (!authorId) return false;
         // Always show the user's own posts.
-        if (authUser?.id && authorId === authUser.id) return true;
+        if (authUser?.id && authorId === authUser?.id) return true;
         // Until the network resolves, don't leak others' posts (fail closed).
         if (!networkIds) return false;
         return networkIds.has(authorId);
@@ -841,9 +889,7 @@ export default function FeedScreen() {
     const key = allPosts.map(p => p.id).join(',');
     if (key === lastPostCountRef.current) return;
     lastPostCountRef.current = key;
-    if (allPosts.length > 0 || userPosts.length > 0) {
-      setUserPosts(allPosts);
-    }
+    setUserPosts(prev => (allPosts.length > 0 || prev.length > 0) ? allPosts : prev);
   }, [getAllPosts, networkIds, authUser?.id]);
 
   // Run the loader whenever the posts provider signals new data (mount/refresh)
@@ -851,11 +897,9 @@ export default function FeedScreen() {
     loadFeedPosts();
   }, [loadFeedPosts]);
 
-  const queryClient = useQueryClient();
-  const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
-  const userPostIds = useMemo(() => new Set(userPosts.map(p => p.id)), [userPosts]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [viewerMedia, setViewerMedia] = useState<string | null>(null);
+  const [viewerMediaIsVideo, setViewerMediaIsVideo] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
@@ -1038,10 +1082,11 @@ export default function FeedScreen() {
       // Await query invalidation so the spinner stops once data is refetched
       await queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
       setRefreshKey((k) => k + 1);
+      loadMentions();
     } finally {
       setRefreshing(false);
     }
-  }, [queryClient]);
+  }, [queryClient, loadMentions]);
 
   const handleSavePost = (postId: string) => {
     setSavedIds((prev) => {
@@ -1109,6 +1154,26 @@ export default function FeedScreen() {
     setUserPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
+  const handleReportPost = (postId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (!authUser?.id) return;
+    supabase.from('reports').insert({ post_id: postId, reported_by: authUser.id, reason: 'Reported post' }).then(({ error }) => {
+      if (error) { Alert.alert('Report failed', error.message); }
+      else { Alert.alert('Reported', 'Thanks — we will review this post.'); }
+    });
+  };
+
+  const handleHidePost = (postId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (authUser?.id) {
+      supabase.from('hidden_posts').insert({ user_id: authUser.id, post_id: postId, created_at: new Date().toISOString() }).then(({ error }) => {
+        if (error) console.warn('[Feed] Hide failed:', error.message);
+      });
+    }
+    // Remove from the local feed immediately so it disappears for this user.
+    setUserPosts((prev) => prev.filter((p) => p.id !== postId));
+  };
+
   const handleEventCardPress = (event: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     // Event detail page removed — navigate to external URL if available
@@ -1127,6 +1192,7 @@ export default function FeedScreen() {
     } catch (_) {}
     return () => { cancelled = true; };
   }, []);
+  const VideoPlayer = Video.current as any;
 
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
     const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -1356,8 +1422,10 @@ export default function FeedScreen() {
               onCelebrate={handleCelebrate}
               onShare={handleSharePost}
               onTagTap={handleTagTap}
-              onMediaTap={(uri) => setViewerMedia(uri)}
-              onDelete={userPostIds.has(item.id) ? () => handleDeletePost(item.id) : undefined}
+              onMediaTap={(uri) => { setViewerMediaIsVideo(false); setViewerMedia(uri); }}
+              onDelete={handleDeletePost}
+              onReport={handleReportPost}
+              onHide={handleHidePost}
               isSaved={savedIds.has(item.id)}
             />
           )}
@@ -1405,6 +1473,44 @@ export default function FeedScreen() {
                   />
                 ))}
               </ScrollView>
+            )}
+
+            {/* ── Mentions Strip ── */}
+            {mentionThumbs.length > 0 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, paddingHorizontal: 16, marginBottom: 8 }}>Mentions</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+                >
+                  {mentionThumbs.map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
+                      activeOpacity={0.85}
+                      onPress={() => { setViewerMedia(t.mediaUrl); setViewerMediaIsVideo(t.isVideo); }}
+                      style={{ width: 76, height: 76, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border, position: 'relative' }}
+                    >
+                      {t.isVideo && VideoPlayer ? (
+                        <VideoPlayer
+                          source={{ uri: t.mediaUrl }}
+                          style={{ width: '100%', height: '100%' }}
+                          resizeMode="cover"
+                          shouldPlay={false}
+                          isMuted
+                        />
+                      ) : (
+                        <RNImage source={{ uri: t.mediaUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      )}
+                      {t.isVideo && (
+                        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' }}>
+                          <Play size={18} color="#FFF" fill="#FFF" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
             )}
 
             {/* ── Search Bar ── */}
@@ -1631,9 +1737,18 @@ export default function FeedScreen() {
           <TouchableOpacity style={[styles.viewerClose, { top: insets.top + 12 }]} onPress={() => setViewerMedia(null)}>
             <X size={24} color="#FFF" />
           </TouchableOpacity>
-          {viewerMedia && (
+          {viewerMedia && viewerMediaIsVideo && VideoPlayer ? (
+            <VideoPlayer
+              source={{ uri: viewerMedia }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+              shouldPlay
+              isLooping
+              useNativeControls
+            />
+          ) : viewerMedia ? (
             <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="cover" />
-          )}
+          ) : null}
         </TouchableOpacity>
       </Modal>
     </View>

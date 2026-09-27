@@ -19,7 +19,7 @@ export async function getPosts() {
     .limit(500);
   if (error) throw error;
   if (!data || data.length === 0) return [];
-  
+
   // Collect unique user IDs and fetch profiles in one query
   const userIds = [...new Set(data.map((p: any) => p.user_id).filter(Boolean))];
   const { data: profiles } = await supabase
@@ -27,12 +27,30 @@ export async function getPosts() {
     .select('id, full_name, username, avatar')
     .in('id', userIds);
   const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
-  
+
+  // Server-authoritative like counts: read actual post_likes rows (the posts.likes
+  // column is not maintained on like/unlike), so the displayed count never drifts.
+  let likeCountById = new Map<string, number>();
+  const postIds = data.map((p: any) => p.id);
+  const { data: likeRows, error: likesErr } = await supabase
+    .from('post_likes')
+    .select('post_id')
+    .in('post_id', postIds);
+  if (likesErr) {
+    console.error('[getPosts] Error fetching like counts:', likesErr.message);
+  } else if (likeRows) {
+    likeCountById = (likeRows as { post_id: string }[]).reduce((m, r) => {
+      m.set(r.post_id, (m.get(r.post_id) || 0) + 1);
+      return m;
+    }, new Map<string, number>());
+  }
+
   // Merge profile data into each post
   return data.map((p: any) => {
     const profile = profileMap.get(p.user_id);
     return {
       ...p,
+      likes: likeCountById.get(p.id) ?? p.likes ?? 0,
       user: profile ? {
         id: profile.id,
         name: profile.full_name,
@@ -47,8 +65,10 @@ export async function createPost(
   userId: string,
   content: string,
   imageUrl?: string,
-  options?: { postKind?: 'post' | 'sell'; category?: string }
+  options?: { postKind?: 'post' | 'sell' }
 ) {
+  // NOTE: the `posts` table has no `category` column. Category is only used
+  // locally for the feed tag display; do not attempt to persist it.
   const { data, error } = await supabase
     .from('posts')
     .insert({
@@ -56,7 +76,6 @@ export async function createPost(
       content,
       image_url: imageUrl || null,
       post_kind: options?.postKind || 'post',
-      category: options?.category || null,
     })
     .select()
     .single();
@@ -148,22 +167,40 @@ export async function getComments(postId: string) {
     .from('post_comments')
     .select('*')
     .eq('post_id', postId)
-    .is('parent_id', null)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  // Fetch replies for each comment
-  const comments = data || [];
-  for (const comment of comments) {
-    const { data: replies } = await supabase
-      .from('post_comments')
-      .select('*')
-      .eq('parent_id', comment.id)
-      .order('created_at', { ascending: true });
-    (comment as any).replies = replies || [];
+  const all = data || [];
+
+  // Join profiles so comments carry real author name/avatar (frontend reads
+  // `author_name`/`author_avatar`; the comments table only stores `author_id`).
+  const authorIds = [...new Set(all.map((c: any) => c.author_id).filter(Boolean))];
+  let profileMap = new Map<string, any>();
+  if (authorIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, avatar')
+      .in('id', authorIds);
+    profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
   }
 
-  return comments;
+  const attachAuthor = (c: any) => {
+    const profile = profileMap.get(c.author_id);
+    return {
+      ...c,
+      author_name: c.author_name || profile?.full_name || profile?.username || 'Unknown',
+      author_avatar: c.author_avatar || profile?.avatar || '',
+    };
+  };
+
+  // Build top-level comments + replies (attached under `replies`)
+  const topLevel = all.filter((c: any) => !c.parent_id).map(attachAuthor);
+  for (const comment of topLevel) {
+    const replies = all.filter((c: any) => c.parent_id === comment.id);
+    (comment as any).replies = replies.map(attachAuthor);
+  }
+
+  return topLevel;
 }
 
 export async function addComment(postId: string, authorId: string, text: string, parentId?: string) {
