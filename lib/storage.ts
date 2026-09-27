@@ -1,6 +1,10 @@
 /**
  * Supabase Storage upload utility.
  * Handles image uploads for posts, stories, and avatars.
+ *
+ * NOTE (SDK 57): expo-file-system removed the legacy `readAsStringAsync` /
+ * `EncodingType` functions — they throw at runtime. We use the new `File`
+ * class API (`new File(uri).bytes()` / `.base64()`) instead.
  */
 import { supabase } from './supabase';
 import { isLocalFileUri, safeImageUrl } from './media';
@@ -12,8 +16,9 @@ export function shouldUploadToStorage(uri: string | null | undefined): boolean {
 }
 
 /**
- * Reads a local file as base64 via expo-file-system, then uploads to Supabase Storage.
- * Returns the public URL on success, or falls back to the original URI on failure.
+ * Reads a local file as bytes via the expo-file-system `File` class, then
+ * uploads to Supabase Storage. Returns the public URL on success, or falls
+ * back to the original URI on failure.
  */
 export async function uploadImageToStorage(
   localUri: string,
@@ -25,7 +30,7 @@ export async function uploadImageToStorage(
   if (!isLocalFileUri(localUri)) return localUri;
 
   // Dynamic import to avoid requiring expo-file-system at bundle evaluation
-  const { readAsStringAsync, EncodingType } = await import('expo-file-system');
+  const { File } = await import('expo-file-system');
 
   let lastError: unknown = null;
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`;
@@ -33,15 +38,13 @@ export async function uploadImageToStorage(
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const base64 = await readAsStringAsync(localUri, { encoding: EncodingType.Base64 });
-      const byteChars = atob(base64);
-      const byteNums = new Array(byteChars.length);
-      for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
-      const byteArr = new Uint8Array(byteNums);
+      const file = new File(localUri);
+      // Read raw bytes directly — no base64 round-trip needed.
+      const bytes = await file.bytes();
 
       const { data, error } = await supabase.storage
         .from(bucket)
-        .upload(path, byteArr, {
+        .upload(path, bytes, {
           contentType: 'image/jpeg',
           upsert: true,
         });
@@ -96,8 +99,8 @@ export async function persistableImageUri(
   // Storage unavailable — read local file and embed as a data URI so the
   // image persists across refresh and shows on any device.
   try {
-    const { readAsStringAsync, EncodingType } = await import('expo-file-system');
-    const base64 = await readAsStringAsync(localUri, { encoding: EncodingType.Base64 });
+    const { File } = await import('expo-file-system');
+    const base64 = await new File(localUri).base64();
     return `data:image/jpeg;base64,${base64}`;
   } catch {
     return undefined;
