@@ -269,7 +269,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
       type: 'service_grab',
       title: `${actorName} offered to help with "${request.title}"`,
       body: `offered to help with "${request.title}"`,
-      data: { request_id: request.id, request_title: request.title, item_id: request.id, item_title: request.title },
+      data: { request_id: request.id, request_title: request.title, item_id: request.id, item_title: request.title, request_image: request.image || '', request_price: budgetLabel },
       read: false,
       created_at: new Date().toISOString(),
     }).then(({ error }) => {

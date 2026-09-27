@@ -228,6 +228,8 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
         data: {
           skill_id: id,
           skill_title: skill.title,
+          skill_image: skill.imageUrl || '',
+          skill_price: Number(skill.price || 0),
         },
         read: false,
         created_at: new Date().toISOString(),

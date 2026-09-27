@@ -186,6 +186,27 @@ export default function InboxScreen() {
     return n.message;
   };
 
+  // Image + price for grab notifications (bundle/skill/service) so the card shows the item
+  const notifImage = (n: any): string => {
+    const d = n.data || {};
+    if (n.type === 'bundle_grab') return d.bundle_image || '';
+    if (n.type === 'skill_grab') return d.skill_image || '';
+    if (n.type === 'service_grab') return d.request_image || '';
+    return '';
+  };
+  const notifPriceLabel = (n: any): string => {
+    const d = n.data || {};
+    let raw: any;
+    if (n.type === 'bundle_grab') raw = d.bundle_price;
+    else if (n.type === 'skill_grab') raw = d.skill_price;
+    else if (n.type === 'service_grab') raw = d.request_price;
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw.startsWith('$') ? raw : `$${raw}`;
+    const num = Number(raw);
+    if (!num || num <= 0) return '';
+    return `$${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`;
+  };
+
   // ─── Notifications Tab ───
 
   const renderNotifications = () => {
@@ -284,10 +305,17 @@ export default function InboxScreen() {
                 <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
                   {notifPreview(n)}
                 </Text>
+                {notifPriceLabel(n) ? (
+                  <Text style={[styles.cardPrice, { color: colors.accent }]} numberOfLines={1}>
+                    {notifPriceLabel(n)}
+                  </Text>
+                ) : null}
               </View>
-              {/* Post thumbnail for like/comment/mention */}
+              {/* Item thumbnail: post image for social, or grabbed item image */}
               {(n.type === 'like' || n.type === 'comment' || n.type === 'mention') && n.data?.post_image_url ? (
-                <Image source={{ uri: n.data.post_image_url }} style={{ width: 44, height: 44, borderRadius: 6, marginLeft: 8 }} />
+                <Image source={{ uri: n.data.post_image_url }} style={{ width: 48, height: 48, borderRadius: 8, marginLeft: 8 }} />
+              ) : notifImage(n) ? (
+                <Image source={{ uri: notifImage(n) }} style={{ width: 48, height: 48, borderRadius: 8, marginLeft: 8, backgroundColor: colors.backgroundTertiary }} />
               ) : null}
               {!n.read && (
                 <View style={[styles.unread, { backgroundColor: colors.accent }]}>
@@ -623,6 +651,7 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 15, fontWeight: '600', flex: 1 },
   cardTime: { fontSize: 12, marginLeft: 8 },
   cardPreview: { fontSize: 13, lineHeight: 18 },
+  cardPrice: { fontSize: 13, fontWeight: '700', marginTop: 2 },
   unread: {
     width: 20, height: 20, borderRadius: 10,
     alignItems: 'center', justifyContent: 'center', marginLeft: 8,

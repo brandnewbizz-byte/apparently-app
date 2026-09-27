@@ -253,6 +253,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         data: {
           bundle_id: id,
           bundle_title: bundle.title,
+          bundle_image: bundle.imageUrl || '',
+          bundle_price: Number(bundle.price || 0),
         },
         read: false,
         created_at: new Date().toISOString(),
