@@ -2,7 +2,7 @@ import {
   MapPin, Sparkles, Dumbbell, Utensils, Palette,
   Plane, Heart, Music, Play, Plus,
   MessageCircle, Wrench, Bookmark,
-  Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft,
+  FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
 } from 'lucide-react-native';
@@ -101,9 +101,9 @@ const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> 
 // All mock data removed — feed is live-only from Supabase + user posts
 
 const FILTERS = [
-  { key: 'all', label: 'All', icon: FileText },
-  { key: 'photo', label: 'Photos', icon: ImageIcon },
-  { key: 'video', label: 'Videos', icon: VideoIcon },
+  { key: 'all', label: 'All' },
+  { key: 'photo', label: 'Photos' },
+  { key: 'video', label: 'Videos' },
 ];
 
 // ── Time helpers ──
@@ -1053,39 +1053,27 @@ export default function FeedScreen() {
           </View>
         </View>
 
-        {/* Filter chips */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterContent}
-        >
+        {/* Filter tabs — segmented, icon-free, active underline */}
+        <View style={[styles.filterTabs, { borderBottomColor: colors.border }]}>
           {FILTERS.map((f) => {
-            const Icon = f.icon;
             const isActive = activeFilter === f.key;
             return (
               <TouchableOpacity
                 key={f.key}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor: isActive ? colors.accent : colors.surface,
-                    borderColor: isActive ? colors.accent : colors.border,
-                  },
-                ]}
+                style={styles.filterTab}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setActiveFilter(f.key);
                 }}
               >
-                <Icon size={13} color={isActive ? '#FFF' : colors.textSecondary} />
-                <Text style={[styles.filterText, { color: isActive ? '#FFF' : colors.textSecondary }]}>
+                <Text style={[styles.filterTabText, { color: isActive ? colors.text : colors.textTertiary }]}>
                   {f.label}
                 </Text>
+                <View style={[styles.filterTabIndicator, { backgroundColor: isActive ? colors.accent : 'transparent' }]} />
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </View>
 
         {/* ── Stories Row (fixed header) ── */}
         {storyUsers.length > 0 && (
@@ -1327,10 +1315,10 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Filters
-  filterScroll: { marginTop: 10, marginBottom: 6 },
-  filterContent: { gap: 8, paddingRight: 16 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
-  filterText: { fontSize: 13, fontWeight: '600' },
+  filterTabs: { flexDirection: 'row', paddingHorizontal: 12, marginTop: 10, marginBottom: 4, borderBottomWidth: 1 },
+  filterTab: { flex: 1, alignItems: 'center', paddingBottom: 8 },
+  filterTabText: { fontSize: 14, fontWeight: '600' },
+  filterTabIndicator: { height: 2, borderRadius: 1, marginTop: 6, alignSelf: 'stretch' },
   // Card
   card: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
