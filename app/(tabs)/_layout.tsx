@@ -1,15 +1,17 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, Users, CalendarDays, User, Search } from 'lucide-react-native';
+import { Home, Newspaper, Users, User, Search, Plus } from 'lucide-react-native';
 import React from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
+import { useCreatePost } from '@/contexts/CreatePostContext';
 
 export default function TabLayout() {
   const { colors } = useTheme();
   const { tabBarTranslateY } = useTabBar();
+  const { openCreate } = useCreatePost();
   const insets = useSafeAreaInsets();
 
   const baseHeight = Platform.OS === 'ios' ? 56 : 52;
@@ -74,10 +76,32 @@ export default function TabLayout() {
             ),
           }}
         />
+        {/* Centered create-post button — raises above the bar, opens the compose flow */}
+        <Tabs.Screen
+          name="create"
+          options={{
+            title: 'Create',
+            tabBarShowLabel: false,
+            tabBarButton: () => (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Create post"
+                onPress={openCreate}
+                activeOpacity={0.8}
+                style={styles.createButtonWrap}
+              >
+                <View style={[styles.createButton, { backgroundColor: colors.accent }]}>
+                  <Plus size={28} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            ),
+          }}
+        />
         <Tabs.Screen
           name="live"
           options={{
             tabBarShowLabel: false,
+            title: 'Live',
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
                 <Users size={24} color={color} />
@@ -85,15 +109,11 @@ export default function TabLayout() {
             ),
           }}
         />
+        {/* Planner moved to top-right header icons (feed + profile) — hidden from bottom nav */}
         <Tabs.Screen
           name="planner"
           options={{
-            title: 'Planner',
-            tabBarIcon: ({ color, focused }) => (
-              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <CalendarDays size={24} color={color} />
-              </View>
-            ),
+            href: null,
           }}
         />
         <Tabs.Screen
@@ -116,5 +136,21 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 12,
     marginBottom: -4,
+  },
+  createButtonWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 4,
+  },
+  createButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -18,
+    borderWidth: 4,
+    borderColor: 'transparent',
   },
 });

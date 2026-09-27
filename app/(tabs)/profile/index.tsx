@@ -6,6 +6,7 @@ import {
   MapPin,
   ChevronRight,
   Calendar,
+  CalendarDays,
   Package,
   Eye,
   MessageSquare,
@@ -180,6 +181,12 @@ function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPos
             timestamp: p.created_at,
             type: 'photo',
             isOwnPost: true,
+            user: {
+              id: authUser?.id || '',
+              name: authUser?.fullName || authUser?.username || 'You',
+              username: authUser?.username || '',
+              avatar: authUser?.avatar || '',
+            },
           }))
           .filter(p => (p.caption || '').trim() !== '' || p.imageUrl);
         setAllPosts(mapped);
@@ -610,6 +617,13 @@ export default function ProfileScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity 
+                style={styles.plannerButton}
+                onPress={() => router.push('/(tabs)/planner' as any)}
+              >
+                <CalendarDays size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity 
                 style={styles.settingsButton}
                 onPress={() => router.push('/profile/settings' as any)}
               >
@@ -1024,7 +1038,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
   const currentPost = postsList[activeIndex] || post;
   const postId = currentPost?.id || '';
   const imageUrl = currentPost?.imageUrl || currentPost?.image_url || currentPost?.mediaUri || '';
-  const authorName = currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || currentPost?.user?.username || 'User';
+  const authorName = currentPost?.user?.username || currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || currentPost?.author?.username || (currentPost?.isOwnPost ? (authUser?.username || authUser?.fullName || 'You') : 'User');
   const caption = currentPost?.caption || currentPost?.content || '';
   const timestamp = currentPost?.timestamp || currentPost?.created_at || '';
 
@@ -1405,6 +1419,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 60,
     left: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plannerButton: {
+    position: 'absolute',
+    top: 60,
+    right: 74,
     width: 44,
     height: 44,
     borderRadius: 22,

@@ -1,7 +1,7 @@
 import {
   MapPin, Sparkles, Dumbbell, Utensils, Palette,
   Plane, Heart, Music, Play, Plus,
-  MessageCircle, Wrench, Bookmark,
+  MessageCircle, Wrench, Bookmark, CalendarDays,
   FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
@@ -1086,10 +1086,10 @@ export default function FeedScreen() {
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.accent }]}
-              onPress={handleCreateTap}
+              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => router.push('/(tabs)/planner' as any)}
             >
-              <Plus size={20} color="#FFF" />
+              <CalendarDays size={20} color={colors.text} />
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}

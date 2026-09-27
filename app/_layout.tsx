@@ -20,6 +20,7 @@ import { SocialProvider } from '@/contexts/SocialContext';
 import { ConnectionsProvider } from '@/contexts/ConnectionsContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { TabBarProvider } from '@/contexts/TabBarContext';
+import { CreatePostProvider } from '@/contexts/CreatePostContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
 import { RoomProvider } from '@/contexts/RoomContext';
 import { PlanProvider } from '@/contexts/PlanContext';
@@ -227,9 +228,11 @@ export default function RootLayout() {
                                       <PlannerProvider>
                                         <OrdersProvider>
                                           <TabBarProvider>
-                                            <AppErrorBoundary>
-                                              <RootLayoutNavWithTheme />
-                                            </AppErrorBoundary>
+                                            <CreatePostProvider>
+                                              <AppErrorBoundary>
+                                                <RootLayoutNavWithTheme />
+                                              </AppErrorBoundary>
+                                            </CreatePostProvider>
                                           </TabBarProvider>
                                         </OrdersProvider>
                                       </PlannerProvider>
