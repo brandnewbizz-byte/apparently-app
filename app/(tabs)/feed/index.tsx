@@ -1,8 +1,8 @@
 import {
-  Calendar, Clock, MapPin, Users, Sparkles, Dumbbell, Utensils, Palette,
-  Plane, Heart, Music, Zap, Play, Plus, Eye,
-  MessageCircle, CheckCircle2, Wrench, Bookmark,
-  Radio, Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft, Camera,
+  MapPin, Sparkles, Dumbbell, Utensils, Palette,
+  Plane, Heart, Music, Play, Plus,
+  MessageCircle, Wrench, Bookmark,
+  Image as ImageIcon, Video as VideoIcon, FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
 } from 'lucide-react-native';
@@ -40,7 +40,6 @@ import { useAuth } from '@/contexts/AuthContext';
 
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
-import { EXTERNAL_EVENTS } from '@/lib/externalEvents';
 import SkeletonCard from '@/components/SkeletonCard';
 import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
 import { supabase } from '@/lib/supabase';
@@ -54,7 +53,7 @@ const FEED_MEDIA_HEIGHT = Math.round(SCREEN_WIDTH / FEED_ASPECT);
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type PostType = 'text' | 'photo' | 'video' | 'live' | 'event' | 'plan' | 'achievement' | 'marketplace' | 'rental' | 'swap' | 'connection' | 'request' | 'bundle';
+type PostType = 'text' | 'photo' | 'video' | 'marketplace';
 
 interface Comment {
   id: string;
@@ -66,7 +65,6 @@ interface Comment {
 interface FeedPost {
   id: string;
   type: PostType;
-  title?: string;
   author: { name: string; avatar: string; userId?: string };
   category: string;
   timestamp: string;
@@ -75,19 +73,13 @@ interface FeedPost {
   mediaWidth?: number;
   mediaHeight?: number;
   location?: string;
-  date?: string;
-  attendees?: number;
-  maxAttendees?: number;
   tags: string[];
   likes: number;
   stats: { saves: number; comments: number };
-  viewerCount?: number;
-  streamDuration?: string;
   videoUrl?: string;
   authorId?: string;
   comments_list?: Comment[];
   price?: number | string;
-  pricePerNight?: string;
 }
 
 const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> = {
@@ -106,21 +98,12 @@ const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> 
   Bundles: { icon: Package, color: '#8B5CF6', bg: '#8B5CF615' },
 };
 
-function formatViewers(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-}
-
 // All mock data removed — feed is live-only from Supabase + user posts
-const MOCK_COMMENTS: Comment[] = [];
 
 const FILTERS = [
   { key: 'all', label: 'All', icon: FileText },
-  { key: 'live', label: 'Live', icon: Radio },
   { key: 'photo', label: 'Photos', icon: ImageIcon },
   { key: 'video', label: 'Videos', icon: VideoIcon },
-  { key: 'event', label: 'Events', icon: Sparkles },
-  { key: 'plan', label: 'Plans', icon: Calendar },
 ];
 
 // ── Time helpers ──
@@ -151,18 +134,12 @@ function PostDetailModal({
   onClose,
   colors,
   onSave,
-  onJoin,
-  onWatch,
-  onCelebrate,
 }: {
   post: FeedPost;
   visible: boolean;
   onClose: () => void;
   colors: any;
   onSave: (postId: string) => void;
-  onJoin: (postId: string) => void;
-  onWatch: (postId: string) => void;
-  onCelebrate: (postId: string) => void;
 }) {
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
@@ -218,17 +195,6 @@ function PostDetailModal({
     addComment(post.id, trimmed);
   };
 
-  const badge = (() => {
-    switch (post.type) {
-      case 'live': return { label: 'LIVE', bg: '#EF444415', fg: '#EF4444' };
-      case 'event': return { label: 'Event', bg: '#8B5CF615', fg: '#8B5CF6' };
-      case 'plan': return { label: 'Plan', bg: '#3B82F615', fg: '#3B82F6' };
-      case 'achievement': return { label: 'Milestone', bg: '#10B98115', fg: '#10B981' };
-      case 'bundle': return { label: 'Bundle', bg: '#8B5CF615', fg: '#8B5CF6' };
-      default: return null;
-    }
-  })();
-
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
@@ -256,11 +222,6 @@ function PostDetailModal({
                 <View style={{ flex: 1 }}>
                   <View style={styles.nameRow}>
                     <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
-                    {badge && (
-                      <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                        <Text style={[styles.badgeText, { color: badge.fg }]}>{badge.label}</Text>
-                      </View>
-                    )}
                   </View>
                   <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
                     {timeAgo(post.timestamp)}{post.location ? ` · ${post.location}` : ''}
@@ -269,21 +230,14 @@ function PostDetailModal({
               </View>
 
               {/* Caption */}
-              {(post.type === 'live' && post.title) ? (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={[styles.caption, { color: colors.text, fontWeight: '700', fontSize: 17 }]}>{post.title}</Text>
-                  <Text style={[styles.caption, { color: colors.textSecondary, marginTop: 4 }]}>{post.caption}</Text>
-                </View>
-              ) : (
-                <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
-              )}
+              <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
 
               {/* Media */}
               {post.media && (
-                <View style={post.type === 'live' ? styles.liveMediaWrap : styles.mediaWrap}>
+                <View style={styles.mediaWrap}>
                   <RNImage
                     source={{ uri: post.media }}
-                    style={[styles.modalMedia, { height: post.type === 'live' ? 280 : 400 }]}
+                    style={[styles.modalMedia, { height: 400 }]}
                     resizeMode="cover"
                   />
                   {post.type === 'video' && post.videoUrl && (
@@ -295,47 +249,6 @@ function PostDetailModal({
                         <Play size={24} color="#FFF" fill="#FFF" style={{ marginLeft: 2 }} />
                       </View>
                     </TouchableOpacity>
-                  )}
-                  {post.type === 'live' && (
-                    <View style={styles.liveOverlay}>
-                      <View style={styles.livePill}>
-                        <View style={styles.liveDotWhite} />
-                        <Text style={styles.livePillText}>LIVE</Text>
-                      </View>
-                      <View style={styles.liveInfo}>
-                        <View style={styles.liveInfoPill}>
-                          <Eye size={11} color="#FFF" />
-                          <Text style={styles.liveInfoText}>{formatViewers(post.viewerCount || 0)}</Text>
-                        </View>
-                        <Text style={styles.liveInfoText}>{post.streamDuration}</Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {/* Event/Plan meta */}
-              {(post.type === 'event' || post.type === 'plan') && (
-                <View style={[styles.metaRow, { marginTop: 12 }]}>
-                  {post.date && (
-                    <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-                      <Clock size={13} color={colors.textSecondary} />
-                      <Text style={[styles.metaChipText, { color: colors.textSecondary }]}>{post.date}</Text>
-                    </View>
-                  )}
-                  {post.location && (
-                    <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-                      <MapPin size={13} color={colors.textSecondary} />
-                      <Text style={[styles.metaChipText, { color: colors.textSecondary }]}>{post.location}</Text>
-                    </View>
-                  )}
-                  {post.attendees != null && (
-                    <View style={[styles.metaChip, { backgroundColor: colors.surface }]}>
-                      <Users size={13} color={colors.textSecondary} />
-                      <Text style={[styles.metaChipText, { color: colors.textSecondary }]}>
-                        {post.attendees}/{post.maxAttendees}
-                      </Text>
-                    </View>
                   )}
                 </View>
               )}
@@ -363,24 +276,6 @@ function PostDetailModal({
                 <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)}>
                   <Bookmark size={20} color={colors.textTertiary} />
                 </TouchableOpacity>
-                {post.type === 'live' && (
-                  <TouchableOpacity style={[styles.joinBtn, { backgroundColor: '#EF4444', marginLeft: 'auto' }]} onPress={() => onWatch(post.id)}>
-                    <Play size={14} color="#FFF" fill="#FFF" />
-                    <Text style={styles.joinBtnText}>Watch Live</Text>
-                  </TouchableOpacity>
-                )}
-                {(post.type === 'event' || post.type === 'plan') && (
-                  <TouchableOpacity style={[styles.joinBtn, { backgroundColor: colors.accent, marginLeft: 'auto' }]} onPress={() => onJoin(post.id)}>
-                    <Users size={14} color="#FFF" />
-                    <Text style={styles.joinBtnText}>Join</Text>
-                  </TouchableOpacity>
-                )}
-                {post.type === 'achievement' && (
-                  <TouchableOpacity style={[styles.celebrateBtn, { marginLeft: 'auto' }]} onPress={() => onCelebrate(post.id)}>
-                    <Sparkles size={14} color="#10B981" />
-                    <Text style={[styles.celebrateBtnText, { color: '#10B981' }]}>Celebrate</Text>
-                  </TouchableOpacity>
-                )}
               </View>
 
               {/* Comments header */}
@@ -441,9 +336,6 @@ function PostCard({
   onPress,
   onSave,
   onComment,
-  onWatch,
-  onJoin,
-  onCelebrate,
   onTagTap,
   onMediaTap,
   onShare,
@@ -457,9 +349,6 @@ function PostCard({
   onPress: () => void;
   onSave: (postId: string) => void;
   onComment: (post: FeedPost) => void;
-  onWatch: (postId: string) => void;
-  onJoin: (postId: string) => void;
-  onCelebrate: (postId: string) => void;
   onTagTap: (tag: string) => void;
   onMediaTap: (uri: string) => void;
   onShare: (post: FeedPost) => void;
@@ -531,13 +420,7 @@ function PostCard({
 
   const typeLabel = (() => {
     switch (post.type) {
-      case 'live': return 'LIVE';
-      case 'event': return 'Event';
-      case 'plan': return 'Plan';
       case 'marketplace': return post.price != null ? `$${post.price}` : 'For Sale';
-      case 'rental': return post.pricePerNight || 'For Rent';
-      case 'swap': return 'Trade';
-      case 'bundle': return 'Bundle';
       default: return null;
     }
   })();
@@ -586,7 +469,7 @@ function PostCard({
             style={[
               igCardStyles.media,
               {
-                height: post.type === 'live' ? 240 : FEED_MEDIA_HEIGHT,
+                height: FEED_MEDIA_HEIGHT,
               },
             ]}
             resizeMode="cover"
@@ -604,21 +487,6 @@ function PostCard({
             <View style={igCardStyles.playOverlay}>
               <View style={igCardStyles.playBtn}>
                 <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
-              </View>
-            </View>
-          )}
-          {post.type === 'live' && (
-            <View style={igCardStyles.liveOverlay}>
-              <View style={igCardStyles.liveBadge}>
-                <View style={igCardStyles.liveDot} />
-                <Text style={igCardStyles.liveText}>LIVE</Text>
-              </View>
-              <View style={igCardStyles.liveInfoRow}>
-                <View style={igCardStyles.liveCountBadge}>
-                  <Eye size={11} color="#FFF" />
-                  <Text style={igCardStyles.liveCountText}>{formatViewers(post.viewerCount || 0)}</Text>
-                </View>
-                <Text style={igCardStyles.liveCountText}>{post.streamDuration}</Text>
               </View>
             </View>
           )}
@@ -682,26 +550,6 @@ function PostCard({
         </View>
       ) : null}
 
-      {/* Event/Plan meta — subtle under caption */}
-      {(post.type === 'event' || post.type === 'plan') && (
-        <View style={igCardStyles.eventMeta}>
-          {post.date && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Clock size={12} color={colors.textTertiary} />
-              <Text style={[igCardStyles.eventMetaText, { color: colors.textTertiary }]}>{post.date}</Text>
-            </View>
-          )}
-          {post.attendees != null && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Users size={12} color={colors.textTertiary} />
-              <Text style={[igCardStyles.eventMetaText, { color: colors.textTertiary }]}>
-                {post.attendees}/{post.maxAttendees}
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
-
       {/* Comments link */}
       {(post.stats.comments > 0 || post.comments_list?.length) && (
         <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
@@ -717,30 +565,10 @@ function PostCard({
           {timeAgo(post.timestamp)}
         </Text>
         {/* Type-specific CTA pill */}
-        {post.type === 'live' ? (
-          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#EF4444' }]} onPress={() => onWatch(post.id)}>
-            <Play size={11} color="#FFF" fill="#FFF" />
-            <Text style={igCardStyles.ctaPillText}>Watch Live</Text>
-          </TouchableOpacity>
-        ) : post.type === 'event' || post.type === 'plan' ? (
-          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: colors.accent }]} onPress={() => onJoin(post.id)}>
-            <Users size={11} color="#FFF" />
-            <Text style={igCardStyles.ctaPillText}>Join</Text>
-          </TouchableOpacity>
-        ) : post.type === 'marketplace' ? (
+        {post.type === 'marketplace' ? (
           <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={onPress}>
             <ShoppingBag size={11} color="#FFF" />
             <Text style={igCardStyles.ctaPillText}>View</Text>
-          </TouchableOpacity>
-        ) : post.type === 'bundle' ? (
-          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#8B5CF6' }]} onPress={onPress}>
-            <Package size={11} color="#FFF" />
-            <Text style={igCardStyles.ctaPillText}>Grab</Text>
-          </TouchableOpacity>
-        ) : post.type === 'achievement' ? (
-          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={() => onCelebrate(post.id)}>
-            <Sparkles size={11} color="#FFF" />
-            <Text style={igCardStyles.ctaPillText}>Celebrate</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -790,9 +618,6 @@ export default function FeedScreen() {
       if (!error && data) setSavedIds(new Set((data as any[]).map(r => r.post_id)));
     });
   }, [authUser?.id]);
-
-  const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
-  const [celebratedIds, setCelebratedIds] = useState<Set<string>>(new Set());
 
   const queryClient = useQueryClient();
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
@@ -972,19 +797,6 @@ export default function FeedScreen() {
     } catch (_) {}
   };
 
-  // ── Promoted external events (admin-managed) ──
-  const externalEvents = useMemo(() => EXTERNAL_EVENTS.map((ev) => ({
-    ...ev,
-    // Compute correct day-of-week dynamically instead of hardcoded 2025 labels
-    displayDate: (() => {
-      try {
-        const d = new Date(ev.date);
-        if (isNaN(d.getTime())) return ev.date;
-        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      } catch { return ev.date; }
-    })(),
-  })), []);
-
   // ── Transform stories into StoryUser[] format for StoriesViewer ──
   const storyUsers = useMemo((): StoryUser[] => {
     // Combine user stories and feed stories, group by user
@@ -1043,7 +855,7 @@ export default function FeedScreen() {
     const isDuplicate = (post: FeedPost): boolean => {
       if (seenIds.has(post.id)) return true;
       // Near-duplicate detection: only for posts with actual text content
-      const caption = (post.title || post.caption || '').toLowerCase().trim();
+      const caption = (post.caption || '').toLowerCase().trim();
       if (caption) {
         const contentKey = `${caption}|${post.author.name.toLowerCase().trim()}`;
         if (seenContentKeys.has(contentKey)) return true;
@@ -1054,7 +866,7 @@ export default function FeedScreen() {
     const addPost = (post: FeedPost) => {
       if (isDuplicate(post)) return;
       seenIds.add(post.id);
-      const caption = (post.title || post.caption || '').toLowerCase().trim();
+      const caption = (post.caption || '').toLowerCase().trim();
       if (caption) {
         seenContentKeys.add(`${caption}|${post.author.name.toLowerCase().trim()}`);
       }
@@ -1069,7 +881,7 @@ export default function FeedScreen() {
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      all = all.filter(p => (p.caption || p.title || '').toLowerCase().includes(q) || p.tags?.some(t => t.toLowerCase().includes(q)));
+      all = all.filter(p => (p.caption || '').toLowerCase().includes(q) || p.tags?.some(t => t.toLowerCase().includes(q)));
     }
     // Keep newest-first order (posts are pre-sorted in loadFeedPosts)
     return all;
@@ -1108,39 +920,11 @@ export default function FeedScreen() {
     });
   };
 
-  const handleJoinPost = (postId: string) => {
-    setJoinedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(postId)) next.delete(postId); else next.add(postId);
-      return next;
-    });
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const handleWatchLive = (postId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Navigate to Spot tab
-    router.push('/(tabs)/live');
-  };
-
-  const handleCelebrate = (postId: string) => {
-    const isAdding = !celebratedIds.has(postId);
-    setCelebratedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(postId)) next.delete(postId); else next.add(postId);
-      return next;
-    });
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (isAdding) {
-      Alert.alert('🎉 Celebrated!', 'You showed some love.');
-    }
-  };
-
   const handleSharePost = async (post: FeedPost) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await Share.share({
-        message: post.title ? `${post.title}\n\n${post.caption}` : post.caption,
+        message: post.caption,
         url: post.media,
       });
     } catch (err) {
@@ -1172,14 +956,6 @@ export default function FeedScreen() {
     }
     // Remove from the local feed immediately so it disappears for this user.
     setUserPosts((prev) => prev.filter((p) => p.id !== postId));
-  };
-
-  const handleEventCardPress = (event: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Event detail page removed — navigate to external URL if available
-    if (event.externalUrl) {
-      router.push(event.externalUrl as any);
-    }
   };
 
   const importVideoRef = useRef<any>(null);
@@ -1319,8 +1095,6 @@ export default function FeedScreen() {
     setActiveFilter('all');
   };
 
-  const liveCount = useMemo(() => userPosts.filter((p) => p.type === 'live').length, [userPosts]);
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -1329,7 +1103,7 @@ export default function FeedScreen() {
           <View>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Feed</Text>
             <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
-              {tagFilter ? `#${tagFilter} · ` : ''}{filteredPosts.length} posts{activeFilter === 'all' && !tagFilter && liveCount > 0 ? ` · ${liveCount} live` : ''}
+              {tagFilter ? `#${tagFilter} · ` : ''}{filteredPosts.length} posts
             </Text>
           </View>
           <View style={styles.headerActions}>
@@ -1358,15 +1132,14 @@ export default function FeedScreen() {
           {FILTERS.map((f) => {
             const Icon = f.icon;
             const isActive = activeFilter === f.key;
-            const isLive = f.key === 'live';
             return (
               <TouchableOpacity
                 key={f.key}
                 style={[
                   styles.filterChip,
                   {
-                    backgroundColor: isActive ? (isLive ? '#EF4444' : colors.accent) : colors.surface,
-                    borderColor: isActive ? (isLive ? '#EF4444' : colors.accent) : colors.border,
+                    backgroundColor: isActive ? colors.accent : colors.surface,
+                    borderColor: isActive ? colors.accent : colors.border,
                   },
                 ]}
                 onPress={() => {
@@ -1374,7 +1147,6 @@ export default function FeedScreen() {
                   setActiveFilter(f.key);
                 }}
               >
-                {isLive && <View style={[styles.filterLiveDot, { backgroundColor: isActive ? '#FFF' : '#EF4444' }]} />}
                 <Icon size={13} color={isActive ? '#FFF' : colors.textSecondary} />
                 <Text style={[styles.filterText, { color: isActive ? '#FFF' : colors.textSecondary }]}>
                   {f.label}
@@ -1419,9 +1191,6 @@ export default function FeedScreen() {
               }}
               onSave={handleSavePost}
               onComment={handleComment}
-              onWatch={handleWatchLive}
-              onJoin={handleJoinPost}
-              onCelebrate={handleCelebrate}
               onShare={handleSharePost}
               onTagTap={handleTagTap}
               onMediaTap={(uri) => { setViewerMediaIsVideo(false); setViewerMedia(uri); }}
@@ -1587,10 +1356,10 @@ export default function FeedScreen() {
                       onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedPost(post); }}
                     >
                       <Text style={{ fontSize: 11, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' }}>
-                        {post.type === 'marketplace' ? 'For Sale' : post.type === 'rental' ? 'Rental' : post.type === 'swap' ? 'Trade' : post.type === 'event' ? 'Event' : post.type}
+                        {post.type === 'marketplace' ? 'For Sale' : post.type}
                       </Text>
                       <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }} numberOfLines={2}>
-                        {post.title || post.caption}
+                        {post.caption}
                       </Text>
                       {post.location ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -1603,53 +1372,6 @@ export default function FeedScreen() {
                           ${post.price}
                         </Text>
                       )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* ── Happening This Week ── */}
-            {externalEvents.length > 0 && activeFilter === 'all' && !tagFilter && (
-              <View style={{ marginBottom: 16 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 10 }}>
-                  <Calendar size={15} color="#EF4444" />
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Happening This Week</Text>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444' }} />
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
-                  {externalEvents.slice(0, 6).map((event: any) => (
-                    <TouchableOpacity
-                      key={event.id}
-                      style={{
-                        width: 200,
-                        borderRadius: 16,
-                        backgroundColor: colors.surface,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        overflow: 'hidden',
-                      }}
-                      onPress={() => handleEventCardPress(event)}
-                    >
-                      {event.image ? (
-                        <RNImage source={{ uri: event.image }} style={{ width: '100%', height: 100 }} resizeMode="cover" />
-                      ) : (
-                        <View style={{ width: '100%', height: 100, backgroundColor: colors.accent + '15', alignItems: 'center', justifyContent: 'center' }}>
-                          <Calendar size={28} color={colors.accent} />
-                        </View>
-                      )}
-                      <View style={{ padding: 10, gap: 4 }}>
-                        <Text style={{ fontSize: 10, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' }}>
-                          {event.category || 'Event'}{event.is_free ? ' · FREE' : ''}
-                        </Text>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }} numberOfLines={2}>
-                          {event.title}
-                        </Text>
-                        <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '500' }}>
-                          {event.displayDate || event.date}{event.venue ? ` · ${event.venue}` : ''}
-                        </Text>
-                        {event.price && <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{event.price}</Text>}
-                      </View>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -1679,9 +1401,6 @@ export default function FeedScreen() {
           onClose={() => setSelectedPost(null)}
           colors={colors}
           onSave={handleSavePost}
-          onJoin={handleJoinPost}
-          onWatch={handleWatchLive}
-          onCelebrate={handleCelebrate}
         />
       )}
 
@@ -1775,7 +1494,6 @@ const styles = StyleSheet.create({
   filterContent: { gap: 8, paddingRight: 16 },
   filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: '600' },
-  filterLiveDot: { width: 5, height: 5, borderRadius: 3 },
   // Card
   card: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -1783,9 +1501,6 @@ const styles = StyleSheet.create({
   avatar: { width: 42, height: 42, borderRadius: 14 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   authorName: { fontSize: 14, fontWeight: '700' },
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
-  badgeText: { fontSize: 10, fontWeight: '700' },
-  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#EF4444' },
   metaSub: { fontSize: 12, marginTop: 1.5 },
   // Caption
   caption: { fontSize: 14, lineHeight: 21 },
@@ -1794,19 +1509,6 @@ const styles = StyleSheet.create({
   mediaImg: { width: '100%', borderRadius: 12 },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
-  // Live media
-  liveMediaWrap: { borderRadius: 12, overflow: 'hidden', position: 'relative', marginTop: 8 },
-  liveOverlay: { position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  livePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5 },
-  liveDotWhite: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#FFF' },
-  livePillText: { fontSize: 10, fontWeight: '800', color: '#FFF' },
-  liveInfo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  liveInfoPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5 },
-  liveInfoText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
-  // Meta
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  metaChipText: { fontSize: 11, fontWeight: '600' },
   // Tags
   bottomRow: { flexDirection: 'row', alignItems: 'center' },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
@@ -1816,10 +1518,6 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8 },
   actionText: { fontSize: 13, fontWeight: '600' },
-  joinBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10 },
-  joinBtnText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
-  celebrateBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
-  celebrateBtnText: { fontSize: 13, fontWeight: '700' },
   // List
   listContent: { paddingBottom: 100 },
   // Empty
@@ -1910,13 +1608,6 @@ const igCardStyles = StyleSheet.create({
   media: { width: SCREEN_WIDTH, backgroundColor: '#0a0a0a' },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  liveOverlay: { position: 'absolute', top: 10, left: 12, right: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#FFF' },
-  liveText: { fontSize: 10, fontWeight: '800', color: '#FFF' },
-  liveInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  liveCountBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 4 },
-  liveCountText: { fontSize: 10, fontWeight: '600', color: '#FFF' },
   textOnlyArea: { paddingHorizontal: 16, paddingVertical: 24, minHeight: 120, justifyContent: 'center' },
   textOnlyCaption: { fontSize: 16, lineHeight: 24 },
   actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
@@ -1928,8 +1619,6 @@ const igCardStyles = StyleSheet.create({
   captionText: { fontSize: 13, lineHeight: 18 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   hashTag: { fontSize: 13, fontWeight: '600' },
-  eventMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 12, paddingVertical: 4 },
-  eventMetaText: { fontSize: 12, fontWeight: '500' },
   commentsLink: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 2 },
   commentsLinkText: { fontSize: 13 },
   timestampRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 4, paddingBottom: 14 },
