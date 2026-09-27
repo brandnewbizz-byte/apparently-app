@@ -1033,9 +1033,6 @@ export default function FeedScreen() {
         <View style={styles.headerRow}>
           <View>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Feed</Text>
-            <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
-              {tagFilter ? `#${tagFilter} · ` : ''}{filteredPosts.length} posts
-            </Text>
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -1311,7 +1308,6 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingBottom: 6, borderBottomWidth: 1 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, marginTop: 2 },
   headerActions: { flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Filters
