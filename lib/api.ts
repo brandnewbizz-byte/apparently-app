@@ -65,16 +65,19 @@ export async function createPost(
   userId: string,
   content: string,
   imageUrl?: string,
-  options?: { postKind?: 'post' | 'sell' }
+  options?: { postKind?: 'post' | 'sell'; videoUrl?: string; mediaType?: 'image' | 'video' }
 ) {
   // NOTE: the `posts` table has no `category` column. Category is only used
   // locally for the feed tag display; do not attempt to persist it.
+  const isVideo = options?.mediaType === 'video';
   const { data, error } = await supabase
     .from('posts')
     .insert({
       user_id: userId,
       content,
-      image_url: imageUrl || null,
+      image_url: isVideo ? null : (imageUrl || null),
+      video_url: isVideo ? (options?.videoUrl || imageUrl || null) : null,
+      media_type: options?.mediaType || null,
       post_kind: options?.postKind || 'post',
     })
     .select()

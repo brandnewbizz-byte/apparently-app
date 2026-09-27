@@ -1197,6 +1197,7 @@ export default function FeedScreen() {
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
     const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const timestamp = new Date().toISOString();
+    const isVideoPost = createMediaType === 'video';
 
     // Display at 9:16 Reels proportions (1080×1920) — media fills with center crop
     let displayHeight: number | undefined;
@@ -1208,7 +1209,7 @@ export default function FeedScreen() {
 
     const newPost: FeedPost = {
       id,
-      type: 'photo',
+      type: isVideoPost ? 'video' : 'photo',
       author: {
         name: 'You',
         avatar: userAvatar,
@@ -1218,6 +1219,7 @@ export default function FeedScreen() {
       timestamp: 'Just now',
       caption: data.caption,
       media: data.mediaUri,
+      videoUrl: isVideoPost ? data.mediaUri : undefined,
       mediaWidth: displayWidth,
       mediaHeight: displayHeight,
       likes: 0,
@@ -1230,7 +1232,7 @@ export default function FeedScreen() {
 
     // Persist to SocialContext so posts appear in getAllPosts() and profile grid.
     // Fire-and-forget: if the DB write fails, the post still shows locally.
-    try { createPost(data.caption, data.mediaUri, undefined); } catch (err: any) {
+    try { createPost(data.caption, data.mediaUri, { mediaType: isVideoPost ? 'video' : 'image' }); } catch (err: any) {
       console.warn('[Feed] createPost failed (post will show locally):', err?.message || err);
     }
 
