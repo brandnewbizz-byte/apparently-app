@@ -23,7 +23,6 @@ import {
   Briefcase,
   Plus,
   ImagePlus,
-  BarChart3,
 } from 'lucide-react-native';
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
@@ -1689,13 +1688,6 @@ export default function HomeScreen() {
               activeOpacity={0.8}
             >
               <MessageCircle size={20} color={colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleNavigate('/manage')}
-              activeOpacity={0.8}
-            >
-              <BarChart3 size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
