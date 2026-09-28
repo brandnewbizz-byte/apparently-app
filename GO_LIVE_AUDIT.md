@@ -362,3 +362,43 @@ T1 anon PII denied · T2 get_my_profile own email · T3 cross-user email denied 
 - Backup: `/tmp/fix2_backup_1790576353634.json` (61 tables, 200 policies, 12 functions, 1 trigger — full schema+data). Migration is idempotent + reversible. EAS commit `ec258c5` + `b5fead3`, update group `ecce2537-88c1-4451-9625-50e2055b7b05`.
 ### Regressions: none found.
 ### SAFE TO CONTINUE: YES
+
+---
+
+## FIX PART 3 — ACCOUNT CONTROL + ADMIN SECURITY (EXECUTED 2026-09-28)
+
+**FIX PART 3 COMPLETE: YES**
+
+### Blocking implementation
+1. `public.is_user_blocked()` — SECURITY DEFINER, empty `search_path`, returns own `is_blocked` flag via `auth.uid()`. `authenticated`/`anon` EXECUTE-only.
+2. **56 write policies** now carry `AND NOT public.is_user_blocked()` guards (posts, messages, conversations, listings, offers, gigs, follows, bookings, reviews, profiles, reports, live_streams, etc.).
+3. **Column-privilege fix (root cause):** column-level `REVOKE` on `is_blocked` was a NO-OP because `anon`/`authenticated` held TABLE-LEVEL `INSERT`/`UPDATE`/`REFERENCES` (relacl `awdDxtm`). Corrected: `REVOKE INSERT,UPDATE,REFERENCES ON profiles` then re-grant column-level write ONLY on user-editable columns (`full_name, username, bio, avatar, location, phone, email, updated_at` + `id` for INSERT). Verified live: `is_blocked`, `is_verified`, `is_live`, `followers_count`, `wallet`, `push_token`, `relationship_category`, `created_at` all `has_column_privilege = false` for clients.
+4. **Frontend:** `AuthContext` checks `is_user_blocked()` on session restore/refresh and force-signs-out blocked accounts; `welcome.tsx` shows a clear "Account suspended" banner. Session restore cannot bypass blocking.
+
+### Admin system
+- `admin_users` DROPPED; `profiles.role` (broken TEXT literal) DROPPED.
+- Canonical authority = `user_roles` + `has_role()` (SECURITY DEFINER, empty search_path). 4 admin rows intact.
+
+### SECURITY DEFINER review
+- `update_conversation_last_message()` → empty `search_path` added.
+- `resolve_login_email()` → returns `email` only (dropped `id`).
+- `get_user_role()` → dropped (caller-controlled enumeration vector).
+- `is_user_blocked()` → new, hardened.
+
+### Voice note fix
+- `voice_note` metadata type now accepts `path` (private-bucket storage path) alongside legacy `url`. Cleared the `[participantId].tsx:156` TS2353 error.
+
+### TypeScript result: 0 errors (`tsc --noEmit` clean).
+
+### Tests (11/11 PASS)
+- normal account works · blocked denied (post + message) · blocked update-own-profile denied · blocked direct `is_blocked` write denied · unblock restores access · `is_user_blocked()` true/false correct.
+
+### Files changed
+- `supabase/migrations/013_account_control.sql` (new, idempotent)
+- `contexts/AuthContext.tsx`, `contexts/MessagingContext.tsx`, `app/welcome.tsx`
+
+### Rollback
+- Migration idempotent + reversible. Commit `319a2ad`. EAS update group `b85b8640-7c3f-4498-aa44-4018f8650955`.
+### Regressions: none found.
+### P0 remaining: none · P1 remaining: duplicate tables cleanup (deferred per instruction).
+### SAFE TO CONTINUE: YES
