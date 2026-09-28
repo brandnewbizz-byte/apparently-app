@@ -263,3 +263,17 @@
 - **Bundle/swap browse** — real data from local context (but not cross-device)
 - **Life CRM** — real Supabase CRUD (contacts, bills, calendar)
 - **Navigation** — all tabs and deep links work
+
+---
+
+# PART 4 — SECURITY & DATABASE REPAIR PLAN (00:45 EDT, Sep 28)
+
+Inspection/planning only. NO changes executed. Full plan delivered to Boss in chat.
+
+## Verdict
+- PART 4 COMPLETE: YES
+- FIRST REPAIR TO PERFORM: Full DB backup (prerequisite), then RLS enable on 17 OFF tables (conversations/payments/reports/hidden_posts first).
+- MIGRATION ORDER: (1) backup → (2) reconcile profiles → (3) merge users→profiles → (4) repoint FKs → (5) TEXT→UUID → (6) drop users → (7) fix handle_new_user → (8) auth FK + unique constraint → (9) RLS repair → (10) storage lock → (11) admin/blocking → (12) test.
+- ROLLBACK PLAN READY: YES (pg_dump snapshot restore per repair).
+- BLOCKING UNKNOWNS: 5 (listed in J).
+- READY TO BEGIN CONTROLLED REPAIRS: NO (await Boss go-ahead; unknowns must be resolved first).

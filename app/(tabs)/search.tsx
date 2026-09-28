@@ -114,8 +114,8 @@ export default function SearchScreen() {
         ? Promise.resolve({ data: [], error: null })
         : supabase
             .from('profiles')
-            .select('id, full_name, username, avatar, bio, email')
-            .or(`full_name.ilike.${pattern},username.ilike.${pattern},email.ilike.${pattern}`)
+            .select('id, full_name, username, avatar, bio')
+            .or(`full_name.ilike.${pattern},username.ilike.${pattern}`)
             .limit(20);
 
       const postPattern = `%${trimmed}%`;

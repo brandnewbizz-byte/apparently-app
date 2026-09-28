@@ -436,8 +436,8 @@ function RoomContent() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, avatar, email')
-        .or(`full_name.ilike.%${query}%,username.ilike.%${query}%,email.ilike.%${query}%`)
+        .select('id, full_name, username, avatar')
+        .or(`full_name.ilike.%${query}%,username.ilike.%${query}%`)
         .limit(10);
       if (!error && data) {
         const pidSet = participantIdsRef.current;

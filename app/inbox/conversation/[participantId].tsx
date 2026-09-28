@@ -152,17 +152,15 @@ export default function ConversationScreen() {
       const blob = await response.blob();
       const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: 'audio/m4a' });
       if (uploadErr) { Alert.alert('Error', 'Failed to upload voice note'); return; }
-      const { data: urlData } = supabase.storage.from('messages').getPublicUrl(filePath);
-      const audioUrl = urlData?.publicUrl;
-      if (audioUrl && participantId) {
-        sendMessage(participantId, `🎤 Voice note • ${dur}s`, undefined, { voice_note: { url: audioUrl, duration: dur } });
+      if (participantId) {
+        sendMessage(participantId, `🎤 Voice note • ${dur}s`, undefined, { voice_note: { path: filePath, duration: dur } });
       }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to send voice note');
     }
   };
 
-  const togglePlayAudio = async (audioUrl: string, messageId: string) => {
+  const togglePlayAudio = async (voiceNote: any, messageId: string) => {
     try {
       if (playingAudioId === messageId) {
         await soundRef.current?.stopAsync();
@@ -174,6 +172,19 @@ export default function ConversationScreen() {
       if (soundRef.current) {
         await soundRef.current.stopAsync();
         await soundRef.current.unloadAsync();
+      }
+      // Resolve a signed URL from the stored path (bucket is now private).
+      let audioUrl: string | null = null;
+      const path = voiceNote?.path || voiceNote?.url;
+      if (path && !String(path).startsWith('http')) {
+        const { data: signed } = await supabase.storage.from('messages').createSignedUrl(path, 3600);
+        audioUrl = signed?.signedUrl || null;
+      } else if (path) {
+        audioUrl = path; // legacy public-URL fallback
+      }
+      if (!audioUrl) {
+        Alert.alert('Error', 'Voice note unavailable');
+        return;
       }
       const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, { shouldPlay: true });
       soundRef.current = sound;
@@ -422,7 +433,7 @@ export default function ConversationScreen() {
           {(message as any).metadata?.voice_note && (
             <TouchableOpacity
               style={styles.voicePlayButton}
-              onPress={() => togglePlayAudio((message as any).metadata.voice_note.url, message.id)}
+              onPress={() => togglePlayAudio((message as any).metadata.voice_note, message.id)}
             >
               {playingAudioId === message.id ? (
                 <PauseCircle size={24} color={isMe ? '#FFFFFF' : colors.accent} />

@@ -90,16 +90,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const fetchProfileFromDb = useCallback(async (userId: string): Promise<ProfilesRow | null> => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, username, phone, email, avatar, bio, location')
-        .eq('id', userId)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc('get_my_profile');
 
       if (error) {
         logger.error('Auth', 'profiles select error', { message: error.message });
         return null;
       }
+      if (!data || (data as any).id !== userId) return null;
       return (data as ProfilesRow | null) ?? null;
     } catch (e) {
       logger.error('Auth', 'profiles select exception', { e });
@@ -436,11 +433,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       let loginEmail = trimmedInput;
 
       if (!isEmail) {
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('id, email')
-          .eq('username', trimmedInput)
-          .maybeSingle();
+        const { data: profileRows, error: profileError } = await supabase
+          .rpc('resolve_login_email', { p_username: trimmedInput });
+
+        const profileData = (profileRows && profileRows.length > 0) ? profileRows[0] : null;
 
         if (profileError || !profileData) {
           logger.info('Auth', 'Username not found', { trimmedInput });
