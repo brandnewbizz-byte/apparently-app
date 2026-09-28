@@ -1,10 +1,12 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { Alert, Modal } from 'react-native';
+import { Alert, Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { Camera, FileText, Gift, Wrench, X } from 'lucide-react-native';
 
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import PostComposer from '@/components/PostComposer';
+import CreateDealModal from '@/components/CreateDealModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
@@ -32,6 +34,9 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
 
   const [showCreate, setShowCreate] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showChooser, setShowChooser] = useState(false);
+  const [showDeal, setShowDeal] = useState(false);
+  const [dealMode, setDealMode] = useState<'skill' | 'bundle'>('skill');
   const [createPreloadMedia, setCreatePreloadMedia] = useState<string | null>(null);
   const [createPreloadMediaWidth, setCreatePreloadMediaWidth] = useState<number | undefined>(undefined);
   const [createPreloadMediaHeight, setCreatePreloadMediaHeight] = useState<number | undefined>(undefined);
@@ -64,28 +69,30 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
     setCreateCategory(null);
   }, [createMediaType, createPost, addUserPost]);
 
+  const startPhotoVideo = useCallback(() => {
+    setShowChooser(false);
+    hideTabBar();
+    setShowCamera(true);
+  }, [hideTabBar]);
+
+  const startTextPost = useCallback(() => {
+    setShowChooser(false);
+    setCreatePreloadMedia(null);
+    setCreatePreloadMediaWidth(undefined);
+    setCreatePreloadMediaHeight(undefined);
+    setShowCreate(true);
+  }, []);
+
+  const startDeal = useCallback((mode: 'skill' | 'bundle') => {
+    setShowChooser(false);
+    setDealMode(mode);
+    setShowDeal(true);
+  }, []);
+
   const openCreate = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert('Create Post', '', [
-      {
-        text: 'Take Photo/Video',
-        onPress: () => {
-          hideTabBar();
-          setShowCamera(true);
-        },
-      },
-      {
-        text: 'Write Text Post',
-        onPress: () => {
-          setCreatePreloadMedia(null);
-          setCreatePreloadMediaWidth(undefined);
-          setCreatePreloadMediaHeight(undefined);
-          setShowCreate(true);
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [hideTabBar]);
+    setShowChooser(true);
+  }, []);
 
   const handleCameraCapture = useCallback((media: CapturedMedia) => {
     setCreatePreloadMedia(media.uri);
@@ -129,6 +136,77 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   return (
     <CreatePostContext.Provider value={value}>
       {children}
+
+      {/* Chooser — what do you want to create? */}
+      <Modal visible={showChooser} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowChooser(false)}>
+        <View style={styles.backdrop}>
+          <View style={[styles.chooserSheet, { backgroundColor: colors.background }]}>
+            <View style={styles.chooserHeader}>
+              <Text style={[styles.chooserTitle, { color: colors.text }]}>Create</Text>
+              <TouchableOpacity onPress={() => setShowChooser(false)}>
+                <X size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={startPhotoVideo}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
+                <Camera size={22} color={colors.accent} />
+              </View>
+              <View style={styles.chooserTextWrap}>
+                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Post</Text>
+                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Photo or video</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={startTextPost}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
+                <FileText size={22} color={colors.accent} />
+              </View>
+              <View style={styles.chooserTextWrap}>
+                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Text Post</Text>
+                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Share a written update</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => startDeal('bundle')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
+                <Gift size={22} color={colors.accent} />
+              </View>
+              <View style={styles.chooserTextWrap}>
+                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Create Bundle</Text>
+                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Package multiple items</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => startDeal('skill')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
+                <Wrench size={22} color={colors.accent} />
+              </View>
+              <View style={styles.chooserTextWrap}>
+                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Post Skill / Service</Text>
+                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Offer a service you provide</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showCamera} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent>
         <InstagramCamera
           visible={showCamera}
@@ -137,6 +215,13 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
           onPickFromGallery={handlePickFromGallery}
         />
       </Modal>
+
+      <CreateDealModal
+        visible={showDeal}
+        mode={dealMode}
+        onClose={() => setShowDeal(false)}
+      />
+
       <PostComposer
         visible={showCreate}
         onClose={() => { setShowCreate(false); setCreatePreloadMedia(null); }}
@@ -151,3 +236,55 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
     </CreatePostContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  chooserSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 28,
+  },
+  chooserHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  chooserTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  chooserOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  chooserIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chooserTextWrap: {
+    flex: 1,
+  },
+  chooserOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  chooserOptionSub: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+});
