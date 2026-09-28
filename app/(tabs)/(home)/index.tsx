@@ -1745,55 +1745,6 @@ export default function HomeScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        <View style={styles.lifestyleSection}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <Heart size={20} color="#EC4899" />
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Lifestyle</Text>
-            </View>
-            <TouchableOpacity onPress={() => handleNavigate('/book')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.lifestyleScroll}
-          >
-            {lifestyleCategories.map((category) => {
-              const IconComponent = category.icon;
-              return (
-                <TouchableOpacity
-                  key={category.id}
-                  style={[styles.lifestyleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  activeOpacity={0.8}
-                  onPress={() => handleNavigate('/book')}
-                >
-                  <ImageBackground
-                    source={{ uri: category.image }}
-                    style={styles.lifestyleCardImage}
-                    imageStyle={styles.lifestyleCardImageStyle}
-                  >
-                    <LinearGradient
-                      colors={['transparent', 'rgba(0,0,0,0.8)']}
-                      style={styles.lifestyleCardOverlay}
-                    >
-                      <View style={[styles.lifestyleCategoryIcon, { backgroundColor: category.color }]}>
-                        <IconComponent size={16} color="#FFF" />
-                      </View>
-                    </LinearGradient>
-                  </ImageBackground>
-                  <View style={styles.lifestyleCardContent}>
-                    <Text style={[styles.lifestyleCardTitle, { color: colors.text }]}>{category.title}</Text>
-                    <Text style={[styles.lifestyleCardCount, { color: colors.textTertiary }]}>{category.count} options</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
         {MARKETPLACE_ENABLED && (
         <>
         <View style={styles.bundleSection}>
