@@ -25,6 +25,15 @@ type DbQueryOpts = {
   signal?: AbortSignal;
 };
 
+/**
+ * Public columns on `profiles` that anon/authenticated roles are granted
+ * column-level SELECT on (Part 1 revoked table-wide SELECT). `select('*')`
+ * now fails with 42501 because `*` expands to the locked PII columns
+ * (email, phone, wallet, push_token, is_blocked, role).
+ */
+export const PROFILE_PUBLIC_COLUMNS =
+  'id, username, full_name, name:full_name, avatar, bio, location, created_at, updated_at, is_verified, followers_count, is_live, relationship_category';
+
 
 export class DatabaseService {
 
@@ -39,7 +48,7 @@ export class DatabaseService {
 
     console.log('[DB] Fetching users...');
     const { data, error } = await withAbortSignal(
-      supabase.from(table).select('*').order('created_at', { ascending: false }),
+      supabase.from(table).select(PROFILE_PUBLIC_COLUMNS).order('created_at', { ascending: false }),
       opts?.signal
     );
 
@@ -69,7 +78,7 @@ export class DatabaseService {
 
     console.log('[DB] Fetching user by id:', id);
     const { data, error } = await withAbortSignal(
-      supabase.from(table).select('*').eq('id', id).single(),
+      supabase.from(table).select(PROFILE_PUBLIC_COLUMNS).eq('id', id).single(),
       opts?.signal
     );
 

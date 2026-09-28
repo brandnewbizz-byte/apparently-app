@@ -46,7 +46,7 @@ interface PostResult {
   likes: number;
   comments: number;
   post_kind: string;
-  user: { name: string; username: string; avatar: string; is_verified: boolean };
+  user: { full_name: string; username: string; avatar: string; is_verified: boolean };
 }
 
 type TabKey = 'top' | 'users' | 'posts';
@@ -123,7 +123,7 @@ export default function SearchScreen() {
         .from('posts')
         .select(`
           id, content, image_url, user_id, created_at, likes, comments, post_kind,
-          user:user_id(name, username, avatar, is_verified)
+          user:user_id(full_name, username, avatar, is_verified)
         `)
         .ilike('content', postPattern)
         .or('post_kind.is.null,post_kind.not.in.(bundle,service,skill)')
@@ -319,7 +319,7 @@ export default function SearchScreen() {
         )}
         <View style={styles.resultText}>
           <View style={styles.nameRow}>
-            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{item.user?.name || 'User'}</Text>
+            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{item.user?.full_name || 'User'}</Text>
             <AtSign size={12} color={colors.textTertiary} />
             <Text style={[styles.metaText, { color: colors.textTertiary }]}>{item.user?.username || generateUsername(item.user_id)}</Text>
           </View>

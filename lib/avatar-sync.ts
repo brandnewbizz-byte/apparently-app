@@ -63,6 +63,4 @@ export async function syncUserAvatar(userId: string, avatarUrl: string): Promise
   // job_requests.accepted_by_avatar
   fire(supabase.from('job_requests').update({ accepted_by_avatar: avatarUrl }).eq('accepted_by', userId));
 
-  // users (legacy) table avatar
-  fire(supabase.from('users').update({ avatar: avatarUrl }).eq('id', userId));
 }

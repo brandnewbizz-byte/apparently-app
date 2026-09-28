@@ -225,7 +225,7 @@ export async function addComment(postId: string, authorId: string, text: string,
 export async function getUsers() {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, username, full_name, avatar, bio, location, is_verified, followers_count, is_live, relationship_category, created_at, updated_at')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -234,7 +234,7 @@ export async function getUsers() {
 export async function getUser(userId: string) {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, username, full_name, avatar, bio, location, is_verified, followers_count, is_live, relationship_category, created_at, updated_at')
     .eq('id', userId)
     .single();
   if (error) throw error;

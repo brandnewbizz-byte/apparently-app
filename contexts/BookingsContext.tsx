@@ -144,7 +144,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, {
             id: u.id,
-            name: u.name,
+            name: u.full_name || u.name,
             username: u.username,
             avatar: u.avatar,
             isVerified: u.is_verified,
@@ -215,7 +215,7 @@ export const [BookingsProvider, useBookings] = createContextHook<BookingsState>(
           const users = await DatabaseService.fetchUsers({ signal });
           const userMap = new Map(users.map(u => [u.id, {
             id: u.id,
-            name: u.name,
+            name: u.full_name || u.name,
             username: u.username,
             avatar: u.avatar,
             isVerified: u.is_verified,

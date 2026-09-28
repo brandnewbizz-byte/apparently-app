@@ -83,7 +83,7 @@ const STORAGE_KEY = 'apparently_connections';
 
 const mapDbUserToMarketplaceProfile = (u: DbUser): MarketplaceProfile => ({
   id: u.id,
-  name: u.name,
+  name: u.full_name || u.name,
   username: u.username,
   avatar: u.avatar,
   location: '—',
