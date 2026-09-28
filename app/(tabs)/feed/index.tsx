@@ -495,43 +495,46 @@ function PostCard({
             </TouchableOpacity>
           </View>
 
-          {/* Left action rail — like / comment / share / repost / save, overlaid on content */}
-          <View style={igCardStyles.actionRail} pointerEvents="box-none">
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleLike}>
-              <Heart size={27} color={liked ? '#EF4444' : '#FFFFFF'} fill={liked ? '#EF4444' : 'rgba(0,0,0,0.4)'} />
-              <Text style={igCardStyles.railCount}>{likeCount > 0 ? likeCount : ' '}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onComment(post)}>
-              <MessagesSquare size={25} color="#FFFFFF" />
-              <Text style={igCardStyles.railCount}>{commentCount > 0 ? commentCount : ' '}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
-              <Forward size={25} color="#FFFFFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
-              <Repeat size={25} color="#FFFFFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave}>
-              <Bookmark size={25} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Bottom comment preview — overlaid on the lower half of the media */}
-          <View style={igCardStyles.commentPreview} pointerEvents="box-none">
-            {post.caption ? (
-              <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
-                <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
-                {post.caption}
-              </Text>
-            ) : null}
-            <View style={igCardStyles.commentPreviewRow}>
-              <TouchableOpacity style={igCardStyles.commentPreviewLink} onPress={() => onComment(post)}>
-                <MessagesSquare size={13} color="rgba(255,255,255,0.85)" />
-                <Text style={igCardStyles.commentPreviewLinkText}>
-                  {commentCount > 0 ? `View all ${commentCount} comments` : 'Add a comment…'}
-                </Text>
+          {/* Bottom overlay — action rail (left) + 3-line comment preview (right), overlaid on media */}
+          <View style={igCardStyles.bottomOverlay} pointerEvents="box-none">
+            {/* Action rail — like / comment / share / repost / save */}
+            <View style={igCardStyles.actionRail}>
+              <TouchableOpacity style={igCardStyles.railBtn} onPress={handleLike}>
+                <Heart size={24} color={liked ? '#EF4444' : '#FFFFFF'} fill={liked ? '#EF4444' : 'rgba(255,255,255,0.2)'} />
+                <Text style={igCardStyles.railCount}>{likeCount > 0 ? likeCount : ''}</Text>
               </TouchableOpacity>
-              <Text style={igCardStyles.commentPreviewTime}>{timeAgo(post.timestamp)}</Text>
+              <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onComment(post)}>
+                <MessagesSquare size={23} color="#FFFFFF" />
+                <Text style={igCardStyles.railCount}>{commentCount > 0 ? commentCount : ''}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
+                <Forward size={23} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
+                <Repeat size={23} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave}>
+                <Bookmark size={23} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Comment preview — 3 lines, right next to the action rail */}
+            <View style={igCardStyles.commentPreviewBox}>
+              {post.caption ? (
+                <Text style={igCardStyles.commentPreviewCaption} numberOfLines={3}>
+                  <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
+                  {post.caption}
+                </Text>
+              ) : null}
+              <View style={igCardStyles.commentPreviewRow}>
+                <TouchableOpacity style={igCardStyles.commentPreviewLink} onPress={() => onComment(post)}>
+                  <MessagesSquare size={13} color="rgba(255,255,255,0.85)" />
+                  <Text style={igCardStyles.commentPreviewLinkText}>
+                    {commentCount > 0 ? `View all ${commentCount} comments` : 'Add a comment…'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={igCardStyles.commentPreviewTime}>{timeAgo(post.timestamp)}</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -1551,13 +1554,14 @@ const igCardStyles = StyleSheet.create({
   timestamp: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
   ctaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
   ctaPillText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-  actionRail: { position: 'absolute', left: 8, bottom: 100, alignItems: 'center', gap: 14, zIndex: 11 },
-  railBtn: { alignItems: 'center', justifyContent: 'center', width: 46, paddingVertical: 2 },
-  railCount: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
-  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 62, paddingRight: 12, paddingBottom: 10, paddingTop: 28, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
-  commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6, paddingRight: 12 },
-  commentPreviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 },
-  commentPreviewLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
+  bottomOverlay: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10, paddingBottom: 12, zIndex: 10 },
+  actionRail: { alignItems: 'center', gap: 8, marginRight: 10 },
+  railBtn: { alignItems: 'center', justifyContent: 'center', width: 44, minHeight: 40, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', paddingVertical: 4 },
+  railCount: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', marginTop: 1, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
+  commentPreviewBox: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 2 },
+  commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6 },
+  commentPreviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  commentPreviewLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 },
   commentPreviewLinkText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
   commentPreviewTime: { color: 'rgba(255,255,255,0.7)', fontSize: 11 },
 });
