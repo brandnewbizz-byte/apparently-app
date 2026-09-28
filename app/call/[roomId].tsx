@@ -9,8 +9,6 @@ import {
   Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, User,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { supabase } from '@/lib/supabase';
-import { getApiUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebRTCCall, type CallConfig } from '@/hooks/useWebRTCCall';
 
@@ -22,7 +20,6 @@ export default function CallScreen() {
     targetId: string;
     targetName: string;
     isOutgoing: string;
-    serverUrl: string;
     currentUserId: string;
     currentUserName: string;
   }>();
@@ -36,21 +33,19 @@ export default function CallScreen() {
   const targetId = params.targetId || '';
   const targetName = params.targetName || 'User';
   const isOutgoing = params.isOutgoing === 'true';
-  const serverUrl = params.serverUrl || getApiUrl();
   const currentUserId = params.currentUserId || user?.id || '';
   const currentUserName = params.currentUserName || (user as any)?.fullName || (user as any)?.username || 'You';
 
   const callConfig: CallConfig = useMemo(() => ({
-    serverUrl,
     roomId,
     peerId: currentUserId,
     peerName: currentUserName,
     targetPeerId: isOutgoing ? targetId : callerId,
     targetPeerName: isOutgoing ? targetName : callerName,
-  }), [serverUrl, roomId, currentUserId, currentUserName, targetId, callerId, targetName, callerName, isOutgoing]);
+  }), [roomId, currentUserId, currentUserName, targetId, callerId, targetName, callerName, isOutgoing]);
 
   const {
-    callState, duration, isMuted, isSpeakerOn,
+    callState, callError, duration, isMuted, isSpeakerOn,
     startCall, acceptCall, endCall, toggleMute, toggleSpeaker,
   } = useWebRTCCall();
 
@@ -116,7 +111,11 @@ export default function CallScreen() {
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.centerContent}>
           <Text style={styles.endTitle}>Call Ended</Text>
-          <Text style={styles.endSub}>{fmtDuration(duration)}</Text>
+          {callError ? (
+            <Text style={styles.errorText}>{callError}</Text>
+          ) : (
+            <Text style={styles.endSub}>{fmtDuration(duration)}</Text>
+          )}
           <TouchableOpacity style={styles.backBtn} onPress={handleEndCall}>
             <Text style={styles.backBtnText}>Close</Text>
           </TouchableOpacity>
@@ -306,6 +305,13 @@ const styles = StyleSheet.create({
     color: '#8B9DC3',
     fontSize: 18,
     marginBottom: 30,
+  },
+  errorText: {
+    color: '#F87171',
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 30,
+    paddingHorizontal: 24,
   },
   backBtn: {
     backgroundColor: '#3B82F6',

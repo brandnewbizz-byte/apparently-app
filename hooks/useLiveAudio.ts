@@ -2,31 +2,15 @@
  * useLiveAudio — React hook for push-to-talk audio in live rooms.
  *
  * Wraps AudioRelayClient with React state management and RoomContext integration.
+ * Audio now streams over Supabase Realtime Broadcast — no signaling backend
+ * required.
+ *
  * Usage in room screen:
  *   const audio = useLiveAudio(roomId);
  *   // Mic button: onPressIn={audio.startSpeaking} onPressOut={audio.stopSpeaking}
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createAudioRelayClient, type AudioRelayClient, type RemoteSpeaker } from '@/lib/audio-relay';
-
-// ── Server URL resolution ──
-
-// Resolve the signaling server URL from env first, then fall back to a
-// same-origin heuristic for web. Native uses the env-configured backend.
-const getServerUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_RORK_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-  }
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:8082'; // dev
-    }
-    return `https://${hostname}`;
-  }
-  // No env configured — live audio will degrade to unavailable.
-  return '';
-};
 
 interface UseLiveAudioOptions {
   roomId: string;
@@ -53,9 +37,6 @@ interface UseLiveAudioResult {
   // For mic button UI: hold-to-talk
   micPressIn: () => Promise<void>;
   micPressOut: () => void;
-
-  // Connection
-  serverUrl: string;
 }
 
 export function useLiveAudio(options: UseLiveAudioOptions): UseLiveAudioResult {
@@ -64,7 +45,6 @@ export function useLiveAudio(options: UseLiveAudioOptions): UseLiveAudioResult {
   const [isConnected, setIsConnected] = useState(false);
   const [isMicActive, setIsMicActive] = useState(false);
   const [speakers, setSpeakers] = useState<RemoteSpeaker[]>([]);
-  const [serverUrl] = useState(getServerUrl);
 
   const clientRef = useRef<AudioRelayClient | null>(null);
   const cleanupRef = useRef<() => void>(() => {});
@@ -75,15 +55,14 @@ export function useLiveAudio(options: UseLiveAudioOptions): UseLiveAudioResult {
     if (!enabled || !roomId || !peerId) return;
 
     const client = createAudioRelayClient({
-      serverUrl,
       roomId,
       peerId,
       peerName,
       onPeersUpdated: (peers) => setSpeakers(peers),
-      onSpeakerStart: (peerId) => {
+      onSpeakerStart: (_peerId) => {
         // Speaker already tracked via onPeersUpdated
       },
-      onSpeakerStop: (peerId) => {
+      onSpeakerStop: (_peerId) => {
         // Clean up handled automatically
       },
       onModerationMute: (muted) => {
@@ -106,7 +85,7 @@ export function useLiveAudio(options: UseLiveAudioOptions): UseLiveAudioResult {
       client.disconnect();
       setIsConnected(false);
     };
-  }, [roomId, peerId, peerName, serverUrl, enabled]);
+  }, [roomId, peerId, peerName, enabled]);
 
   // ── Join/leave ──
 
@@ -173,6 +152,5 @@ export function useLiveAudio(options: UseLiveAudioOptions): UseLiveAudioResult {
     muteSelf,
     micPressIn,
     micPressOut,
-    serverUrl,
   };
 }

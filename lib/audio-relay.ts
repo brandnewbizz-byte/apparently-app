@@ -1,19 +1,25 @@
 /**
- * AudioRelayClient — WebSocket client for push-to-talk audio streaming.
+ * AudioRelayClient — push-to-talk audio streaming over Supabase Realtime.
  *
- * Connects to the signaling server at /ws/room and handles:
- *  - Room join/leave with peer discovery
- *  - Push-to-talk: hold mic → stream audio chunks → release mutes
- *  - Multi-speaker: receives audio from any number of simultaneous speakers
- *  - Moderation: host mute/unmute commands from the server
+ * Replaces the old WebSocket signaling server with Supabase Realtime Broadcast.
+ * The signaling server was just a thin JSON relay (join/leave, audio_chunk,
+ * mute) — Supabase Realtime Broadcast already powers text chat and participant
+ * presence in this app, so it can carry the same audio messages with no
+ * additional backend to deploy.
+ *
+ * Push-to-talk: hold mic → record → stream audio segments → release mutes.
+ * Audio is recorded in short bounded segments (a complete WAV each) so every
+ * broadcast message stays well under the Supabase Realtime payload limit
+ * (256 KB free / 3 MB Pro). Each segment is independently playable.
  *
  * Uses expo-av for recording (Audio.Recording) and playback (Audio.Sound).
- * Audio format: PCM 16-bit 16000 Hz mono, base64-encoded chunks (~40ms each).
+ * Audio format: PCM 16-bit 16000 Hz mono, base64-encoded (~2s segments).
  */
 
 import type { Audio as AudioTypes } from 'expo-av';
 import { SafeAudio as Audio } from '@/lib/safe-av';
-import { Platform } from 'react-native';
+import { supabase } from '@/lib/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // ── Types ──
 
@@ -25,7 +31,6 @@ export interface RemoteSpeaker {
 }
 
 export interface AudioRelayConfig {
-  serverUrl: string;
   roomId: string;
   peerId: string;
   peerName: string;
@@ -73,17 +78,22 @@ const RECORDING_OPTIONS: AudioTypes.RecordingOptions = {
   },
 };
 
+// A ~2s segment at 16 kHz 16-bit mono is ~64 KB raw (~85 KB base64) — safely
+// under the 256 KB Realtime broadcast limit and independently playable.
+const SEGMENT_MS = 2000;
+
 // ── Factory ──
 
 export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClient {
-  const { serverUrl, roomId, peerId, peerName, onPeersUpdated, onSpeakerStart, onSpeakerStop, onModerationMute } = config;
+  const { roomId, peerId, peerName, onPeersUpdated, onSpeakerStart, onSpeakerStop, onModerationMute } = config;
 
-  let ws: WebSocket | null = null;
+  let channel: RealtimeChannel | null = null;
   let connected = false;
   let recording: AudioTypes.Recording | null = null;
   let isRecording = false;
-  let chunkInterval: ReturnType<typeof setInterval> | null = null;
-  let chuckSequence = 0;
+  let segmentTimer: ReturnType<typeof setInterval> | null = null;
+  let chunkSequence = 0;
+  let selfMuted = false;
 
   // Speaker playback pool: one Audio.Sound per remote peer
   const speakerPool = new Map<string, { sound: AudioTypes.Sound; peerName: string; lastChunkAt: number }>();
@@ -101,6 +111,19 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
     });
+  }
+
+  // ── Read a recording file as base64 ──
+  //
+  // NOTE: the old implementation used `fetch(uri)` + `FileReader`, which is
+  // unavailable in React Native and would have thrown at runtime on device.
+  // We use the expo-file-system `File` class (SDK 57) instead.
+
+  async function readRecordingBase64(rec: AudioTypes.Recording): Promise<string> {
+    const uri = rec.getURI();
+    if (!uri) return '';
+    const { File } = await import('expo-file-system');
+    return new File(uri).base64();
   }
 
   // ── Playback for incoming audio ──
@@ -162,10 +185,10 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       const now = Date.now();
       const stale = 2000; // 2 seconds without audio = stopped speaking
 
-      for (const [peerId, entry] of speakerPool) {
+      for (const [pid, entry] of speakerPool) {
         if (now - entry.lastChunkAt > stale) {
-          updateSpeaker(peerId, entry.peerName, false);
-          speakerPool.delete(peerId);
+          updateSpeaker(pid, entry.peerName, false);
+          speakerPool.delete(pid);
           try { entry.sound.unloadAsync(); } catch {}
         }
       }
@@ -185,93 +208,53 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
     });
 
     return new Promise<void>((resolve, reject) => {
-      try {
-        ws = new WebSocket(`${serverUrl}/ws/room`);
+      const ch = supabase.channel(`room-audio:${roomId}`, {
+        config: { broadcast: { self: false } },
+      });
 
-        ws.onopen = () => {
+      ch.on('broadcast', { event: 'audio_chunk' }, ({ payload }: any) => {
+        if (payload?.audioData && payload?.peerId && payload.peerId !== peerId) {
+          playIncomingAudio(payload.peerId, payload.peerName || 'User', payload.audioData);
+        }
+      });
+
+      ch.on('broadcast', { event: 'mute' }, ({ payload }: any) => {
+        // Host moderation: a targeted mute for this peer
+        if (payload?.targetPeerId === peerId) {
+          onModerationMute?.(true);
+        }
+      });
+
+      ch.on('broadcast', { event: 'unmute' }, ({ payload }: any) => {
+        if (payload?.targetPeerId === peerId) {
+          onModerationMute?.(false);
+        }
+      });
+
+      ch.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
           connected = true;
-          // Join the room
-          ws!.send(JSON.stringify({
-            type: 'join',
-            roomId,
-            peerId,
-            peerName,
-          }));
           startSilenceCheck();
           resolve();
-        };
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          reject(new Error(`Realtime channel failed: ${status}`));
+        }
+      });
 
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
+      channel = ch;
 
-            switch (msg.type) {
-              case 'join':
-                // Our join confirmed — received ICE servers + existing peers
-                break;
-
-              case 'peer_joined':
-                break;
-
-              case 'peer_left':
-                // Remove from pool
-                updateSpeaker(msg.peerId, msg.peerName, false);
-                const entry = speakerPool.get(msg.peerId);
-                if (entry) {
-                  try { entry.sound.unloadAsync(); } catch {}
-                  speakerPool.delete(msg.peerId);
-                }
-                break;
-
-              case 'audio_chunk':
-                // Play audio from remote speaker
-                if (msg.audioData && msg.peerId && msg.peerName) {
-                  playIncomingAudio(msg.peerId, msg.peerName, msg.audioData);
-                }
-                break;
-
-              case 'mute':
-                onModerationMute?.(true);
-                break;
-
-              case 'unmute':
-                onModerationMute?.(false);
-                break;
-
-              case 'error':
-                console.warn('[AudioRelay] Server error:', msg.error);
-                break;
-            }
-          } catch (e) {
-            console.warn('[AudioRelay] Parse error:', e);
-          }
-        };
-
-        ws.onerror = (e) => {
-          console.warn('[AudioRelay] WS error:', e);
-          reject(new Error('WebSocket connection failed'));
-        };
-
-        ws.onclose = () => {
-          connected = false;
-          cleanup();
-        };
-
-        // Timeout fallback
-        setTimeout(() => {
-          if (!connected) {
-            reject(new Error('WebSocket connection timeout'));
-          }
-        }, 10000);
-      } catch (e) {
-        reject(e);
-      }
+      // Timeout fallback
+      setTimeout(() => {
+        if (!connected) {
+          reject(new Error('Realtime connection timeout'));
+        }
+      }, 10000);
     });
   }
 
   function cleanup() {
     if (silenceCheck) { clearInterval(silenceCheck); silenceCheck = null; }
-    if (chunkInterval) { clearInterval(chunkInterval); chunkInterval = null; }
+    if (segmentTimer) { clearInterval(segmentTimer); segmentTimer = null; }
     // Unload all speaker sounds
     for (const [, entry] of speakerPool) {
       try { entry.sound.unloadAsync(); } catch {}
@@ -282,18 +265,52 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   }
 
   function disconnect() {
-    if (ws && connected) {
-      ws.send(JSON.stringify({ type: 'leave', roomId, peerId }));
-      ws.close();
-    }
     connected = false;
     cleanup();
+    if (channel) {
+      supabase.removeChannel(channel).then(() => {}, () => {});
+      channel = null;
+    }
   }
 
-  // ── Push-to-talk: start ──
+  // ── Push-to-talk: start recording a segment ──
+
+  async function startNewSegment() {
+    const rec = new Audio.Recording();
+    recording = rec;
+    await rec.prepareToRecordAsync(RECORDING_OPTIONS);
+    await rec.startAsync();
+    isRecording = true;
+  }
+
+  async function sendCurrentSegment() {
+    if (!recording) return;
+    const rec = recording;
+    recording = null;
+    isRecording = false;
+    try {
+      const base64 = await readRecordingBase64(rec);
+      await rec.stopAndUnloadAsync();
+      if (base64 && connected && channel) {
+        channel.send({
+          type: 'broadcast',
+          event: 'audio_chunk',
+          payload: {
+            roomId,
+            peerId,
+            peerName,
+            audioData: base64,
+            sequence: chunkSequence++,
+          },
+        }).then(() => {}, () => {});
+      }
+    } catch (e) {
+      console.warn('[AudioRelay] Segment send failed:', e instanceof Error ? e.message : e);
+    }
+  }
 
   async function startSpeaking() {
-    if (!connected) return;
+    if (!connected || selfMuted) return;
 
     try {
       // Ensure fresh audio mode
@@ -302,76 +319,35 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
         playsInSilentModeIOS: true,
       });
 
-      const rec = new Audio.Recording();
-      recording = rec;
-      await rec.prepareToRecordAsync(RECORDING_OPTIONS);
-      await rec.startAsync();
-      isRecording = true;
+      await startNewSegment();
 
-      // Notify server
-      ws!.send(JSON.stringify({ type: 'unmute', roomId, peerId }));
-
-      // Chunk audio every ~100ms
-      chunkInterval = setInterval(async () => {
-        if (!recording || !isRecording || !connected) return;
-
-        try {
-          const uri = recording.getURI();
-          if (!uri) return;
-
-          // Read the file as base64
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          const reader = new FileReader();
-
-          reader.onloadend = () => {
-            const base64 = (reader.result as string).split(',')[1];
-            if (base64 && connected) {
-              ws!.send(JSON.stringify({
-                type: 'audio_chunk',
-                roomId,
-                peerId,
-                audioData: base64,
-                sequence: chuckSequence++,
-              }));
-            }
-          };
-          reader.readAsDataURL(blob);
-        } catch {
-          // Skip chunk on error
+      // Rotate segments: send the current clip, start a fresh one, so each
+      // broadcast stays bounded and the listener hears continuous audio.
+      segmentTimer = setInterval(async () => {
+        if (!connected) return;
+        await sendCurrentSegment();
+        if (connected && !selfMuted) {
+          try { await startNewSegment(); } catch {}
         }
-      }, 100);
+      }, SEGMENT_MS);
     } catch (e) {
-      console.warn('[AudioRelay] Recording start failed:', e);
+      console.warn('[AudioRelay] Recording start failed:', e instanceof Error ? e.message : e);
     }
   }
 
   // ── Push-to-talk: stop ──
 
   function stopSpeaking() {
-    if (chunkInterval) { clearInterval(chunkInterval); chunkInterval = null; }
-
-    if (recording && isRecording) {
-      try {
-        recording.stopAndUnloadAsync();
-      } catch {}
-      recording = null;
-      isRecording = false;
-    }
-
-    if (connected) {
-      ws!.send(JSON.stringify({ type: 'mute', roomId, peerId }));
-    }
+    if (segmentTimer) { clearInterval(segmentTimer); segmentTimer = null; }
+    sendCurrentSegment().catch(() => {});
   }
 
   function isConnected() { return connected; }
   function getSpeakers() { return [...speakers]; }
 
   function muteSelf(muted: boolean) {
-    if (muted && isRecording) stopSpeaking();
-    if (connected) {
-      ws!.send(JSON.stringify({ type: muted ? 'mute' : 'unmute', roomId, peerId }));
-    }
+    selfMuted = muted;
+    if (muted) stopSpeaking();
   }
 
   return {
