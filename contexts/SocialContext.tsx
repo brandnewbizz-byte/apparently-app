@@ -279,6 +279,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               imageUrl: p.image_url,
               videoUrl: (p as any).video_url,
               mediaType: (p as any).media_type as 'image' | 'video' | undefined,
+              postKind: (p as any).post_kind || 'post',
               timestamp: p.timestamp,
               likes: p.likes,
               comments: p.comments,
