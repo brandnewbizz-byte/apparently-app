@@ -636,6 +636,12 @@ export default function FeedScreen() {
   const [showCreateStory, setShowCreateStory] = useState(false);
   // ── Full-screen snap paging: measured viewport height for each 'page' ──
   const [feedHeight, setFeedHeight] = useState(0);
+  // Header height (state mirror of headerHeight ref) — used to size pages to the visible area
+  const [headerHeightState, setHeaderHeightState] = useState(0);
+
+  // Visible content area = full screen minus the fixed header. The tab bar is already
+  // excluded from feedHeight by the navigator, so this is the space between header and tab bar.
+  const contentHeight = feedHeight > 0 ? Math.max(0, feedHeight - headerHeightState) : 0;
 
   // ── Scroll-away header: hides on scroll up, reappears on scroll down ──
   const headerTranslateY = useRef(new Animated.Value(0)).current;
@@ -1086,7 +1092,7 @@ export default function FeedScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header — scroll-away overlay (hides on scroll up, shows on scroll down) */}
       <Animated.View
-        onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
+        onLayout={(e) => { const h = e.nativeEvent.layout.height; headerHeight.current = h; if (h > 0 && Math.abs(h - headerHeightState) > 1) setHeaderHeightState(h); }}
         style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }, styles.headerOverlay, { transform: [{ translateY: headerTranslateY }] }]}
       >
         <View style={styles.headerRow}>
@@ -1236,7 +1242,7 @@ export default function FeedScreen() {
             <PostCard
               post={item}
               colors={colors}
-              height={feedHeight || undefined}
+              height={contentHeight || undefined}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1252,7 +1258,7 @@ export default function FeedScreen() {
               isSaved={savedIds.has(item.id)}
             />
           )}
-          contentContainerStyle={{ paddingBottom: 0 }}
+          contentContainerStyle={{ paddingTop: headerHeightState, paddingBottom: 0 }}
           showsVerticalScrollIndicator={false}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
@@ -1261,9 +1267,8 @@ export default function FeedScreen() {
           }}
           scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
-          pagingEnabled
           decelerationRate="fast"
-          snapToInterval={feedHeight || undefined}
+          snapToInterval={contentHeight || undefined}
           snapToAlignment="start"
           disableIntervalMomentum
 
