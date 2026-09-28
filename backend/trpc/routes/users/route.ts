@@ -6,7 +6,7 @@ export const getProfile = publicProcedure
   .query(async ({ ctx, input }) => {
     const { data, error } = await ctx.supabase
       .from("profiles")
-      .select("*")
+      .select("id, username, full_name, avatar, bio, location, is_verified, followers_count, is_live, relationship_category, created_at, updated_at")
       .eq("id", input.userId)
       .single();
 
