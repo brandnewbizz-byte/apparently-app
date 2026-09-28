@@ -277,3 +277,40 @@ Inspection/planning only. NO changes executed. Full plan delivered to Boss in ch
 - ROLLBACK PLAN READY: YES (pg_dump snapshot restore per repair).
 - BLOCKING UNKNOWNS: 5 (listed in J).
 - READY TO BEGIN CONTROLLED REPAIRS: NO (await Boss go-ahead; unknowns must be resolved first).
+
+---
+
+## FIX PART 1 — CRITICAL SECURITY REPAIRS (EXECUTED 2026-09-28)
+
+**FIX PART 1 COMPLETE: YES**
+
+### Changes made
+1. Enabled RLS on 17 previously-RLS-OFF tables + ownership/participant policies.
+2. Profile PII locked via column-level SELECT grants (email/phone/wallet/push_token/push_token_updated_at/is_blocked/user_id/role revoked from anon+authenticated) + 2 SECURITY DEFINER RPCs (`get_my_profile`, `resolve_login_email`).
+3. `listings`: dropped 3 `true` mutation policies (keep owner user_id/host_id).
+4. `job_requests`: dropped `true` UPDATE; added owner-or-acceptor accept policy (preserves worker accept + avatar-sync).
+5. `notifications`: dropped `true` INSERT; replaced with `actor_id = auth.uid()`.
+6. `post_comments`: dropped `true` INSERT; replaced with `author_id = auth.uid()`.
+7. `messages` storage bucket → private; dropped `Messages: public select`; added `Messages participant select` (owner OR folder==auth.uid()).
+
+### Migrations
+- `supabase/migrations/011_fix_part1_security.sql` (idempotent; applied live via pooler).
+
+### Client code changed
+- `contexts/AuthContext.tsx` — `get_my_profile()` + `resolve_login_email()` RPCs.
+- `app/(tabs)/search.tsx` — removed `email` from select + `.or()`.
+- `app/(tabs)/live/room/[roomId].tsx` — removed `email` from select + `.or()`.
+- `app/inbox/conversation/[participantId].tsx` — store `path`; playback via `createSignedUrl`.
+
+### Tests (all PASS)
+T1 anon PII denied · T2 get_my_profile own email · T3 cross-user email denied · T4 public fields allowed · T5 resolve_login_email · T6 conversations participant-only · T7 listing owner-only update · T8 notification actor-gated · T9 comment author-gated · T10 storage non-participant denied · T11/T12 storage participant checks · T13 storage policy clean.
+
+### Rollback
+- Backup: `/tmp/fix1_backup_1790571424099.json` (full schema+data+policies). Migration is idempotent + reversible (DROP POLICY ... IF EXISTS). EAS commit `6a8dbcc`, update group `f12e2e2a-b652-48a7-bb11-ab1c54d13f36`.
+
+### Remaining (deferred — identity migration, NOT in Part 1)
+- P0: none remaining in Part 1 scope.
+- P1 remaining (deferred): users→profiles identity migration; TEXT→UUID id conversion; `is_blocked` enforcement; admin system canonicalization; `comments`/`social_posts`/`user_reviews` duplicate tables.
+
+### Regressions: none found.
+### SAFE TO CONTINUE: YES
