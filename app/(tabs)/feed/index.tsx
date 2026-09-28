@@ -367,6 +367,7 @@ function PostCard({
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
+  const commentCount = post.stats.comments || (post.comments_list?.length || 0);
   const authorAvatar = post.author.avatar || '';
   const { user: currentUser } = useAuth();
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -493,6 +494,46 @@ function PostCard({
               <Text style={igCardStyles.overlayMenuDots}>···</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Left action rail — like / comment / share / repost / save, overlaid on content */}
+          <View style={igCardStyles.actionRail} pointerEvents="box-none">
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleLike}>
+              <Heart size={27} color={liked ? '#EF4444' : '#FFFFFF'} fill={liked ? '#EF4444' : 'rgba(0,0,0,0.4)'} />
+              <Text style={igCardStyles.railCount}>{likeCount > 0 ? likeCount : ' '}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onComment(post)}>
+              <MessagesSquare size={25} color="#FFFFFF" />
+              <Text style={igCardStyles.railCount}>{commentCount > 0 ? commentCount : ' '}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
+              <Forward size={25} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
+              <Repeat size={25} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave}>
+              <Bookmark size={25} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Bottom comment preview — overlaid on the lower half of the media */}
+          <View style={igCardStyles.commentPreview} pointerEvents="box-none">
+            {post.caption ? (
+              <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
+                <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
+                {post.caption}
+              </Text>
+            ) : null}
+            <View style={igCardStyles.commentPreviewRow}>
+              <TouchableOpacity style={igCardStyles.commentPreviewLink} onPress={() => onComment(post)}>
+                <MessagesSquare size={13} color="rgba(255,255,255,0.85)" />
+                <Text style={igCardStyles.commentPreviewLinkText}>
+                  {commentCount > 0 ? `View all ${commentCount} comments` : 'Add a comment…'}
+                </Text>
+              </TouchableOpacity>
+              <Text style={igCardStyles.commentPreviewTime}>{timeAgo(post.timestamp)}</Text>
+            </View>
+          </View>
         </View>
       ) : (
         <>
@@ -530,76 +571,62 @@ function PostCard({
         </View>
       ) : null}
 
-      {/* Action Bar — Instagram style: ♡ 💬 ✈  |  🔖 */}
-      <View style={igCardStyles.actionBar}>
-        <View style={igCardStyles.actionLeft}>
-          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleLike}>
-            <Star size={26} color={liked ? '#EF4444' : colors.text} fill={liked ? '#EF4444' : 'none'} />
-          </TouchableOpacity>
-          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onComment(post)}>
-            <MessagesSquare size={26} color={colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onShare(post)}>
-            <Forward size={23} color={colors.text} />
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleSave}>
-          <Bookmark size={26} color={colors.text} fill={saved ? colors.text : 'none'} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Likes count */}
-      <View style={igCardStyles.likesRow}>
-        <Text style={[igCardStyles.likesText, { color: colors.text }]}>
-          {liked ? (
-            <>Liked by <Text style={{ fontWeight: '700' }}>you</Text>{likeCount > 1 ? <> and{' '}<Text style={{ fontWeight: '700' }}>{likeCount - 1} {likeCount - 1 === 1 ? 'other' : 'others'}</Text></> : null}</>
-          ) : (
-            <><Text style={{ fontWeight: '700' }}>{likeCount}</Text> {likeCount === 1 ? 'like' : 'likes'}</>
-          )}
-        </Text>
-      </View>
-
-      {/* Caption — with bold username like Instagram */}
-      {post.caption && post.media ? (
-        <View style={igCardStyles.captionRow}>
-          <Text style={[igCardStyles.captionText, { color: colors.text }]} numberOfLines={3}>
-            <Text style={{ fontWeight: '700' }}>{post.author.name}</Text>{' '}
-            {post.caption}
-          </Text>
-          {post.tags.length > 0 && (
-            <View style={igCardStyles.tagRow}>
-              {post.tags.slice(0, 3).map((tag) => (
-                <TouchableOpacity key={tag} onPress={() => onTagTap(tag)}>
-                  <Text style={[igCardStyles.hashTag, { color: '#00376B' }]}>#{tag}</Text>
-                </TouchableOpacity>
-              ))}
+      {/* Below-media content — text-only posts only (media posts overlay everything) */}
+      {!post.media ? (
+        <>
+          {/* Action Bar — Instagram style: ♡ 💬 ✈  |  🔖 */}
+          <View style={igCardStyles.actionBar}>
+            <View style={igCardStyles.actionLeft}>
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleLike}>
+                <Star size={26} color={liked ? '#EF4444' : colors.text} fill={liked ? '#EF4444' : 'none'} />
+              </TouchableOpacity>
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onComment(post)}>
+                <MessagesSquare size={26} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onShare(post)}>
+                <Forward size={23} color={colors.text} />
+              </TouchableOpacity>
             </View>
+            <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleSave}>
+              <Bookmark size={26} color={colors.text} fill={saved ? colors.text : 'none'} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Likes count */}
+          <View style={igCardStyles.likesRow}>
+            <Text style={[igCardStyles.likesText, { color: colors.text }]}>
+              {liked ? (
+                <>Liked by <Text style={{ fontWeight: '700' }}>you</Text>{likeCount > 1 ? <> and{' '}<Text style={{ fontWeight: '700' }}>{likeCount - 1} {likeCount - 1 === 1 ? 'other' : 'others'}</Text></> : null}</>
+              ) : (
+                <><Text style={{ fontWeight: '700' }}>{likeCount}</Text> {likeCount === 1 ? 'like' : 'likes'}</>
+              )}
+            </Text>
+          </View>
+
+          {/* Comments link */}
+          {(post.stats.comments > 0 || post.comments_list?.length) && (
+            <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
+              <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
+                View all {post.stats.comments || post.comments_list?.length || 0} comments
+              </Text>
+            </TouchableOpacity>
           )}
-        </View>
+
+          {/* Timestamp */}
+          <View style={igCardStyles.timestampRow}>
+            <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
+              {timeAgo(post.timestamp)}
+            </Text>
+            {/* Type-specific CTA pill */}
+            {post.type === 'marketplace' ? (
+              <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={onPress}>
+                <ShoppingBag size={11} color="#FFF" />
+                <Text style={igCardStyles.ctaPillText}>View</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </>
       ) : null}
-
-      {/* Comments link */}
-      {(post.stats.comments > 0 || post.comments_list?.length) && (
-        <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
-          <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
-            View all {post.stats.comments || post.comments_list?.length || 0} comments
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Timestamp */}
-      <View style={igCardStyles.timestampRow}>
-        <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
-          {timeAgo(post.timestamp)}
-        </Text>
-        {/* Type-specific CTA pill */}
-        {post.type === 'marketplace' ? (
-          <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={onPress}>
-            <ShoppingBag size={11} color="#FFF" />
-            <Text style={igCardStyles.ctaPillText}>View</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
     </View>
   );
 }
@@ -1524,4 +1551,13 @@ const igCardStyles = StyleSheet.create({
   timestamp: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
   ctaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
   ctaPillText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
+  actionRail: { position: 'absolute', left: 8, bottom: 100, alignItems: 'center', gap: 14, zIndex: 11 },
+  railBtn: { alignItems: 'center', justifyContent: 'center', width: 46, paddingVertical: 2 },
+  railCount: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
+  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 62, paddingRight: 12, paddingBottom: 10, paddingTop: 28, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
+  commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6, paddingRight: 12 },
+  commentPreviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 },
+  commentPreviewLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
+  commentPreviewLinkText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
+  commentPreviewTime: { color: 'rgba(255,255,255,0.7)', fontSize: 11 },
 });
