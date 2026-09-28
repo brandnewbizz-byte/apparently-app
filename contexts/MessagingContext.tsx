@@ -554,11 +554,21 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
   const markConversationAsRead = useCallback((participantId: string) => {
     const me = authUser?.id || '';
+    const target = conversations.find(c => c.participantId === participantId);
+    if (!target) return;
+
+    // Idempotency guard: only persist when there is actually an unread message
+    // to clear. Without this, the `.map()` below produces a brand-new array on
+    // every call, which re-triggers the conversation screen's effect (whose dep
+    // is this callback's identity, itself dependent on `conversations`) → an
+    // infinite render loop that freezes the screen before it can open.
+    const myIncoming = target.messages.filter(m => m.receiverId === me && !m.read);
+    if (myIncoming.length === 0 && target.unreadCount === 0) return;
+
     const updatedConversations = conversations.map(conv => {
       if (conv.participantId === participantId) {
         // Persist read state of MY received messages up to the DB so the sender
         // sees the read receipt via realtime UPDATE.
-        const myIncoming = conv.messages.filter(m => m.receiverId === me && !m.read);
         if (myIncoming.length && conv.id && !conv.id.startsWith('conv-')) {
           const ids = myIncoming.map(m => m.id);
           (async () => {
