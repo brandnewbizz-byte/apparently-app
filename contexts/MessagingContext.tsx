@@ -45,7 +45,7 @@ export interface Message {
       image_url?: string;
       creator_name?: string;
     };
-    voice_note?: { url: string; duration: number };
+    voice_note?: { url?: string; path?: string; duration: number };
   };
 }
 

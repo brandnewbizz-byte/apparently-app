@@ -65,6 +65,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [emailVerificationRequired, setEmailVerificationRequired] = useState<boolean>(false);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [isResendingVerification, setIsResendingVerification] = useState<boolean>(false);
+  const [isBlocked, setIsBlocked] = useState<boolean>(false);
   const queryClient = useQueryClient();
 
   const { mutateAsync: saveProfileCache } = useMutation({
@@ -211,6 +212,23 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         hasName: !needsName,
         phone: profile.phone,
       });
+
+      // ENFORCE BLOCKED ACCOUNTS — a blocked account cannot continue.
+      // Check the DB-backed flag (SECURITY DEFINER RPC) so a blocked user's
+      // existing/refreshed session cannot bypass enforcement.
+      try {
+        const { data: blocked, error: blockedErr } = await supabase.rpc('is_user_blocked');
+        if (!blockedErr && blocked === true) {
+          logger.warn('Auth', 'Account is blocked — signing out', { userId: profile.id });
+          setIsBlocked(true);
+          await supabase.auth.signOut();
+          setState(defaultState);
+          return;
+        }
+      } catch (e) {
+        logger.warn('Auth', 'Block check failed', { message: String(e) });
+      }
+      setIsBlocked(false);
 
       setProfileNeedsName(needsName);
       setEmailVerificationRequired(false);
@@ -815,6 +833,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     emailVerificationRequired,
     pendingVerificationEmail,
     isResendingVerification,
+    isBlocked,
     displayName,
     saveFullNameOnce,
     updateAvatar,

@@ -314,3 +314,51 @@ T1 anon PII denied · T2 get_my_profile own email · T3 cross-user email denied 
 
 ### Regressions: none found.
 ### SAFE TO CONTINUE: YES
+
+---
+
+## FIX PART 2 — CANONICAL USER IDENTITY (EXECUTED 2026-09-28)
+
+**FIX PART 2 COMPLETE: YES**
+
+### Changes made
+1. `public.profiles` is now the SINGLE canonical app identity. Added 4 legacy-user columns (`is_verified`, `followers_count`, `is_live`, `relationship_category`) and merged useful data from the 2 legacy `users` rows.
+2. `profiles.id` → `auth.users(id)` `ON DELETE CASCADE` (true 1:1 identity; PK already prevents dupes).
+3. Reconcile 3 `user_id=NULL` profiles (all matched to real auth accounts; backfilled `user_id=id` then dropped the redundant nullable column).
+4. Repointed **11 FKs** `users(id)` → `profiles(id)` (posts, stories, product_inquiries, calendar_events, income_sources, bills, relationships, pipelines, market_watch, post_likes, post_comments).
+5. Converted **6 TEXT identity columns → UUID** + added FKs (follows.follower_id/following_id, hidden_posts.user_id, live_streams.streamer_id, messages.receiver_id, reports.reported_by). `rooms.id` intentionally NOT converted (non-UUID room IDs).
+6. Rewrote `handle_new_user()` — SECURITY DEFINER, explicit `search_path`, idempotent (`ON CONFLICT (id) DO NOTHING`), username-uniqueness-safe, `unique_violation` swallowed so signup never breaks.
+7. Dropped legacy `public.users` (all conditions met: zero code deps, zero FK deps, data migrated, 21 posts resolve, signup no longer writes it).
+8. **@user root cause fixed**: Part 1 revoked table-wide `SELECT` on `profiles`, so every `select('*')` read began returning PostgREST `42501` (because `*` expands to locked PII columns). Feed/marketplace/planner author resolution silently failed → `@user` fallback. Switched ALL profile reads to explicit public columns (with `name:full_name` alias to preserve legacy `DbUser.name`).
+
+### Migrations
+- `supabase/migrations/012_canonical_identity.sql` (idempotent; applied live via pooler).
+
+### Client/backend code changed
+- `lib/database.ts` — `PROFILE_PUBLIC_COLUMNS` const; `fetchUsers`/`fetchUserById` use it.
+- `lib/api.ts` — `getUsers`/`getUser` explicit columns.
+- `lib/avatar-sync.ts` — removed dead legacy `users` avatar sync.
+- `backend/trpc/routes/users/route.ts` — `users`→`profiles`, `name`→`full_name`, narrow `getProfile` to public columns (PII leak closed).
+- `app/(tabs)/search.tsx` — post-search embed `name`→`full_name`.
+- `app/user/[userId].tsx` — profile read explicit columns.
+- `contexts/ConnectionsContext.tsx` / `BookingsContext.tsx` — `full_name || name` fallbacks.
+
+### Identity mapping result
+- 10 auth.users ↔ 10 profiles (aligned `profiles.id = auth.users.id`). 2 legacy `users` rows merged (shawnie876/d8694830, dapadon/95b86cde). 0 orphans deleted; 3 `user_id=NULL` rows resolved to real accounts.
+
+### Tests (all PASS)
+- Signup trigger: with-metadata → exactly 1 profile w/ chosen username + dicebear avatar; no-metadata → exactly 1 profile w/ auto username (BEGIN…ROLLBACK clean).
+- 21 posts preserved (2 owners → shawnie876=14, dapadon=7, **0 NULL authors** via PostgREST `user:user_id` embed).
+- RLS negative: User A vs B cross-user INSERT/DELETE/SELECT blocked; own follows readable; policies use `auth.uid()` (no `::text`); User A cannot read User B email.
+- PostgREST: `select=*` correctly 42501 (PII locked); explicit public columns return; `email` denied.
+- `tsc --noEmit`: clean except pre-existing voice-note `path` vs `url` typing (`app/inbox/conversation/[participantId].tsx:156` — Part 1 scope, flagged).
+
+### FKs changed: 11 repointed users→profiles + 6 new FKs + profiles.id→auth.users CASCADE.
+### ID columns changed: 6 TEXT→UUID (follows, hidden_posts, live_streams, messages, reports).
+### Legacy users: DROPPED.
+### Orphans: 3 resolved (none deleted).
+### @USER bug: FIXED.
+### Rollback
+- Backup: `/tmp/fix2_backup_1790576353634.json` (61 tables, 200 policies, 12 functions, 1 trigger — full schema+data). Migration is idempotent + reversible. EAS commit `ec258c5` + `b5fead3`, update group `ecce2537-88c1-4451-9625-50e2055b7b05`.
+### Regressions: none found.
+### SAFE TO CONTINUE: YES

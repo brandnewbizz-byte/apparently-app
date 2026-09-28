@@ -33,6 +33,7 @@ export default function WelcomeScreen() {
     pendingVerificationEmail,
     resendVerificationEmail,
     isResendingVerification,
+    isBlocked,
     resetPassword,
   } = useAuth();
 
@@ -272,6 +273,18 @@ export default function WelcomeScreen() {
                     ? 'Fill in your details to get started'
                     : 'Enter your email to receive a reset link'}
                 </Text>
+
+                {isBlocked ? (
+                  <View style={styles.suspendedBanner} testID="account-suspended-banner">
+                    <View style={styles.emailBannerHeader}>
+                      <AlertCircle size={16} color={Colors.dark.error} />
+                      <Text style={styles.emailBannerTitle}>Account suspended</Text>
+                    </View>
+                    <Text style={styles.emailBannerSubtitle} numberOfLines={3}>
+                      This account has been suspended. If you believe this is a mistake, contact support.
+                    </Text>
+                  </View>
+                ) : null}
 
                 {shouldShowEmailBanner ? (
                   <View style={styles.emailBanner} testID="email-verification-banner">
@@ -660,6 +673,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: `${Colors.dark.warning}55`,
     backgroundColor: `${Colors.dark.warning}1A`,
+    padding: 14,
+    marginBottom: 14,
+  },
+  suspendedBanner: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: `${Colors.dark.error}55`,
+    backgroundColor: `${Colors.dark.error}22`,
     padding: 14,
     marginBottom: 14,
   },
