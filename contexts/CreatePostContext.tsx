@@ -3,10 +3,10 @@ import { Alert, Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-na
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, FileText, Gift, Wrench, X } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import PostComposer from '@/components/PostComposer';
-import CreateDealModal from '@/components/CreateDealModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
@@ -31,12 +31,11 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   const { createPost } = useSocial();
   const { addUserPost } = useUserPosts();
   const { hideTabBar, showTabBar } = useTabBar();
+  const router = useRouter();
 
   const [showCreate, setShowCreate] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
-  const [showDeal, setShowDeal] = useState(false);
-  const [dealMode, setDealMode] = useState<'skill' | 'bundle'>('skill');
   const [createPreloadMedia, setCreatePreloadMedia] = useState<string | null>(null);
   const [createPreloadMediaWidth, setCreatePreloadMediaWidth] = useState<number | undefined>(undefined);
   const [createPreloadMediaHeight, setCreatePreloadMediaHeight] = useState<number | undefined>(undefined);
@@ -83,11 +82,15 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
     setShowCreate(true);
   }, []);
 
-  const startDeal = useCallback((mode: 'skill' | 'bundle') => {
+  const startBundle = useCallback(() => {
     setShowChooser(false);
-    setDealMode(mode);
-    setShowDeal(true);
-  }, []);
+    router.push('/bundle-builder' as any);
+  }, [router]);
+
+  const startSkill = useCallback(() => {
+    setShowChooser(false);
+    router.push('/skill-builder' as any);
+  }, [router]);
 
   const openCreate = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -178,7 +181,7 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
 
             <TouchableOpacity
               style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => startDeal('bundle')}
+              onPress={startBundle}
               activeOpacity={0.8}
             >
               <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
@@ -192,7 +195,7 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
 
             <TouchableOpacity
               style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => startDeal('skill')}
+              onPress={startSkill}
               activeOpacity={0.8}
             >
               <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
@@ -215,12 +218,6 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
           onPickFromGallery={handlePickFromGallery}
         />
       </Modal>
-
-      <CreateDealModal
-        visible={showDeal}
-        mode={dealMode}
-        onClose={() => setShowDeal(false)}
-      />
 
       <PostComposer
         visible={showCreate}
