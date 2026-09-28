@@ -795,7 +795,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: 'apparently://reset-password',
+        redirectTo: 'rork-app://reset-password',
       });
 
       if (error) {

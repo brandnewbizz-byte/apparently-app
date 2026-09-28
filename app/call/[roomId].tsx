@@ -10,6 +10,7 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebRTCCall, type CallConfig } from '@/hooks/useWebRTCCall';
 
@@ -35,7 +36,7 @@ export default function CallScreen() {
   const targetId = params.targetId || '';
   const targetName = params.targetName || 'User';
   const isOutgoing = params.isOutgoing === 'true';
-  const serverUrl = params.serverUrl || 'http://localhost:3000';
+  const serverUrl = params.serverUrl || getApiUrl();
   const currentUserId = params.currentUserId || user?.id || '';
   const currentUserName = params.currentUserName || (user as any)?.fullName || (user as any)?.username || 'You';
 

@@ -117,6 +117,7 @@ function RootLayoutNav() {
       }}
     >
     <Stack.Screen name="welcome" options={{ headerShown: false }} />
+    <Stack.Screen name="reset-password" options={{ headerShown: false }} />
     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     <Stack.Screen
       name="onboarding"

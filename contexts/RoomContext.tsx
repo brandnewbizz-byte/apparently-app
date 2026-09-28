@@ -302,7 +302,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     goal?: string; category?: string; visibility?: 'public' | 'private' | 'invite_only'; maxParticipants?: number; environment?: string; coverImage?: string | null;
   }) => {
     const roomId = `room_${seededId()}`;
-    const inviteLink = `apparently://live/room/${roomId}`;
+    const inviteLink = `rork-app://live/room/${roomId}`;
     const newRoom: LiveRoom = {
       id: roomId, name, topic,
       goal: opts?.goal || '', category: opts?.category || 'General',
@@ -507,7 +507,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const generateInviteLink = useCallback((roomId: string): string => {
-    return `apparently://live/room/${roomId}`;
+    return `rork-app://live/room/${roomId}`;
   }, []);
 
   const toggleRoomLock = useCallback((roomId: string) => {

@@ -11,20 +11,21 @@ import { createAudioRelayClient, type AudioRelayClient, type RemoteSpeaker } fro
 
 // ── Server URL resolution ──
 
-// During dev, the backend runs on localhost via the Rork/EAS tunnel
-// In production, this should be pointed at the deployed backend
-const getServerUrl = () => {
+// Resolve the signaling server URL from env first, then fall back to a
+// same-origin heuristic for web. Native uses the env-configured backend.
+const getServerUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_RORK_API_BASE_URL) {
+    return process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+  }
   if (typeof window !== 'undefined' && window.location?.hostname) {
-    // Running in browser/web mode
     const hostname = window.location.hostname;
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:8082'; // Default dev server
+      return 'http://localhost:8082'; // dev
     }
     return `https://${hostname}`;
   }
-  // Native mobile — use the tunnel/production URL
-  // This should be configured per environment
-  return 'http://localhost:8082'; // Default dev — override via env
+  // No env configured — live audio will degrade to unavailable.
+  return '';
 };
 
 interface UseLiveAudioOptions {
