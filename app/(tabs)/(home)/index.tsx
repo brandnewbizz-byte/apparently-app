@@ -9,7 +9,7 @@ import {
   X,
   Bookmark,
   Trophy,
-  MessageCircle,
+  Bell,
   Sparkles,
   Wrench,
   Star,
@@ -1687,7 +1687,7 @@ export default function HomeScreen() {
               onPress={() => handleNavigate('/inbox')}
               activeOpacity={0.8}
             >
-              <MessageCircle size={20} color={colors.text} />
+              <Bell size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>

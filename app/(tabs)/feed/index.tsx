@@ -1,7 +1,7 @@
 import {
   MapPin, Sparkles, Dumbbell, Utensils, Palette,
   Plane, Heart, Music, Play, Plus,
-  MessageCircle, Wrench, Bookmark, CalendarDays,
+  Bell, Wrench, Bookmark, CalendarDays,
   FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
@@ -1101,7 +1101,7 @@ export default function FeedScreen() {
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => router.push('/inbox')}
             >
-              <MessageCircle size={20} color={colors.text} />
+              <Bell size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
