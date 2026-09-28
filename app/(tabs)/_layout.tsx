@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, Users, User, Search, Plus } from 'lucide-react-native';
+import { Home, Newspaper, Users, User, Plus } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,15 +54,11 @@ export default function TabLayout() {
             ),
           }}
         />
+        {/* Search moved to top-right header icon on feed — hidden from bottom nav */}
         <Tabs.Screen
           name="search"
           options={{
-            title: 'Search',
-            tabBarIcon: ({ color, focused }) => (
-              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <Search size={24} color={color} />
-              </View>
-            ),
+            href: null,
           }}
         />
         <Tabs.Screen

@@ -1087,6 +1087,12 @@ export default function FeedScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => router.push('/(tabs)/search' as any)}
+            >
+              <Search size={20} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => router.push('/(tabs)/planner' as any)}
             >
               <CalendarDays size={20} color={colors.text} />
