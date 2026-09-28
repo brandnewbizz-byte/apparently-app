@@ -441,58 +441,85 @@ function PostCard({
 
   return (
     <View style={[igCardStyles.card, { backgroundColor: colors.surface, height: height ?? undefined, marginBottom: height ? 0 : 16 }]}>
-      {/* Header — Instagram style: circle avatar + username + location */}
-      <View style={igCardStyles.header}>
-        <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
-          {authorAvatar ? (
-            <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
-          ) : null}
-          <View style={igCardStyles.headerText}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
-              {typeLabel && (
-                <Text style={[igCardStyles.typeLabel, { color: colors.textTertiary }]}>· {typeLabel}</Text>
-              )}
-            </View>
-            {post.location ? (
-              <Text style={[igCardStyles.location, { color: colors.textTertiary }]}>{post.location}</Text>
-            ) : null}
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={igCardStyles.menuBtn} onPress={handleMenuPress}>
-          <Text style={[igCardStyles.menuDots, { color: colors.textSecondary }]}>···</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Media — Reels-style full-screen fill */}
+      {/* Media — Reels-style full-screen fill, author overlaid top-left (Instagram style) */}
       {post.media ? (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)} style={height ? { flex: 1 } : undefined}>
-          <RNImage
-            source={{ uri: post.media }}
-            style={[
-              igCardStyles.media,
-              height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
-            ]}
-            resizeMode="contain"
-          />
-          {post.type === 'video' && post.videoUrl && (
-            <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
-              Alert.alert('Coming Soon', 'Video playback will be available soon.');
-            }}>
-              <View style={igCardStyles.playBtn}>
-                <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
+        <View style={height ? { flex: 1 } : undefined}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)} style={height ? { flex: 1 } : undefined}>
+            <RNImage
+              source={{ uri: post.media }}
+              style={[
+                igCardStyles.media,
+                height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
+              ]}
+              resizeMode="contain"
+            />
+            {post.type === 'video' && post.videoUrl && (
+              <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
+                Alert.alert('Coming Soon', 'Video playback will be available soon.');
+              }}>
+                <View style={igCardStyles.playBtn}>
+                  <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
+                </View>
+              </TouchableOpacity>
+            )}
+            {post.type === 'video' && !post.videoUrl && (
+              <View style={igCardStyles.playOverlay}>
+                <View style={igCardStyles.playBtn}>
+                  <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
+                </View>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Author overlay — avatar + name on the content, top-left */}
+          <View style={igCardStyles.authorOverlay} pointerEvents="box-none">
+            <TouchableOpacity style={igCardStyles.authorOverlayLeft} onPress={handleProfileTap}>
+              {authorAvatar ? (
+                <RNImage source={{ uri: authorAvatar }} style={igCardStyles.overlayAvatar} />
+              ) : null}
+              <View style={{ flexShrink: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={igCardStyles.overlayUsername} numberOfLines={1}>{post.author.name}</Text>
+                  {typeLabel ? (
+                    <Text style={igCardStyles.overlayTypeLabel} numberOfLines={1}>· {typeLabel}</Text>
+                  ) : null}
+                </View>
+                {post.location ? (
+                  <Text style={igCardStyles.overlayLocation} numberOfLines={1}>{post.location}</Text>
+                ) : null}
               </View>
             </TouchableOpacity>
-          )}
-          {post.type === 'video' && !post.videoUrl && (
-            <View style={igCardStyles.playOverlay}>
-              <View style={igCardStyles.playBtn}>
-                <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
+            <TouchableOpacity style={igCardStyles.overlayMenuBtn} onPress={handleMenuPress}>
+              <Text style={igCardStyles.overlayMenuDots}>···</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <>
+          {/* Header — text-only post keeps its own row (no media to overlay) */}
+          <View style={igCardStyles.header}>
+            <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
+              {authorAvatar ? (
+                <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
+              ) : null}
+              <View style={igCardStyles.headerText}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
+                  {typeLabel && (
+                    <Text style={[igCardStyles.typeLabel, { color: colors.textTertiary }]}>· {typeLabel}</Text>
+                  )}
+                </View>
+                {post.location ? (
+                  <Text style={[igCardStyles.location, { color: colors.textTertiary }]}>{post.location}</Text>
+                ) : null}
               </View>
-            </View>
-          )}
-        </TouchableOpacity>
-      ) : null}
+            </TouchableOpacity>
+            <TouchableOpacity style={igCardStyles.menuBtn} onPress={handleMenuPress}>
+              <Text style={[igCardStyles.menuDots, { color: colors.textSecondary }]}>···</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       {/* Text-only post: larger caption area */}
       {!post.media && post.caption ? (
@@ -1467,6 +1494,14 @@ const igCardStyles = StyleSheet.create({
   media: { width: SCREEN_WIDTH, backgroundColor: '#0a0a0a' },
   playOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  authorOverlay: { position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', zIndex: 10 },
+  authorOverlayLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 22, maxWidth: '82%' },
+  overlayAvatar: { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
+  overlayUsername: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  overlayTypeLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '500' },
+  overlayLocation: { color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 1 },
+  overlayMenuBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  overlayMenuDots: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', letterSpacing: 1 },
   textOnlyArea: { paddingHorizontal: 16, paddingVertical: 24, minHeight: 120, justifyContent: 'center' },
   textOnlyCaption: { fontSize: 16, lineHeight: 24 },
   actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
