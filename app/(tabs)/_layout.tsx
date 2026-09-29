@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, User, Plus, CalendarDays } from 'lucide-react-native';
+import { Home, Newspaper, User, Plus, CalendarDays, LayoutGrid } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -108,6 +108,18 @@ export default function TabLayout() {
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
                 <CalendarDays size={24} color={color} />
+              </View>
+            ),
+          }}
+        />
+        {/* Manage hub — skills, bundles, plans, and orders in one place */}
+        <Tabs.Screen
+          name="manage"
+          options={{
+            title: 'Manage',
+            tabBarIcon: ({ color, focused }) => (
+              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
+                <LayoutGrid size={24} color={color} />
               </View>
             ),
           }}
