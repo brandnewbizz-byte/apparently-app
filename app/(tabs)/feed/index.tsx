@@ -452,7 +452,7 @@ function PostCard({
                 igCardStyles.media,
                 height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
               ]}
-              resizeMode="contain"
+              resizeMode="cover"
             />
             {post.type === 'video' && post.videoUrl && (
               <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
@@ -472,24 +472,8 @@ function PostCard({
             )}
           </TouchableOpacity>
 
-          {/* Author overlay — avatar + name on the content, top-left */}
-          <View style={igCardStyles.authorOverlay} pointerEvents="box-none">
-            <TouchableOpacity style={igCardStyles.authorOverlayLeft} onPress={handleProfileTap}>
-              {authorAvatar ? (
-                <RNImage source={{ uri: authorAvatar }} style={igCardStyles.overlayAvatar} />
-              ) : null}
-              <View style={{ flexShrink: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={igCardStyles.overlayUsername} numberOfLines={1}>{post.author.name}</Text>
-                  {typeLabel ? (
-                    <Text style={igCardStyles.overlayTypeLabel} numberOfLines={1}>· {typeLabel}</Text>
-                  ) : null}
-                </View>
-                {post.location ? (
-                  <Text style={igCardStyles.overlayLocation} numberOfLines={1}>{post.location}</Text>
-                ) : null}
-              </View>
-            </TouchableOpacity>
+          {/* Menu button — top-right overlay (who-posted info now lives at the bottom) */}
+          <View style={igCardStyles.menuOverlay} pointerEvents="box-none">
             <TouchableOpacity style={igCardStyles.overlayMenuBtn} onPress={handleMenuPress}>
               <Text style={igCardStyles.overlayMenuDots}>···</Text>
             </TouchableOpacity>
@@ -516,13 +500,22 @@ function PostCard({
             </TouchableOpacity>
           </View>
 
-          {/* Bottom comment preview — overlaid on the lower half of the media */}
+          {/* Bottom overlay — who posted + like count + 3-line comment preview, overlaid on the media */}
           <View style={igCardStyles.commentPreview} pointerEvents="box-none">
+            <View style={igCardStyles.previewMetaRow}>
+              <TouchableOpacity style={igCardStyles.previewAuthor} onPress={handleProfileTap}>
+                {authorAvatar ? (
+                  <RNImage source={{ uri: authorAvatar }} style={igCardStyles.previewAvatar} />
+                ) : null}
+                <Text style={igCardStyles.previewUsername} numberOfLines={1}>{post.author.name}</Text>
+              </TouchableOpacity>
+              <View style={igCardStyles.previewLikesWrap}>
+                <Heart size={13} color="#FF4D67" fill="#FF4D67" />
+                <Text style={igCardStyles.previewLikes}>{likeCount}</Text>
+              </View>
+            </View>
             {post.caption ? (
-              <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
-                <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
-                {post.caption}
-              </Text>
+              <Text style={igCardStyles.commentPreviewCaption} numberOfLines={3}>{post.caption}</Text>
             ) : null}
             <View style={igCardStyles.commentPreviewRow}>
               <TouchableOpacity style={igCardStyles.commentPreviewLink} onPress={() => onComment(post)}>
@@ -1554,7 +1547,14 @@ const igCardStyles = StyleSheet.create({
   actionRail: { position: 'absolute', left: 8, bottom: 100, alignItems: 'center', gap: 14, zIndex: 11 },
   railBtn: { alignItems: 'center', justifyContent: 'center', width: 46, paddingVertical: 2 },
   railCount: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
-  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 62, paddingRight: 12, paddingBottom: 10, paddingTop: 28, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
+  menuOverlay: { position: 'absolute', top: 10, right: 10, zIndex: 10 },
+  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 62, paddingRight: 12, paddingBottom: 10, paddingTop: 10, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
+  previewMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  previewAuthor: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  previewAvatar: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)' },
+  previewUsername: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  previewLikesWrap: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
+  previewLikes: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6, paddingRight: 12 },
   commentPreviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 },
   commentPreviewLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
