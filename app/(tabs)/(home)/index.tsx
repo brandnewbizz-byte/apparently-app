@@ -91,6 +91,8 @@ interface BundlePlan {
   summary?: string[];
   description?: string;
   imageUrl?: string;
+  videoUrl?: string;
+  mediaType?: 'image' | 'video';
   category?: string;
   grabCount?: number;
   location?: string;
@@ -121,6 +123,8 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     summary: b.items.map((i) => i.name),
     description: b.description,
     imageUrl: b.imageUrl,
+    videoUrl: b.videoUrl,
+    mediaType: b.mediaType,
     category: b.category,
     grabCount: b.grabCount,
     location: b.location,
@@ -527,6 +531,18 @@ interface SwipeBundleCardContentProps {
 }
 
 function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps) {
+  const Video = useRef<any>(null);
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const av = require('expo-av');
+      if (!cancelled) { Video.current = av.Video; }
+    } catch (_) {}
+    return () => { cancelled = true; };
+  }, []);
+  const VideoPlayer = Video.current as any;
+  const isVideo = bundle.mediaType === 'video' && !!bundle.videoUrl;
+
   const getTypeColor = (type: string) => {
     const typeColors: Record<string, string> = {
       lifestyle: '#7B61FF',
@@ -542,20 +558,41 @@ function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps)
 
   return (
     <View style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <ImageBackground
-        source={{ uri: bundle.image }}
-        style={styles.bundleCardImage}
-        imageStyle={styles.bundleCardImageStyle}
-      >
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.7)']}
-          style={styles.bundleImageOverlay}
+      {isVideo && VideoPlayer ? (
+        <View style={styles.bundleCardImage}>
+          <VideoPlayer
+            source={{ uri: bundle.videoUrl }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            shouldPlay={false}
+            isMuted
+            isLooping={false}
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.7)']}
+            style={styles.bundleImageOverlay}
+          >
+            <View style={[styles.bundleTypeTag, { backgroundColor: getTypeColor(bundle.type) }]}>
+              <Text style={styles.bundleTypeText}>{bundle.type.toUpperCase()}</Text>
+            </View>
+          </LinearGradient>
+        </View>
+      ) : (
+        <ImageBackground
+          source={{ uri: bundle.image }}
+          style={styles.bundleCardImage}
+          imageStyle={styles.bundleCardImageStyle}
         >
-          <View style={[styles.bundleTypeTag, { backgroundColor: getTypeColor(bundle.type) }]}>
-            <Text style={styles.bundleTypeText}>{bundle.type.toUpperCase()}</Text>
-          </View>
-        </LinearGradient>
-      </ImageBackground>
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.7)']}
+            style={styles.bundleImageOverlay}
+          >
+            <View style={[styles.bundleTypeTag, { backgroundColor: getTypeColor(bundle.type) }]}>
+              <Text style={styles.bundleTypeText}>{bundle.type.toUpperCase()}</Text>
+            </View>
+          </LinearGradient>
+        </ImageBackground>
+      )}
 
       <View style={styles.bundleCardContent}>
         <View style={styles.bundleCardHeader}>

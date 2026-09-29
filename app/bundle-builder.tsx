@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,11 +27,13 @@ import {
   Calendar,
   Trash2,
   Star,
+  Play,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBundles, type BundleItem } from '@/contexts/BundleContext';
+import { uploadVideoToStorage, persistableImageUri } from '@/lib/storage';
 
 // ── Categories ───────────────────────────────────────────────────────
 
@@ -80,8 +82,16 @@ export default function BundleBuilderScreen() {
   const [availableCount, setAvailableCount] = useState('10');
   const [plannerNotes, setPlannerNotes] = useState('');
   const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [coverMediaType, setCoverMediaType] = useState<'image' | 'video'>('image');
+  const [publishing, setPublishing] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
+
+  const VideoRef = useRef<any>(null);
+  useEffect(() => {
+    try { VideoRef.current = require('expo-av').Video; } catch (_) {}
+  }, []);
+  const VideoPlayer = VideoRef.current as any;
 
   const itemsTotal = services.reduce((sum, s) => sum + (s.price || 0), 0);
   const finalPrice = bundlePrice ? parseFloat(bundlePrice) : itemsTotal;
@@ -107,13 +117,20 @@ export default function BundleBuilderScreen() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.8,
       allowsEditing: true,
       aspect: [16, 9],
+      videoMaxDuration: 60,
     });
     if (!result.canceled && result.assets?.[0]) {
-      setCoverImage(result.assets[0].uri);
+      const asset = result.assets[0];
+      if (asset.type === 'video' && asset.duration && asset.duration > 60000) {
+        Alert.alert('Video too long', 'Please select a video under 60 seconds.');
+        return;
+      }
+      setCoverImage(asset.uri);
+      setCoverMediaType(asset.type === 'video' ? 'video' : 'image');
     }
   }, []);
 
@@ -131,10 +148,25 @@ export default function BundleBuilderScreen() {
 
   const canPublish = title.trim().length > 0 && finalPrice > 0;
 
-  const handlePublish = () => {
-    if (!canPublish) {
-      Alert.alert('Missing Info', 'Add a title and price to publish your bundle.');
+  const handlePublish = async () => {
+    if (!canPublish || publishing) {
+      if (!canPublish) Alert.alert('Missing Info', 'Add a title and price to publish your bundle.');
       return;
+    }
+    setPublishing(true);
+
+    let imageUrl = '';
+    let videoUrl: string | undefined;
+    try {
+      if (coverImage) {
+        if (coverMediaType === 'video') {
+          videoUrl = await uploadVideoToStorage(coverImage, 'user-media', `bundles/${user?.id || 'anon'}`);
+        } else {
+          imageUrl = (await persistableImageUri(coverImage, 'user-media', `bundles/${user?.id || 'anon'}`)) || '';
+        }
+      }
+    } catch (e) {
+      console.warn('[bundle-builder] media upload failed', e);
     }
 
     const items: BundleItem[] = services.map((s, i) => ({
@@ -159,7 +191,9 @@ export default function BundleBuilderScreen() {
       description: bundleDescription,
       price: finalPrice,
       items,
-      imageUrl: coverImage || '',
+      imageUrl,
+      videoUrl,
+      mediaType: coverMediaType,
       category: category || 'other',
       location: location.trim(),
       dateRange: dateRange.trim(),
@@ -176,6 +210,7 @@ export default function BundleBuilderScreen() {
     });
 
     if (!result.success) {
+      setPublishing(false);
       Alert.alert('Limit Reached', result.error);
       return;
     }
@@ -220,16 +255,27 @@ export default function BundleBuilderScreen() {
         >
           {coverImage ? (
             <View style={styles.imagePreview}>
-              <Image source={{ uri: coverImage }} style={styles.coverImage} />
+              {coverMediaType === 'video' && VideoPlayer ? (
+                <VideoPlayer
+                  source={{ uri: coverImage }}
+                  style={styles.coverImage}
+                  resizeMode="cover"
+                  shouldPlay={false}
+                  isMuted
+                  isLooping={false}
+                />
+              ) : (
+                <Image source={{ uri: coverImage }} style={styles.coverImage} />
+              )}
               <View style={[styles.imageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                <Camera size={14} color="#FFF" />
-                <Text style={styles.imageOverlayText}>Change</Text>
+                {coverMediaType === 'video' ? <Play size={14} color="#FFF" fill="#FFF" /> : <Camera size={14} color="#FFF" />}
+                <Text style={styles.imageOverlayText}>{coverMediaType === 'video' ? 'Change Video' : 'Change'}</Text>
               </View>
             </View>
           ) : (
             <View style={styles.imagePlaceholder}>
               <Camera size={28} color={colors.textTertiary} />
-              <Text style={[styles.imagePickerText, { color: colors.textSecondary }]}>Add Cover Image</Text>
+              <Text style={[styles.imagePickerText, { color: colors.textSecondary }]}>Add Cover Photo or Video</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -431,7 +477,18 @@ export default function BundleBuilderScreen() {
           <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Preview</Text>
           <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             {coverImage ? (
-              <Image source={{ uri: coverImage }} style={styles.previewCover} />
+              coverMediaType === 'video' && VideoPlayer ? (
+                <VideoPlayer
+                  source={{ uri: coverImage }}
+                  style={styles.previewCover}
+                  resizeMode="cover"
+                  shouldPlay={false}
+                  isMuted
+                  isLooping={false}
+                />
+              ) : (
+                <Image source={{ uri: coverImage }} style={styles.previewCover} />
+              )
             ) : (
               <View style={[styles.previewCover, { backgroundColor: colors.surfaceHighlight }]}>
                 <Text style={{ fontSize: 48 }}>📦</Text>

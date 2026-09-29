@@ -9,6 +9,23 @@
 import { supabase } from './supabase';
 import { isLocalFileUri, safeImageUrl } from './media';
 
+/** Maps a lowercase file extension to a video MIME type for Supabase uploads. */
+const VIDEO_EXT_TO_MIME: Record<string, string> = {
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  m4v: 'video/x-m4v',
+  webm: 'video/webm',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  hevc: 'video/mp4',
+  '3gp': 'video/3gpp',
+};
+
+function fileExtension(uri: string): string {
+  const m = uri.match(/\.([a-zA-Z0-9]+)(\?.*)?$/);
+  return m ? m[1].toLowerCase() : '';
+}
+
 /** Local file:// URIs that should be uploaded to Supabase Storage instead of stored directly */
 export function shouldUploadToStorage(uri: string | null | undefined): boolean {
   if (!uri) return false;
@@ -66,6 +83,56 @@ export async function uploadImageToStorage(
 
   console.warn(`[storage] upload failed after ${retries} retries:`, lastError);
   // Fall back to local URI — the caller should handle this gracefully
+  return localUri;
+}
+
+/**
+ * Uploads a local video file to Supabase Storage with the correct content type
+ * and extension, returning the public URL. Falls back to the original URI on
+ * failure (caller should detect and retry/handle).
+ */
+export async function uploadVideoToStorage(
+  localUri: string,
+  bucket: string,
+  folder: string,
+  retries = 3,
+): Promise<string> {
+  if (!isLocalFileUri(localUri)) return localUri;
+
+  const { File } = await import('expo-file-system');
+
+  const ext = fileExtension(localUri);
+  const safeExt = VIDEO_EXT_TO_MIME[ext] ? ext : 'mp4';
+  const contentType = VIDEO_EXT_TO_MIME[ext] || 'video/mp4';
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+  const path = `${folder}/${fileName}`;
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const file = new File(localUri);
+      const bytes = await file.bytes();
+
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .upload(path, bytes, { contentType, upsert: true });
+
+      if (error) throw error;
+
+      const { data: urlData } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(data.path);
+
+      return urlData.publicUrl;
+    } catch (e) {
+      lastError = e;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 500));
+      }
+    }
+  }
+
+  console.warn(`[storage] video upload failed after ${retries} retries:`, lastError);
   return localUri;
 }
 

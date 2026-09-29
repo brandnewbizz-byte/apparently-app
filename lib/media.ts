@@ -57,3 +57,23 @@ export function safeImageUrl(url: string | undefined | null): string | null {
   // Reject file://, blob: (non-image), and unknown schemes
   return null;
 }
+
+const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp)(\?.*)?$/i;
+
+/**
+ * Returns true if the URL points to a video file (by extension).
+ * Used to decide whether to render a video player vs an image.
+ */
+export function isVideoUrl(url: string | undefined | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  return VIDEO_EXT_RE.test(url);
+}
+
+/**
+ * Validates a URL for video playback. Falls back to null for unsafe urls.
+ */
+export function safeVideoUrl(url: string | undefined | null): string | null {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('https://') || url.startsWith('http://')) return url;
+  return null;
+}

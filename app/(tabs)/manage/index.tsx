@@ -38,6 +38,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
+import { isVideoUrl } from '@/lib/media';
 import { useOrders, type GrabOrder } from '@/contexts/OrdersContext';
 import { useSkills, type UserSkill } from '@/contexts/SkillContext';
 import { useBundles, type UserBundle } from '@/contexts/BundleContext';
@@ -453,7 +454,11 @@ export default function ManageScreen() {
           const paused = bundle.status === 'draft';
           return (
             <View key={bundle.id} style={[styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              {bundle.imageUrl ? (
+              {bundle.videoUrl || isVideoUrl(bundle.imageUrl) ? (
+                <View style={[styles.listIcon, { backgroundColor: ACCENT.purpleDim }]}>
+                  <Play size={18} color={ACCENT.purple} />
+                </View>
+              ) : bundle.imageUrl ? (
                 <Image source={{ uri: bundle.imageUrl }} style={{ width: 44, height: 44, borderRadius: 10 }} />
               ) : (
                 <View style={[styles.listIcon, { backgroundColor: ACCENT.purpleDim }]}>

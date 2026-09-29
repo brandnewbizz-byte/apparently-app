@@ -5,6 +5,7 @@ import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 import { sanitizeBundleDesc, sanitizeCaption } from '@/lib/sanitize';
+import { isVideoUrl } from '@/lib/media';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ export interface UserBundle {
   createdAt: string;
   availableCount: number;
   plannerNotes?: string;
+  videoUrl?: string;
+  mediaType?: 'image' | 'video';
 }
 
 interface BundleContextValue {
@@ -73,24 +76,30 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   // Load bundles: backend API (bypasses RLS) → Supabase → AsyncStorage
   useEffect(() => {
     let cancelled = false;
-    const mapRow = (row: any): UserBundle => ({
-      id: row.id,
-      title: row.title || '',
-      description: row.description || '',
-      price: row.bundle_price ?? row.price ?? 0,
-      items: row.items || row.services || [],
-      imageUrl: row.image || row.cover_image || '',
-      category: row.category || '',
-      location: row.location || '',
-      dateRange: row.expires_at || '',
-      tags: row.tags || [],
-      creatorId: row.user_id || row.creator_id || '',
-      creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
-      status: row.status || 'available',
-      grabCount: row.grabs ?? row.grab_count ?? 0,
-      createdAt: row.created_at || new Date().toISOString(),
-      availableCount: row.available_count || 1,
-    });
+    const mapRow = (row: any): UserBundle => {
+      const rawImage = row.image || row.cover_image || '';
+      const isVideo = isVideoUrl(rawImage);
+      return {
+        id: row.id,
+        title: row.title || '',
+        description: row.description || '',
+        price: row.bundle_price ?? row.price ?? 0,
+        items: row.items || row.services || [],
+        imageUrl: isVideo ? '' : rawImage,
+        videoUrl: isVideo ? rawImage : undefined,
+        mediaType: isVideo ? 'video' : 'image',
+        category: row.category || '',
+        location: row.location || '',
+        dateRange: row.expires_at || '',
+        tags: row.tags || [],
+        creatorId: row.user_id || row.creator_id || '',
+        creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
+        status: row.status || 'available',
+        grabCount: row.grabs ?? row.grab_count ?? 0,
+        createdAt: row.created_at || new Date().toISOString(),
+        availableCount: row.available_count || 1,
+      };
+    };
 
     const loadBundles = async () => {
       try {
@@ -183,8 +192,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       bundle_price: newBundle.price,
       items: newBundle.items,
       creator_id: newBundle.creatorId,
-      image: newBundle.imageUrl,
-      cover_image: newBundle.imageUrl,
+      image: newBundle.mediaType === 'video' ? '' : newBundle.imageUrl,
+      cover_image: newBundle.mediaType === 'video' ? (newBundle.videoUrl || '') : newBundle.imageUrl,
       category: newBundle.category || 'lifestyle',
       location: newBundle.location || '',
       provider_name: newBundle.creator?.name || '',
@@ -212,6 +221,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     if (patch.price !== undefined) dbPatch.bundle_price = patch.price;
     if (patch.status !== undefined) dbPatch.status = patch.status;
     if (patch.imageUrl !== undefined) { dbPatch.image = patch.imageUrl; dbPatch.cover_image = patch.imageUrl; }
+    if (patch.videoUrl !== undefined) { dbPatch.image = ''; dbPatch.cover_image = patch.videoUrl; }
     if (patch.category !== undefined) dbPatch.category = patch.category;
     supabase.from('bundles').update(dbPatch).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase update failed', { error });
