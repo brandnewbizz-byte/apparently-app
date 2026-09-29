@@ -39,8 +39,8 @@ export default function PostLiveLayer({ postId, userId, userName, avatar }: Post
 
   return (
     <>
-      {/* Presence pill — top-left, below the author overlay */}
-      <View style={{ position: 'absolute', top: 54, left: 12, zIndex: 12 }}>
+      {/* Presence pill — top-left, below the author overlay (author pill is ~54px tall with a location line) */}
+      <View style={{ position: 'absolute', top: 60, left: 12, zIndex: 12 }}>
         <PostPresenceIndicator
           presenceCount={presence.presenceCount}
           talkingCount={presence.talkingCount}
@@ -48,13 +48,13 @@ export default function PostLiveLayer({ postId, userId, userName, avatar }: Post
         />
       </View>
 
-      {/* Active speakers — bottom-left, above the comment preview */}
-      <View style={{ position: 'absolute', bottom: 138, left: 12, zIndex: 12 }} pointerEvents="none">
+      {/* Active speakers — bottom-left, above the voice controls */}
+      <View style={{ position: 'absolute', bottom: 152, left: 12, zIndex: 12 }} pointerEvents="none">
         <ActiveSpeakers participants={presence.participants} speakingIds={voice.speakingIds} />
       </View>
 
-      {/* Voice controls — bottom-left, compact */}
-      <View style={{ position: 'absolute', bottom: 96, left: 12, zIndex: 13 }}>
+      {/* Voice controls — bottom-left, above the comment preview (which reaches ~102px tall) */}
+      <View style={{ position: 'absolute', bottom: 112, left: 12, zIndex: 13 }}>
         <PostVoiceControls
           listening={voice.isListening}
           micActive={voice.isMicActive}

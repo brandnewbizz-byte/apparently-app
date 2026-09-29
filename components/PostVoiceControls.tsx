@@ -42,49 +42,56 @@ export default function PostVoiceControls({
   const connecting = connectionState === 'connecting';
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      {/* Listen */}
-      <TouchableOpacity
-        style={[pillBase, listening && { backgroundColor: 'rgba(34,197,94,0.85)' }]}
-        onPress={onToggleListen}
-        disabled={connecting}
-        activeOpacity={0.8}
-      >
-        <Headphones size={15} color="#FFFFFF" />
-        <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-          {listening ? 'Listening' : 'Listen'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Talk */}
-      <TouchableOpacity
-        style={[pillBase, micActive && { backgroundColor: 'rgba(239,68,68,0.85)' }]}
-        onPress={onToggleTalk}
-        disabled={connecting}
-        activeOpacity={0.8}
-      >
-        <Mic size={15} color="#FFFFFF" />
-        <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-          {micActive ? 'Mic On' : 'Talk'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Mute — only visible while the mic is on */}
-      {micActive && (
+    <View style={{ alignItems: 'flex-start', gap: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {/* Listen */}
         <TouchableOpacity
-          style={[pillBase, muted && { backgroundColor: 'rgba(245,158,11,0.85)' }]}
-          onPress={onToggleMute}
+          style={[pillBase, listening && { backgroundColor: 'rgba(34,197,94,0.85)' }]}
+          onPress={onToggleListen}
+          disabled={connecting}
           activeOpacity={0.8}
         >
-          <MicOff size={15} color="#FFFFFF" />
+          <Headphones size={15} color="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-            {muted ? 'Muted' : 'Mute'}
+            {listening ? 'Listening' : 'Listen'}
           </Text>
         </TouchableOpacity>
-      )}
+
+        {/* Talk */}
+        <TouchableOpacity
+          style={[pillBase, micActive && { backgroundColor: 'rgba(239,68,68,0.85)' }]}
+          onPress={onToggleTalk}
+          disabled={connecting}
+          activeOpacity={0.8}
+        >
+          <Mic size={15} color="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+            {micActive ? 'Mic On' : 'Talk'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Mute — only visible while the mic is on */}
+        {micActive && (
+          <TouchableOpacity
+            style={[pillBase, muted && { backgroundColor: 'rgba(245,158,11,0.85)' }]}
+            onPress={onToggleMute}
+            activeOpacity={0.8}
+          >
+            <MicOff size={15} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+              {muted ? 'Muted' : 'Mute'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {error && (
-        <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '600' }}>{error}</Text>
+        <Text
+          numberOfLines={1}
+          style={{ color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: '600', backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' }}
+        >
+          {error}
+        </Text>
       )}
     </View>
   );
