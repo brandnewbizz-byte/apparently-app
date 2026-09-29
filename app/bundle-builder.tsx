@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -86,12 +86,6 @@ export default function BundleBuilderScreen() {
   const [publishing, setPublishing] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-
-  const VideoRef = useRef<any>(null);
-  useEffect(() => {
-    try { VideoRef.current = require('expo-av').Video; } catch (_) {}
-  }, []);
-  const VideoPlayer = VideoRef.current as any;
 
   const itemsTotal = services.reduce((sum, s) => sum + (s.price || 0), 0);
   const finalPrice = bundlePrice ? parseFloat(bundlePrice) : itemsTotal;
@@ -255,15 +249,10 @@ export default function BundleBuilderScreen() {
         >
           {coverImage ? (
             <View style={styles.imagePreview}>
-              {coverMediaType === 'video' && VideoPlayer ? (
-                <VideoPlayer
-                  source={{ uri: coverImage }}
-                  style={styles.coverImage}
-                  resizeMode="cover"
-                  shouldPlay={false}
-                  isMuted
-                  isLooping={false}
-                />
+              {coverMediaType === 'video' ? (
+                <View style={[styles.coverImage, styles.videoTile]}>
+                  <Play size={28} color="#FFF" fill="#FFF" />
+                </View>
               ) : (
                 <Image source={{ uri: coverImage }} style={styles.coverImage} />
               )}
@@ -477,15 +466,10 @@ export default function BundleBuilderScreen() {
           <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Preview</Text>
           <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             {coverImage ? (
-              coverMediaType === 'video' && VideoPlayer ? (
-                <VideoPlayer
-                  source={{ uri: coverImage }}
-                  style={styles.previewCover}
-                  resizeMode="cover"
-                  shouldPlay={false}
-                  isMuted
-                  isLooping={false}
-                />
+              coverMediaType === 'video' ? (
+                <View style={[styles.previewCover, styles.videoTile]}>
+                  <Play size={28} color="#FFF" fill="#FFF" />
+                </View>
               ) : (
                 <Image source={{ uri: coverImage }} style={styles.previewCover} />
               )
@@ -592,6 +576,7 @@ const styles = StyleSheet.create({
   imagePicker: { borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 4 },
   imagePreview: { position: 'relative' },
   coverImage: { height: 160, width: '100%' },
+  videoTile: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0D0D12' },
   imagePlaceholder: { height: 120, alignItems: 'center', justifyContent: 'center', gap: 6 },
   imageOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,

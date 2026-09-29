@@ -23,6 +23,7 @@ import {
   Briefcase,
   Plus,
   ImagePlus,
+  Play,
 } from 'lucide-react-native';
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
@@ -531,16 +532,6 @@ interface SwipeBundleCardContentProps {
 }
 
 function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps) {
-  const Video = useRef<any>(null);
-  useEffect(() => {
-    let cancelled = false;
-    try {
-      const av = require('expo-av');
-      if (!cancelled) { Video.current = av.Video; }
-    } catch (_) {}
-    return () => { cancelled = true; };
-  }, []);
-  const VideoPlayer = Video.current as any;
   const isVideo = bundle.mediaType === 'video' && !!bundle.videoUrl;
 
   const getTypeColor = (type: string) => {
@@ -558,19 +549,12 @@ function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps)
 
   return (
     <View style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      {isVideo && VideoPlayer ? (
-        <View style={styles.bundleCardImage}>
-          <VideoPlayer
-            source={{ uri: bundle.videoUrl }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-            shouldPlay={false}
-            isMuted
-            isLooping={false}
-          />
+      {isVideo ? (
+        <View style={[styles.bundleCardImage, styles.videoCardTile]}>
+          <Play size={28} color="#FFF" fill="#FFF" />
           <LinearGradient
             colors={['transparent', 'rgba(0,0,0,0.7)']}
-            style={styles.bundleImageOverlay}
+            style={styles.videoCardOverlay}
           >
             <View style={[styles.bundleTypeTag, { backgroundColor: getTypeColor(bundle.type) }]}>
               <Text style={styles.bundleTypeText}>{bundle.type.toUpperCase()}</Text>
@@ -2248,6 +2232,16 @@ const styles = StyleSheet.create({
   },
   bundleCardImage: {
     height: 160,
+  },
+  videoCardTile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0D0D12',
+  },
+  videoCardOverlay: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'flex-end',
+    padding: 14,
   },
   bundleCardImageStyle: {
     borderTopLeftRadius: 20,
