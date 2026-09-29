@@ -48,6 +48,7 @@ interface BundleContextValue {
   bundles: UserBundle[];
   myBundles: UserBundle[];
   createBundle: (bundle: Omit<UserBundle, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
+  updateBundle: (id: string, patch: Partial<UserBundle>) => void;
   grabBundle: (id: string) => void;
   deleteBundle: (id: string) => void;
 }
@@ -197,6 +198,26 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   }, [isLoaded, saveBundles, myBundles.length]);
 
+  const updateBundle = useCallback((id: string, patch: Partial<UserBundle>) => {
+    setBundles((prev) => {
+      const updated = prev.map((b) => (b.id === id ? { ...b, ...patch } : b));
+      if (isLoaded) saveBundles(updated);
+      return updated;
+    });
+    setMyBundles((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    // Sync to Supabase — use actual DB column names
+    const dbPatch: Record<string, any> = {};
+    if (patch.title !== undefined) dbPatch.title = patch.title;
+    if (patch.description !== undefined) dbPatch.description = sanitizeBundleDesc(patch.description);
+    if (patch.price !== undefined) dbPatch.bundle_price = patch.price;
+    if (patch.status !== undefined) dbPatch.status = patch.status;
+    if (patch.imageUrl !== undefined) { dbPatch.image = patch.imageUrl; dbPatch.cover_image = patch.imageUrl; }
+    if (patch.category !== undefined) dbPatch.category = patch.category;
+    supabase.from('bundles').update(dbPatch).eq('id', id).then(({ error }) => {
+      if (error) logger.error('BundleContext', 'Supabase update failed', { error });
+    });
+  }, [isLoaded, saveBundles]);
+
   const grabBundle = useCallback((id: string) => {
     const bundle = bundles.find((b) => b.id === id);
     if (bundle && user?.id && bundle.creatorId === user.id) {
@@ -315,8 +336,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveBundles]);
 
   const value = useMemo(
-    () => ({ bundles, myBundles, createBundle, grabBundle, deleteBundle }),
-    [bundles, myBundles, createBundle, grabBundle, deleteBundle]
+    () => ({ bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle }),
+    [bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle]
   );
 
   return <BundleContext.Provider value={value}>{children}</BundleContext.Provider>;

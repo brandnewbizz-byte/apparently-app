@@ -9,6 +9,11 @@ import { logger } from '@/lib/logger';
 export type OrderKind = 'bundle' | 'skill' | 'service';
 export type OrderStatus = 'requested' | 'accepted' | 'fulfilled' | 'declined';
 
+export interface OrderStatusEvent {
+  status: OrderStatus;
+  at: string;
+}
+
 export interface GrabOrder {
   id: string; // grab notification id (durable)
   kind: OrderKind;
@@ -20,6 +25,7 @@ export interface GrabOrder {
   buyerAvatar?: string;
   status: OrderStatus;
   createdAt: string; // when grabbed
+  statusHistory: OrderStatusEvent[]; // ordered timeline of status transitions
 }
 
 interface OrdersContextValue {
@@ -94,6 +100,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       buyerAvatar: n.actor_avatar || '',
       status: resolvedMap[n.id] || 'requested',
       createdAt: n.created_at || new Date().toISOString(),
+      statusHistory: [{ status: (resolvedMap[n.id] || 'requested') as OrderStatus, at: n.created_at || new Date().toISOString() }],
     };
   }, [resolvedMap]);
 
@@ -132,7 +139,14 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
   const markOrder = useCallback(
     (orderId: string, status: OrderStatus) => {
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+      const at = new Date().toISOString();
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? { ...o, status, statusHistory: [...(o.statusHistory || []), { status, at }] }
+            : o
+        )
+      );
       persistResolved({ ...resolvedMap, [orderId]: status });
     },
     [resolvedMap, persistResolved]

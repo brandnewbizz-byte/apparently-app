@@ -36,6 +36,7 @@ interface SkillContextValue {
   skills: UserSkill[];
   mySkills: UserSkill[];
   createSkill: (skill: Omit<UserSkill, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
+  updateSkill: (id: string, patch: Partial<UserSkill>) => void;
   grabSkill: (id: string) => void;
   deleteSkill: (id: string) => void;
 }
@@ -172,6 +173,26 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   }, [isLoaded, saveSkills, mySkills.length]);
 
+  const updateSkill = useCallback((id: string, patch: Partial<UserSkill>) => {
+    setSkills((prev) => {
+      const updated = prev.map((s) => (s.id === id ? { ...s, ...patch } : s));
+      if (isLoaded) saveSkills(updated);
+      return updated;
+    });
+    setMySkills((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    // Sync to Supabase (skill_deals table)
+    const dbPatch: Record<string, any> = {};
+    if (patch.title !== undefined) dbPatch.service = patch.title;
+    if (patch.description !== undefined) dbPatch.description = sanitizeBundleDesc(patch.description);
+    if (patch.price !== undefined) dbPatch.price = patch.price;
+    if (patch.status !== undefined) dbPatch.status = patch.status;
+    if (patch.imageUrl !== undefined) dbPatch.featured_image = patch.imageUrl;
+    if (patch.category !== undefined) dbPatch.category = patch.category;
+    supabase.from('skill_deals').update(dbPatch).eq('id', id).then(({ error }) => {
+      if (error) logger.error('SkillContext', 'Supabase update failed', { error });
+    });
+  }, [isLoaded, saveSkills]);
+
   const grabSkill = useCallback((id: string) => {
     const skill = skills.find((s) => s.id === id);
     if (skill && user?.id && skill.creatorId === user.id) {
@@ -290,8 +311,8 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveSkills]);
 
   const value = useMemo(
-    () => ({ skills, mySkills, createSkill, grabSkill, deleteSkill }),
-    [skills, mySkills, createSkill, grabSkill, deleteSkill]
+    () => ({ skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill }),
+    [skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill]
   );
 
   return <SkillContext.Provider value={value}>{children}</SkillContext.Provider>;
