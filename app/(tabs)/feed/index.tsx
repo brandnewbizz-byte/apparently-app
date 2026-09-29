@@ -452,7 +452,7 @@ function PostCard({
                 igCardStyles.media,
                 height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
               ]}
-              resizeMode="contain"
+              resizeMode="cover"
             />
             {post.type === 'video' && post.videoUrl && (
               <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
