@@ -34,6 +34,13 @@ export interface AudioRelayConfig {
   roomId: string;
   peerId: string;
   peerName: string;
+  /**
+   * When `false`, `connect()` does NOT request microphone permission and
+   * configures audio for playback only (speaker output). This is used by the
+   * Feed's "Listen" mode so tapping Listen never triggers a mic prompt.
+   * Defaults to `true` to preserve the existing room behavior.
+   */
+  requestMicOnConnect?: boolean;
   onPeersUpdated?: (peers: RemoteSpeaker[]) => void;
   onSpeakerStart?: (peerId: string, peerName: string) => void;
   onSpeakerStop?: (peerId: string, peerName: string) => void;
@@ -86,6 +93,7 @@ const SEGMENT_MS = 2000;
 
 export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClient {
   const { roomId, peerId, peerName, onPeersUpdated, onSpeakerStart, onSpeakerStop, onModerationMute } = config;
+  const requestMicOnConnect = config.requestMicOnConnect !== false;
 
   let channel: RealtimeChannel | null = null;
   let connected = false;
@@ -94,6 +102,7 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   let segmentTimer: ReturnType<typeof setInterval> | null = null;
   let chunkSequence = 0;
   let selfMuted = false;
+  let micGranted = false;
 
   // Speaker playback pool: one Audio.Sound per remote peer
   const speakerPool = new Map<string, { sound: AudioTypes.Sound; peerName: string; lastChunkAt: number }>();
@@ -104,6 +113,7 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   async function ensurePermissions() {
     const { granted } = await Audio.requestPermissionsAsync();
     if (!granted) throw new Error('Microphone permission denied');
+    micGranted = true;
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
@@ -198,14 +208,18 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   // ── Connect ──
 
   async function connect() {
-    await ensurePermissions();
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    });
+    if (requestMicOnConnect) {
+      await ensurePermissions();
+    } else {
+      // Listen-only: no mic permission, playback routed through the speaker.
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    }
 
     return new Promise<void>((resolve, reject) => {
       const ch = supabase.channel(`room-audio:${roomId}`, {
@@ -313,6 +327,11 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
     if (!connected || selfMuted) return;
 
     try {
+      // If this client connected in listen-only mode, request mic permission
+      // now — microphone activation always stems from the explicit Talk action.
+      if (!micGranted) {
+        await ensurePermissions();
+      }
       // Ensure fresh audio mode
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
