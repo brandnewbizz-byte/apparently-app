@@ -530,24 +530,15 @@ function PostCard({
             </TouchableOpacity>
           </View>
 
-          {/* Bottom comment preview — overlaid on the lower half of the media */}
-          <View style={igCardStyles.commentPreview} pointerEvents="box-none">
-            {post.caption ? (
+          {/* Bottom caption — overlaid on the lower half of the media */}
+          {post.caption ? (
+            <View style={igCardStyles.commentPreview} pointerEvents="none">
               <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
                 <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
                 {post.caption}
               </Text>
-            ) : null}
-            <View style={igCardStyles.commentPreviewRow}>
-              <TouchableOpacity style={igCardStyles.commentPreviewLink} onPress={() => onComment(post)}>
-                <MessagesSquare size={13} color="rgba(255,255,255,0.85)" />
-                <Text style={igCardStyles.commentPreviewLinkText}>
-                  {commentCount > 0 ? `View all ${commentCount} comments` : 'Add a comment…'}
-                </Text>
-              </TouchableOpacity>
-              <Text style={igCardStyles.commentPreviewTime}>{timeAgo(post.timestamp)}</Text>
             </View>
-          </View>
+          ) : null}
 
           {/* Live voice layer — only the active post holds a connection */}
           {isActive ? (
