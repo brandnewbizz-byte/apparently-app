@@ -1113,7 +1113,7 @@ export default function FeedScreen() {
       {/* Header — scroll-away overlay (hides on scroll up, shows on scroll down) */}
       <Animated.View
         onLayout={(e) => { const h = e.nativeEvent.layout.height; headerHeight.current = h; if (h > 0 && Math.abs(h - headerHeightState) > 1) setHeaderHeightState(h); }}
-        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }, styles.headerOverlay, { transform: [{ translateY: headerTranslateY }] }]}
+        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }, styles.headerOverlay]}
       >
         <View style={styles.headerRow}>
           {/* Filter tabs — page identity (left), icon-free, active underline */}
@@ -1283,7 +1283,6 @@ export default function FeedScreen() {
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             handleTabBarScroll(y);
-            handleHeaderScroll(y);
           }}
           scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
