@@ -666,9 +666,9 @@ export default function FeedScreen() {
   // Header height (state mirror of headerHeight ref) — used to size pages to the visible area
   const [headerHeightState, setHeaderHeightState] = useState(0);
 
-  // Visible content area = full screen minus the fixed header. The tab bar is already
-  // excluded from feedHeight by the navigator, so this is the space between header and tab bar.
-  const contentHeight = feedHeight > 0 ? Math.max(0, feedHeight - headerHeightState) : 0;
+  // Header is now in normal flow (pinned, not absolute), so the flex:1 wrapper below it
+  // already measures exactly the visible content area between the header and the tab bar.
+  const contentHeight = feedHeight > 0 ? feedHeight : 0;
 
   // ── Scroll-away header: hides on scroll up, reappears on scroll down ──
   const headerTranslateY = useRef(new Animated.Value(0)).current;
@@ -1117,10 +1117,9 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header — scroll-away overlay (hides on scroll up, shows on scroll down) */}
-      <Animated.View
-        onLayout={(e) => { const h = e.nativeEvent.layout.height; headerHeight.current = h; if (h > 0 && Math.abs(h - headerHeightState) > 1) setHeaderHeightState(h); }}
-        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }, styles.headerOverlay]}
+      {/* Header — pinned in normal flow (content below sits flush against it) */}
+      <View
+        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}
       >
         <View style={styles.headerRow}>
           {/* Filter tabs — page identity (left), icon-free, active underline */}
@@ -1250,12 +1249,12 @@ export default function FeedScreen() {
           </View>
         )}
 
-      </Animated.View>
+      </View>
 
       {isInitialLoad ? (
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: insets.bottom + 100 }}
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
         >
           <SkeletonCard count={5} shimmerColor={colors.accent + '30'} baseColor={colors.surface} />
@@ -1285,7 +1284,7 @@ export default function FeedScreen() {
               isSaved={savedIds.has(item.id)}
             />
           )}
-          contentContainerStyle={{ paddingTop: headerHeightState, paddingBottom: 0 }}
+          contentContainerStyle={{ paddingTop: 0, paddingBottom: 0 }}
           showsVerticalScrollIndicator={false}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
