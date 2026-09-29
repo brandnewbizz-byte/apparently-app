@@ -51,6 +51,7 @@ import {
   MessageSquare,
   UserPlus,
   Camera,
+  Radio,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
@@ -852,6 +853,17 @@ export default function PlannerScreen() {
       <Stack.Screen
         options={{
           title: 'Planner',
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => {
+                if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/(tabs)/live' as any);
+              }}
+              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+            >
+              <Radio size={18} color={colors.text} />
+            </TouchableOpacity>
+          ),
           headerRight: () => (
             <TouchableOpacity
               onPress={() => {

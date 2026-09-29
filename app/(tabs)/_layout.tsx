@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, Users, User, Plus } from 'lucide-react-native';
+import { Home, Newspaper, User, Plus, CalendarDays } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -93,23 +93,23 @@ export default function TabLayout() {
             ),
           }}
         />
+        {/* Live/Spot moved into the Planner (calendar) tab — hidden from bottom nav */}
         <Tabs.Screen
           name="live"
           options={{
-            tabBarShowLabel: false,
-            title: 'Live',
-            tabBarIcon: ({ color, focused }) => (
-              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <Users size={24} color={color} />
-              </View>
-            ),
+            href: null,
           }}
         />
-        {/* Planner moved to top-right header icons (feed + profile) — hidden from bottom nav */}
+        {/* Planner (calendar) now lives in the bottom nav */}
         <Tabs.Screen
           name="planner"
           options={{
-            href: null,
+            title: 'Planner',
+            tabBarIcon: ({ color, focused }) => (
+              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
+                <CalendarDays size={24} color={color} />
+              </View>
+            ),
           }}
         />
         <Tabs.Screen
