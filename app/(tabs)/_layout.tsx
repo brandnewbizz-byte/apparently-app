@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, User, Plus, CalendarDays, LayoutGrid } from 'lucide-react-native';
+import { Home, Newspaper, User, Plus, LayoutGrid } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -97,16 +97,11 @@ export default function TabLayout() {
             href: null,
           }}
         />
-        {/* Planner (calendar) now lives in the bottom nav */}
+        {/* Planner (calendar) moved into the Create chooser — hidden from bottom nav */}
         <Tabs.Screen
           name="planner"
           options={{
-            title: 'Planner',
-            tabBarIcon: ({ color, focused }) => (
-              <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <CalendarDays size={24} color={color} />
-              </View>
-            ),
+            href: null,
           }}
         />
         {/* Manage hub — skills, bundles, plans, and orders in one place */}

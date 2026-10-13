@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState } from
 import { Alert, Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, FileText, Gift, Wrench, X } from 'lucide-react-native';
+import { Camera, FileText, Gift, Wrench, CalendarDays, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
@@ -90,6 +90,11 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   const startSkill = useCallback(() => {
     setShowChooser(false);
     router.push('/skill-builder' as any);
+  }, [router]);
+
+  const startPlanner = useCallback(() => {
+    setShowChooser(false);
+    router.push('/(tabs)/planner' as any);
   }, [router]);
 
   const openCreate = useCallback(() => {
@@ -204,6 +209,20 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
               <View style={styles.chooserTextWrap}>
                 <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Post Skill / Service</Text>
                 <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Offer a service you provide</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={startPlanner}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
+                <CalendarDays size={22} color={colors.accent} />
+              </View>
+              <View style={styles.chooserTextWrap}>
+                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Planner</Text>
+                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Plan your day and stay organized</Text>
               </View>
             </TouchableOpacity>
           </View>
