@@ -102,12 +102,6 @@ const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> 
 
 // All mock data removed — feed is live-only from Supabase + user posts
 
-const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'photo', label: 'Photos' },
-  { key: 'video', label: 'Videos' },
-];
-
 // ── Time helpers ──
 function timeAgo(dateStr: string): string {
   if (!dateStr || dateStr === 'Just now') return 'Just now';
@@ -648,7 +642,6 @@ export default function FeedScreen() {
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
   const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts } = useSocial();
-  const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -906,11 +899,10 @@ export default function FeedScreen() {
     userPosts.forEach(addPost);
 
     let all = deduped;
-    if (activeFilter !== 'all') all = all.filter((p) => p.type === activeFilter);
     if (tagFilter) all = all.filter((p) => p.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())));
     // Keep newest-first order (posts are pre-sorted in loadFeedPosts)
     return all;
-  }, [activeFilter, userPosts, tagFilter]);
+  }, [userPosts, tagFilter]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1117,7 +1109,6 @@ export default function FeedScreen() {
   const handleTagTap = (tag: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTagFilter((prev) => (prev === tag ? null : tag));
-    setActiveFilter('all');
   };
 
   return (
@@ -1127,27 +1118,6 @@ export default function FeedScreen() {
         style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}
       >
         <View style={styles.headerRow}>
-          {/* Filter tabs — page identity (left), icon-free, active underline */}
-          <View style={styles.filterTabs}>
-            {FILTERS.map((f) => {
-              const isActive = activeFilter === f.key;
-              return (
-                <TouchableOpacity
-                  key={f.key}
-                  style={styles.filterTab}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setActiveFilter(f.key);
-                  }}
-                >
-                  <Text style={[styles.filterTabText, { color: isActive ? colors.text : colors.textTertiary }]}>
-                    {f.label}
-                  </Text>
-                  <View style={[styles.filterTabIndicator, { backgroundColor: isActive ? colors.accent : 'transparent' }]} />
-                </TouchableOpacity>
-              );
-            })}
-          </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -1304,7 +1274,7 @@ export default function FeedScreen() {
             <FileText size={48} color={colors.textTertiary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No posts yet</Text>
             <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-              {tagFilter ? `No posts tagged #${tagFilter}.` : `Nothing here for "${activeFilter}" right now.`}
+              {tagFilter ? `No posts tagged #${tagFilter}.` : `Nothing here right now.`}
             </Text>
           </View>
         )}
@@ -1405,13 +1375,8 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
   headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerActions: { flexDirection: 'row', gap: 8 },
+  headerActions: { marginLeft: 'auto', flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  // Filters
-  filterTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  filterTab: { flex: 1, alignItems: 'center', paddingVertical: 4 },
-  filterTabText: { fontSize: 15, fontWeight: '600' },
-  filterTabIndicator: { height: 2, borderRadius: 1, marginTop: 3, alignSelf: 'stretch' },
   // Card
   card: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
