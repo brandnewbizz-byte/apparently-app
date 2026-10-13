@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState } from
 import { Alert, Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, FileText, Gift, Wrench, CalendarDays, X } from 'lucide-react-native';
+import { Camera, FileText, Gift, Wrench, CalendarDays, X, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
@@ -149,82 +149,85 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
       <Modal visible={showChooser} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowChooser(false)}>
         <View style={styles.backdrop}>
           <View style={[styles.chooserSheet, { backgroundColor: colors.background }]}>
+            <View style={[styles.handle, { backgroundColor: colors.border }]} />
+
             <View style={styles.chooserHeader}>
               <Text style={[styles.chooserTitle, { color: colors.text }]}>Create</Text>
-              <TouchableOpacity onPress={() => setShowChooser(false)}>
-                <X size={22} color={colors.textSecondary} />
+              <TouchableOpacity
+                onPress={() => setShowChooser(false)}
+                style={[styles.closeBtn, { backgroundColor: colors.surfaceHighlight }]}
+                activeOpacity={0.8}
+              >
+                <X size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
+            {/* Primary: photo/video post */}
             <TouchableOpacity
-              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              style={[styles.primaryCard, { backgroundColor: colors.accent }]}
               onPress={startPhotoVideo}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
             >
-              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
-                <Camera size={22} color={colors.accent} />
+              <View style={styles.primaryIcon}>
+                <Camera size={26} color="#FFFFFF" />
               </View>
-              <View style={styles.chooserTextWrap}>
-                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Post</Text>
-                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Photo or video</Text>
+              <View style={styles.primaryText}>
+                <Text style={styles.primaryTitle}>Post</Text>
+                <Text style={styles.primarySub}>Photo or video</Text>
               </View>
+              <ChevronRight size={22} color="rgba(255,255,255,0.85)" />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={startTextPost}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
-                <FileText size={22} color={colors.accent} />
-              </View>
-              <View style={styles.chooserTextWrap}>
-                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Text Post</Text>
-                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Share a written update</Text>
-              </View>
-            </TouchableOpacity>
+            {/* Secondary grid */}
+            <View style={styles.grid}>
+              <TouchableOpacity
+                style={[styles.gridTile, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={startTextPost}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.gridTileIcon, { backgroundColor: colors.accentGlow }]}>
+                  <FileText size={22} color={colors.accent} />
+                </View>
+                <Text style={[styles.gridTileTitle, { color: colors.text }]}>Text Post</Text>
+                <Text style={[styles.gridTileSub, { color: colors.textSecondary }]}>Written update</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={startBundle}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
-                <Gift size={22} color={colors.accent} />
-              </View>
-              <View style={styles.chooserTextWrap}>
-                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Create Bundle</Text>
-                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Package multiple items</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.gridTile, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={startBundle}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.gridTileIcon, { backgroundColor: colors.accentGlow }]}>
+                  <Gift size={22} color={colors.accent} />
+                </View>
+                <Text style={[styles.gridTileTitle, { color: colors.text }]}>Create Bundle</Text>
+                <Text style={[styles.gridTileSub, { color: colors.textSecondary }]}>Package items</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={startSkill}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
-                <Wrench size={22} color={colors.accent} />
-              </View>
-              <View style={styles.chooserTextWrap}>
-                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Post Skill / Service</Text>
-                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Offer a service you provide</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.gridTile, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={startSkill}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.gridTileIcon, { backgroundColor: colors.accentGlow }]}>
+                  <Wrench size={22} color={colors.accent} />
+                </View>
+                <Text style={[styles.gridTileTitle, { color: colors.text }]}>Skill / Service</Text>
+                <Text style={[styles.gridTileSub, { color: colors.textSecondary }]}>Offer a service</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.chooserOption, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={startPlanner}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.chooserIcon, { backgroundColor: colors.accentGlow }]}>
-                <CalendarDays size={22} color={colors.accent} />
-              </View>
-              <View style={styles.chooserTextWrap}>
-                <Text style={[styles.chooserOptionTitle, { color: colors.text }]}>Planner</Text>
-                <Text style={[styles.chooserOptionSub, { color: colors.textSecondary }]}>Plan your day and stay organized</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.gridTile, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={startPlanner}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.gridTileIcon, { backgroundColor: colors.accentGlow }]}>
+                  <CalendarDays size={22} color={colors.accent} />
+                </View>
+                <Text style={[styles.gridTileTitle, { color: colors.text }]}>Planner</Text>
+                <Text style={[styles.gridTileSub, { color: colors.textSecondary }]}>Plan your day</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -263,44 +266,91 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 10,
     paddingBottom: 28,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 14,
+    opacity: 0.4,
   },
   chooserHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   chooserTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
   },
-  chooserOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-  },
-  chooserIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chooserTextWrap: {
+  primaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginBottom: 16,
+  },
+  primaryIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryText: {
     flex: 1,
   },
-  chooserOptionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+  primaryTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  chooserOptionSub: {
+  primarySub: {
     fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
     marginTop: 2,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  gridTile: {
+    width: '47%',
+    flexGrow: 1,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
+  },
+  gridTileIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  gridTileTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  gridTileSub: {
+    fontSize: 12,
+    lineHeight: 16,
   },
 });
