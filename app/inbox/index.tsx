@@ -162,6 +162,7 @@ export default function InboxScreen() {
     service_grab: Briefcase,
     job_grabbed: Briefcase,
     call_request: Phone,
+    room_invite: Video,
   };
 
   const renderNotifIcon = (type: string) => {
@@ -181,6 +182,7 @@ export default function InboxScreen() {
     if (n.type === 'like') return 'liked your post';
     if (n.type === 'mention') return 'mentioned you';
     if (n.type === 'call_request') return 'wants to call you';
+    if (n.type === 'room_invite') return 'invited you to a room';
     return n.message;
   };
 
@@ -342,6 +344,33 @@ export default function InboxScreen() {
                   }}
                 >
                   <Phone size={16} color="#10B981" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}
+                  onPress={() => {
+                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
+                    setNotifs(prev => prev.filter(x => x.id !== n.id));
+                  }}
+                >
+                  <X size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            )}
+            {/* Room invite actions */}
+            {n.type === 'room_invite' && (
+              <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
+                <TouchableOpacity
+                  style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    const raw = n._raw || {};
+                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
+                    setNotifs(prev => prev.filter(x => x.id !== n.id));
+                    const inviteRoomId = raw.data?.room_id || raw.room_id;
+                    if (inviteRoomId) router.push(`/(tabs)/live/room/${inviteRoomId}` as any);
+                  }}
+                >
+                  <Check size={16} color="#10B981" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}

@@ -90,6 +90,13 @@ export default function TabLayout() {
             },
           }}
         />
+        {/* Live/Spot moved into the Planner (calendar) tab — hidden from bottom nav */}
+        <Tabs.Screen
+          name="live"
+          options={{
+            href: null,
+          }}
+        />
         {/* Planner (calendar) moved into the Create chooser — hidden from bottom nav */}
         <Tabs.Screen
           name="planner"
