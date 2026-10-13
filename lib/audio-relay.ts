@@ -1,16 +1,18 @@
 /**
- * AudioRelayClient — push-to-talk audio streaming over Supabase Realtime.
+ * AudioRelayClient — push-to-talk audio streaming over Supabase REST polling.
  *
- * Replaces the old WebSocket signaling server with Supabase Realtime Broadcast.
- * The signaling server was just a thin JSON relay (join/leave, audio_chunk,
- * mute) — Supabase Realtime Broadcast already powers text chat and participant
- * presence in this app, so it can carry the same audio messages with no
- * additional backend to deploy.
+ * Originally carried audio over Supabase Realtime Broadcast, but Realtime has
+ * proven unreliable (platform-wide degradation + free-tier auto-pause). This
+ * client now relays audio through the Postgres-backed `live_audio_chunks` table
+ * using plain REST (PostgREST) — the most reliable Supabase service, with no
+ * extra backend and no websocket dependency.
  *
  * Push-to-talk: hold mic → record → stream audio segments → release mutes.
- * Audio is recorded in short bounded segments (a complete AAC/M4A each) so
- * every broadcast message stays well under the Supabase Realtime payload limit
- * (256 KB free / 3 MB Pro). Each segment is independently playable.
+ * Audio is recorded in short bounded segments (a complete AAC/M4A each) so each
+ * row stays small and is independently playable. Talkers POST each segment to
+ * `live_audio_chunks`; listeners poll every ~300ms and play any segment newer
+ * than the last one they've seen. Added latency is ~0.3s on top of the ~2s
+ * segment window — fine for a walkie-talkie "talk through this post" flow.
  *
  * Audio engine: `expo-audio` (the SDK 57 replacement for the deprecated and
  * removed `expo-av`). Recording uses `AudioModule.AudioRecorder` (imperative,
@@ -32,7 +34,6 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // ── Types ──
 
@@ -92,8 +93,17 @@ const RECORDING_OPTIONS: RecordingOptions = {
 };
 
 // A ~2s segment of AAC mono at 64 kbps is ~16 KB (~22 KB base64) — well under
-// the 256 KB Realtime broadcast limit and independently playable.
+// PostgREST payload limits and independently playable.
 const SEGMENT_MS = 2000;
+
+// Poll interval for listeners to pick up newly-posted chunks.
+const POLL_MS = 300;
+
+// Purge stale chunks from the relay table every N poll ticks.
+const CLEANUP_EVERY = 20;
+const CHUNK_TTL_MS = 5 * 60 * 1000;
+
+const CHUNK_TABLE = 'live_audio_chunks';
 
 // ── Factory ──
 
@@ -101,14 +111,18 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   const { roomId, peerId, peerName, onPeersUpdated, onSpeakerStart, onSpeakerStop, onModerationMute } = config;
   const requestMicOnConnect = config.requestMicOnConnect !== false;
 
-  let channel: RealtimeChannel | null = null;
   let connected = false;
   let recording: AudioRecorder | null = null;
   let isRecording = false;
   let segmentTimer: ReturnType<typeof setInterval> | null = null;
-  let chunkSequence = 0;
   let selfMuted = false;
   let micGranted = false;
+
+  // Polling state: we only play chunks with id > lastSeenId, so each listener
+  // hears audio that arrives after they join (and never their own).
+  let lastSeenId = 0;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let cleanupCounter = 0;
 
   // Speaker playback pool: one AudioPlayer per remote peer
   const speakerPool = new Map<string, { player: AudioPlayer; peerName: string; lastChunkAt: number }>();
@@ -220,6 +234,57 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
     }, 1000);
   }
 
+  // ── Polling transport ──
+
+  async function seedLastSeenId() {
+    try {
+      const { data } = await supabase
+        .from(CHUNK_TABLE)
+        .select('id')
+        .eq('room_id', roomId)
+        .order('id', { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) lastSeenId = data[0].id;
+    } catch (e) {
+      console.warn('[AudioRelay] Seed failed:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  function startPolling() {
+    pollTimer = setInterval(async () => {
+      if (!connected) return;
+      try {
+        const { data, error } = await supabase
+          .from(CHUNK_TABLE)
+          .select('id, peer_id, peer_name, audio_data')
+          .eq('room_id', roomId)
+          .gt('id', lastSeenId)
+          .order('id', { ascending: true })
+          .limit(100);
+
+        if (error) return;
+
+        for (const row of data ?? []) {
+          lastSeenId = row.id;
+          if (row.peer_id === peerId) continue; // never play our own audio
+          playIncomingAudio(row.peer_id, row.peer_name || 'User', row.audio_data);
+        }
+
+        // Occasionally purge stale chunks so the relay table doesn't grow.
+        cleanupCounter++;
+        if (cleanupCounter >= CLEANUP_EVERY) {
+          cleanupCounter = 0;
+          await supabase
+            .from(CHUNK_TABLE)
+            .delete()
+            .lt('created_at', new Date(Date.now() - CHUNK_TTL_MS).toISOString());
+        }
+      } catch (e) {
+        console.warn('[AudioRelay] Poll error:', e instanceof Error ? e.message : e);
+      }
+    }, POLL_MS);
+  }
+
   // ── Connect ──
 
   async function connect() {
@@ -235,54 +300,18 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       });
     }
 
-    return new Promise<void>((resolve, reject) => {
-      const ch = supabase.channel(`room-audio:${roomId}`, {
-        config: { broadcast: { self: false } },
-      });
+    // Start from the newest chunk so we only hear audio after joining.
+    await seedLastSeenId();
 
-      ch.on('broadcast', { event: 'audio_chunk' }, ({ payload }: any) => {
-        if (payload?.audioData && payload?.peerId && payload.peerId !== peerId) {
-          playIncomingAudio(payload.peerId, payload.peerName || 'User', payload.audioData);
-        }
-      });
-
-      ch.on('broadcast', { event: 'mute' }, ({ payload }: any) => {
-        // Host moderation: a targeted mute for this peer
-        if (payload?.targetPeerId === peerId) {
-          onModerationMute?.(true);
-        }
-      });
-
-      ch.on('broadcast', { event: 'unmute' }, ({ payload }: any) => {
-        if (payload?.targetPeerId === peerId) {
-          onModerationMute?.(false);
-        }
-      });
-
-      ch.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          connected = true;
-          startSilenceCheck();
-          resolve();
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          reject(new Error(`Realtime channel failed: ${status}`));
-        }
-      });
-
-      channel = ch;
-
-      // Timeout fallback
-      setTimeout(() => {
-        if (!connected) {
-          reject(new Error('Realtime connection timeout'));
-        }
-      }, 10000);
-    });
+    connected = true;
+    startSilenceCheck();
+    startPolling();
   }
 
   function cleanup() {
     if (silenceCheck) { clearInterval(silenceCheck); silenceCheck = null; }
     if (segmentTimer) { clearInterval(segmentTimer); segmentTimer = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     // Remove all speaker players
     for (const [, entry] of speakerPool) {
       try { entry.player.remove(); } catch {}
@@ -295,10 +324,6 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   function disconnect() {
     connected = false;
     cleanup();
-    if (channel) {
-      supabase.removeChannel(channel).then(() => {}, () => {});
-      channel = null;
-    }
   }
 
   // ── Push-to-talk: start recording a segment ──
@@ -331,18 +356,13 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       if (uri) {
         base64 = await readRecordingBase64(uri);
       }
-      if (base64 && connected && channel) {
-        channel.send({
-          type: 'broadcast',
-          event: 'audio_chunk',
-          payload: {
-            roomId,
-            peerId,
-            peerName,
-            audioData: base64,
-            sequence: chunkSequence++,
-          },
-        }).then(() => {}, () => {});
+      if (base64 && connected) {
+        await supabase.from(CHUNK_TABLE).insert({
+          room_id: roomId,
+          peer_id: peerId,
+          peer_name: peerName,
+          audio_data: base64,
+        });
       }
     } catch (e) {
       console.warn('[AudioRelay] Segment send failed:', e instanceof Error ? e.message : e);
@@ -369,7 +389,7 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       await startNewSegment();
 
       // Rotate segments: send the current clip, start a fresh one, so each
-      // broadcast stays bounded and the listener hears continuous audio.
+      // insert stays bounded and the listener hears continuous audio.
       segmentTimer = setInterval(async () => {
         if (!connected) return;
         await sendCurrentSegment();
