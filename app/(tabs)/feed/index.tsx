@@ -45,8 +45,6 @@ import SkeletonCard from '@/components/SkeletonCard';
 import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
-import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
-import PostLiveLayer from '@/components/PostLiveLayer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -340,7 +338,6 @@ function PostCard({
   onHide,
   isSaved: isSavedProp,
   height,
-  isActive,
 }: {
   post: FeedPost;
   colors: any;
@@ -355,7 +352,6 @@ function PostCard({
   onHide: (postId: string) => void;
   isSaved?: boolean;
   height?: number;
-  isActive?: boolean;
 }) {
   const [saved, setSaved] = useState(isSavedProp ?? false);
   // Sync with parent if savedIds changes externally
@@ -523,15 +519,6 @@ function PostCard({
             </View>
           ) : null}
 
-          {/* Live voice layer — only the active post holds a connection */}
-          {isActive ? (
-            <PostLiveLayer
-              postId={post.id}
-              userId={currentUser?.id ?? ''}
-              userName={currentUser?.fullName || currentUser?.username || 'You'}
-              avatar={currentUser?.avatar || null}
-            />
-          ) : null}
         </View>
       ) : (
         <>
@@ -659,9 +646,6 @@ export default function FeedScreen() {
   // Header is now in normal flow (pinned, not absolute), so the flex:1 wrapper below it
   // already measures exactly the visible content area between the header and the tab bar.
   const contentHeight = feedHeight > 0 ? feedHeight : 0;
-
-  // ── Live Voice Feed: active-post detection (TikTok-style snap paging) ──
-  const { activePostId, viewabilityConfig, onViewableItemsChanged } = useActiveFeedPost();
 
   // ── Scroll-away header: hides on scroll up, reappears on scroll down ──
   const headerTranslateY = useRef(new Animated.Value(0)).current;
@@ -1233,7 +1217,6 @@ export default function FeedScreen() {
               post={item}
               colors={colors}
               height={contentHeight || undefined}
-              isActive={item.id === activePostId}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1261,9 +1244,6 @@ export default function FeedScreen() {
           snapToInterval={contentHeight || undefined}
           snapToAlignment="start"
           disableIntervalMomentum
-          viewabilityConfig={viewabilityConfig}
-          onViewableItemsChanged={onViewableItemsChanged}
-
                 ListEmptyComponent={() => (
           <View style={styles.emptyState}>
             <FileText size={48} color={colors.textTertiary} />
