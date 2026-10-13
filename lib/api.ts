@@ -65,7 +65,7 @@ export async function createPost(
   userId: string,
   content: string,
   imageUrl?: string,
-  options?: { postKind?: 'post' | 'sell'; videoUrl?: string; mediaType?: 'image' | 'video' }
+  options?: { postKind?: 'post'; videoUrl?: string; mediaType?: 'image' | 'video' }
 ) {
   // NOTE: the `posts` table has no `category` column. Category is only used
   // locally for the feed tag display; do not attempt to persist it.
@@ -252,52 +252,7 @@ export async function getListings(category?: string) {
   return data || [];
 }
 
-// ─── Products ───
-export async function getProducts() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('status', 'active')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
-}
 
-export async function createProduct(product: {
-  seller_id: string;
-  seller_name: string;
-  seller_avatar: string;
-  seller_username: string;
-  title: string;
-  description: string;
-  price: number;
-  accepts_swap: boolean;
-  condition: string;
-  category: string;
-  images: Array<{ id: string; uri: string }>;
-  location: string;
-}) {
-  const { data, error } = await supabase
-    .from('products')
-    .insert({
-      seller_id: product.seller_id,
-      seller_name: product.seller_name,
-      seller_avatar: product.seller_avatar,
-      seller_username: product.seller_username,
-      title: product.title,
-      description: product.description,
-      price: product.price,
-      accepts_swap: product.accepts_swap,
-      condition: product.condition,
-      category: product.category,
-      images: product.images,
-      location: product.location,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 // ─── Calendar Events ───
 export async function getCalendarEvents(userId: string) {
@@ -737,7 +692,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       streamerId: featuredPost.user_id,
       thumbnail: spotSafeImage(featuredPost.image_url),
       viewers: featuredPost.likes || 0,
-      category: (featuredPost as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      category: 'Creative',
       tags: (featuredPost as any).post_kind ? [(featuredPost as any).post_kind] : ['post'],
       isLive: true,
       description: featuredPost.content || undefined,
@@ -765,7 +720,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       streamerId: post.user_id,
       thumbnail: spotSafeImage(post.image_url),
       viewers: post.likes || 0,
-      category: (post as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      category: 'Creative',
       tags: (post as any).post_kind ? [(post as any).post_kind] : ['post'],
       isLive: true,
       description: post.content || undefined,
@@ -820,7 +775,7 @@ export async function getSpotFeed(limit: number = 20): Promise<SpotFeedResponse>
       streamerId: post.user_id,
       thumbnail: spotSafeImage(post.image_url),
       viewers: post.likes || 0,
-      category: (post as any).post_kind === 'sell' ? 'Marketplace' : 'Creative',
+      category: 'Creative',
       tags: (post as any).post_kind ? [(post as any).post_kind] : ['memory'],
       isLive: false,
       duration: age,

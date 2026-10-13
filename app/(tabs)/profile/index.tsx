@@ -11,7 +11,6 @@ import {
   Eye,
   MessageSquare,
   MessageCircle,
-  ShoppingBag,
   Edit3,
   Star,
   TrendingUp,
@@ -276,7 +275,7 @@ export default function ProfileScreen() {
   const [avgRating, setAvgRating] = useState(0);
   const [grabbedBundles, setGrabbedBundles] = useState<GrabbedBundle[]>([]);
   const [loadingBundles, setLoadingBundles] = useState(true);
-  const [activeTab, setActiveTab] = useState<'posts' | 'bundles' | 'skills' | 'plans' | 'saved'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [viewerPosts, setViewerPosts] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -610,13 +609,6 @@ export default function ProfileScreen() {
               style={[styles.headerGradient, { paddingTop: insets.top + 16 }]}
             >
               <TouchableOpacity 
-                style={styles.shopButton}
-                onPress={() => router.push('/book' as any)}
-              >
-                <ShoppingBag size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-
-              <TouchableOpacity 
                 style={styles.plannerButton}
                 onPress={() => router.push('/(tabs)/planner' as any)}
               >
@@ -671,7 +663,7 @@ export default function ProfileScreen() {
 
           {/* Tab Bar */}
           <View style={{ flexDirection: 'row', borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: colors.border }}>
-            {(['posts', 'bundles', 'skills', 'plans', 'saved'] as const).map((tab) => (
+            {(['posts', 'saved'] as const).map((tab) => (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setActiveTab(tab)}
@@ -687,141 +679,6 @@ export default function ProfileScreen() {
           {/* Tab Content */}
           <View style={{ paddingBottom: 100 }}>
             {activeTab === 'posts' && <UserPostsGrid colors={colors} refreshKey={refreshKey} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
-
-            {activeTab === 'bundles' && (
-              <View style={{ paddingTop: 8 }}>
-                {/* Add New Bundle header — always visible */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSecondary }}>{myBundles.length} bundle{myBundles.length !== 1 ? 's' : ''}</Text>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.goldDim }} onPress={() => router.push('/orders' as any)}>
-                      <BellRing size={15} color={ACCENT_COLORS.gold} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.gold }}>Orders{pendingOrders > 0 ? ` (${pendingOrders})` : ''}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.purpleDim }} onPress={() => router.push('/bundles' as any)}>
-                      <Plus size={16} color={ACCENT_COLORS.purple} />
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.purple }}>Manage Bundles</Text>
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                </View>
-                {myBundles.length === 0 ? (
-                  <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.purpleDim }]}>
-                      <Package size={32} color={ACCENT_COLORS.purple} />
-                    </View>
-                    <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No bundles yet</Text>
-                    <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Create a bundle to offer multiple services together</Text>
-                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.purpleDim }]} onPress={() => router.push('/bundles' as any)}>
-                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.purple }]}>Manage Bundles</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  myBundles.map((bundle) => (
-                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7} onPress={() => handleViewBundleDetails(bundle)}>
-                      <View style={styles.bundleCardLeft}>
-                        <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.purpleDim }]}>
-                          <Package size={20} color={ACCENT_COLORS.purple} />
-                        </View>
-                      </View>
-                      <View style={styles.bundleCardContent}>
-                        <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>{bundle.title}</Text>
-                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>{bundle.grabCount} grabs</Text>
-                      </View>
-                      <View style={styles.bundleCardRight}>
-                        <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${bundle.price}</Text>
-                        <TouchableOpacity onPress={() => { Alert.alert('Delete Bundle?', `Are you sure you want to delete "${bundle.title}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteBundle(bundle.id) }]); }}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
-
-            {activeTab === 'skills' && (
-              <View style={{ paddingTop: 8 }}>
-                {/* Add New Skill header — always visible */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textSecondary }}>{mySkills.length} skill{mySkills.length !== 1 ? 's' : ''}</Text>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: ACCENT_COLORS.coralDim }} onPress={() => router.push('/skill-builder' as any)}>
-                    <Plus size={16} color={ACCENT_COLORS.coral} />
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: ACCENT_COLORS.coral }}>New Skill</Text>
-                  </TouchableOpacity>
-                </View>
-                {mySkills.length === 0 ? (
-                  <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.coralDim }]}>
-                      <Zap size={32} color={ACCENT_COLORS.coral} />
-                    </View>
-                    <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No skills posted</Text>
-                    <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Post a skill to offer your services on the marketplace</Text>
-                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.coralDim }]} onPress={() => router.push('/skill-builder' as any)}>
-                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.coral }]}>Post a Skill</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  mySkills.map((skill) => (
-                    <TouchableOpacity key={skill.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} activeOpacity={0.7} onPress={() => handleViewSkillDetails(skill)}>
-                      <View style={styles.bundleCardLeft}>
-                        <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.coralDim }]}>
-                          {skill.imageUrl ? (
-                            <Image source={{ uri: skill.imageUrl }} style={{ width: 40, height: 40, borderRadius: 8 }} />
-                          ) : (
-                            <Text style={{ fontSize: 20 }}>{skill.icon}</Text>
-                          )}
-                        </View>
-                      </View>
-                      <View style={styles.bundleCardContent}>
-                        <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>{skill.title}</Text>
-                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>{skill.grabCount} grabs</Text>
-                      </View>
-                      <View style={styles.bundleCardRight}>
-                        <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${skill.price}</Text>
-                        <TouchableOpacity onPress={() => { Alert.alert('Delete Skill?', `Are you sure you want to delete "${skill.title}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteSkill(skill.id) }]); }}><X size={18} color={colors.textTertiary} /></TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
-
-            {activeTab === 'plans' && (
-              <View style={{ paddingTop: 8 }}>
-                {loadingBundles ? (
-                  <View style={[styles.bundleLoadingContainer, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.bundleLoadingText, { color: colors.textSecondary }]}>Loading...</Text>
-                  </View>
-                ) : grabbedBundles.length === 0 ? (
-                  <View style={[styles.bundleEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <View style={[styles.emptyIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
-                      <Package size={32} color={ACCENT_COLORS.gold} />
-                    </View>
-                    <Text style={[styles.bundleEmptyTitle, { color: colors.text }]}>No plans yet</Text>
-                    <Text style={[styles.bundleEmptyText, { color: colors.textSecondary }]}>Grab a plan bundle to see it here</Text>
-                    <TouchableOpacity style={[styles.emptyStateButton, { backgroundColor: ACCENT_COLORS.goldDim }]} onPress={() => router.push('/(tabs)/planner' as any)}>
-                      <Text style={[styles.emptyStateButtonText, { color: ACCENT_COLORS.gold }]}>Browse Plans</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  grabbedBundles.map((bundle) => (
-                    <TouchableOpacity key={bundle.id} style={[styles.bundleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginHorizontal: 16, marginBottom: 8 }]} onPress={() => handleViewPlanDetails(bundle)} activeOpacity={0.7}>
-                      <View style={styles.bundleCardLeft}>
-                        <View style={[styles.bundleIconContainer, { backgroundColor: ACCENT_COLORS.goldDim }]}>
-                          <Package size={20} color={ACCENT_COLORS.gold} />
-                        </View>
-                      </View>
-                      <View style={styles.bundleCardContent}>
-                        <Text style={[styles.bundleTitle, { color: colors.text }]} numberOfLines={1}>{bundle.title}</Text>
-                        <Text style={[styles.bundleDate, { color: colors.textTertiary }]}>{formatBundleDate(bundle.booked_at)}</Text>
-                      </View>
-                      <View style={styles.bundleCardRight}>
-                        <Text style={[styles.bundleBudget, { color: ACCENT_COLORS.neonGreen }]}>${bundle.proposed_budget}</Text>
-                        <ChevronRight size={18} color={colors.textTertiary} />
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
 
             {activeTab === 'saved' && <SavedPostsGrid colors={colors} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
           </View>
@@ -1414,17 +1271,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-  },
-  shopButton: {
-    position: 'absolute',
-    top: 60,
-    left: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   plannerButton: {
     position: 'absolute',

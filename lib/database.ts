@@ -6,8 +6,6 @@ import type {
   DbStory,
   DbListing,
   DbBooking,
-  DbProduct,
-  DbProductInquiry,
   DbCalendarEvent,
   DbBill,
   DbRelationship,
@@ -520,119 +518,6 @@ export class DatabaseService {
 
     if (error) {
       console.error('[DB] Error updating booking:', error.message, error.code, error.details);
-      return null;
-    }
-    return data;
-  }
-
-  static async fetchProducts(category?: string, opts?: DbQueryOpts): Promise<DbProduct[]> {
-    const table = 'products';
-    if (DatabaseService.isTableUnavailable(table)) {
-      console.log('[DB] Skipping fetchProducts - table unavailable');
-      return [];
-    }
-
-    console.log('[DB] Fetching products...', category ? `category: ${category}` : '');
-    let query = supabase
-      .from(table)
-      .select('*')
-      .eq('status', 'active')
-      .order('created_at', { ascending: false });
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const { data, error } = await withAbortSignal(query, opts?.signal);
-
-    if (error) {
-      if (isAbortError(error)) {
-        logAbort('[DB][fetchProducts]');
-        return [];
-      }
-      if (DatabaseService.isMissingTableError(error)) {
-        DatabaseService.markTableUnavailable(table, error);
-        return [];
-      }
-      console.error('[DB] Error fetching products:', error.message, error.code, error.details);
-      return [];
-    }
-    console.log('[DB] Fetched products:', data?.length || 0);
-    return data || [];
-  }
-
-  static async fetchUserProducts(userId: string): Promise<DbProduct[]> {
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('seller_id', userId)
-      .neq('status', 'deleted')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[DB] Error fetching user products:', error.message, error.code, error.details);
-      return [];
-    }
-    return data || [];
-  }
-
-  static async createProduct(product: Omit<DbProduct, 'id' | 'created_at' | 'updated_at' | 'views' | 'saves'>): Promise<DbProduct | null> {
-    console.log('[DB] Creating product...');
-    const { data, error } = await supabase
-      .from('products')
-      .insert({ ...product, views: 0, saves: 0 })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[DB] Error creating product:', error.message, error.code, error.details);
-      return null;
-    }
-    console.log('[DB] Created product:', data.id);
-    return data;
-  }
-
-  static async updateProduct(id: string, updates: Partial<DbProduct>): Promise<DbProduct | null> {
-    const { data, error } = await supabase
-      .from('products')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[DB] Error updating product:', error.message, error.code, error.details);
-      return null;
-    }
-    return data;
-  }
-
-  static async fetchProductInquiries(productId: string, opts?: DbQueryOpts): Promise<DbProductInquiry[]> {
-    const { data, error } = await withAbortSignal(
-      supabase.from('product_inquiries').select('*').eq('product_id', productId).order('created_at', { ascending: false }),
-      opts?.signal
-    );
-
-    if (error) {
-      if (isAbortError(error)) {
-        logAbort('[DB][fetchProductInquiries]');
-        return [];
-      }
-      console.error('[DB] Error fetching inquiries:', error.message, error.code, error.details);
-      return [];
-    }
-    return data || [];
-  }
-
-  static async createProductInquiry(inquiry: Omit<DbProductInquiry, 'id' | 'created_at'>): Promise<DbProductInquiry | null> {
-    const { data, error } = await supabase
-      .from('product_inquiries')
-      .insert(inquiry)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[DB] Error creating inquiry:', error.message, error.code, error.details);
       return null;
     }
     return data;

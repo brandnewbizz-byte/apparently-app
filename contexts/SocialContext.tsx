@@ -143,7 +143,7 @@ interface SocialState {
   getStoryInteraction: (storyId: string) => StoryInteraction;
   updatePost: (postId: string, content: string) => void;
   deletePost: (postId: string) => void;
-  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => void;
+  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => void;
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
@@ -828,7 +828,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Deleted post', { postId });
   }, [interactions, persistState, userPosts, persistUserPostsMutation, queryClient]);
 
-  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post' | 'sell'; category?: string; mediaType?: 'image' | 'video' }) => {
+  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => {
     const isVideo = options?.mediaType === 'video';
     const videoUrl = isVideo ? imageUrl : undefined;
     const rawImageUrl = isVideo ? undefined : imageUrl;
@@ -856,27 +856,6 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               processMentions(userId, safeContent, saved.id, 'post').catch((e) =>
                 logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
               );
-            }
-
-            if (options?.postKind === 'sell') {
-              localApi.createProduct({
-                seller_id: userId,
-                seller_name: 'You',
-                seller_avatar: '',
-                seller_username: 'you',
-                title: content.slice(0, 100),
-                description: content,
-                price: 0,
-                accepts_swap: true,
-                condition: 'good',
-                category: options?.category || 'General',
-                images: finalImageUrl ? [{ id: '1', uri: finalImageUrl }] : [],
-                location: 'Local',
-              }).then(() => {
-                logger.info('SocialContext', 'Sell post also created as marketplace product');
-              }).catch((e) => {
-                logger.info('SocialContext', 'Marketplace product create failed', { message: e?.message });
-              });
             }
 
             apiLoaded.current = false;

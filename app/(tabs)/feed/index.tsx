@@ -56,7 +56,7 @@ const FEED_MEDIA_HEIGHT = Math.round(SCREEN_WIDTH / FEED_ASPECT);
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type PostType = 'text' | 'photo' | 'video' | 'marketplace';
+type PostType = 'text' | 'photo' | 'video';
 
 interface Comment {
   id: string;
@@ -82,7 +82,6 @@ interface FeedPost {
   videoUrl?: string;
   authorId?: string;
   comments_list?: Comment[];
-  price?: number | string;
 }
 
 const CATEGORY_CONFIG: Record<string, { icon: any; color: string; bg: string }> = {
@@ -426,12 +425,7 @@ function PostCard({
     Alert.alert('Post Options', `By ${post.author.name}`, options, { cancelable: true });
   };
 
-  const typeLabel = (() => {
-    switch (post.type) {
-      case 'marketplace': return post.price != null ? `$${post.price}` : 'For Sale';
-      default: return null;
-    }
-  })();
+  const typeLabel = null;
 
   const handleProfileTap = () => {
     if (!post.author.userId) return;
@@ -632,13 +626,6 @@ function PostCard({
             <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
               {timeAgo(post.timestamp)}
             </Text>
-            {/* Type-specific CTA pill */}
-            {post.type === 'marketplace' ? (
-              <TouchableOpacity style={[igCardStyles.ctaPill, { backgroundColor: '#10B981' }]} onPress={onPress}>
-                <ShoppingBag size={11} color="#FFF" />
-                <Text style={igCardStyles.ctaPillText}>View</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
         </>
       ) : null}
@@ -803,7 +790,7 @@ export default function FeedScreen() {
       })
       .map((p: any) => ({
         id: p.id,
-        type: (p.postKind === 'sell' ? 'marketplace' : (p.mediaType === 'video' || p.videoUrl || p.video_url) ? 'video' : (p.imageUrl || p.image_url) ? 'photo' : 'text') as PostType,
+        type: ((p.mediaType === 'video' || p.videoUrl || p.video_url) ? 'video' : (p.imageUrl || p.image_url) ? 'photo' : 'text') as PostType,
         author: { name: p.user?.name || p.author_name || 'Unknown', avatar: p.user?.avatar || '', userId: p.user?.id || p.user_id },
         category: p.category || 'General',
         timestamp: p.timestamp || p.created_at || '',

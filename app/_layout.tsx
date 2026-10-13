@@ -29,7 +29,6 @@ import { UserPostsProvider } from '@/contexts/UserPostsContext';
 import { BundleProvider } from '@/contexts/BundleContext';
 import { SkillProvider } from '@/contexts/SkillContext';
 import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
-import { MarketplaceProvider } from '@/contexts/MarketplaceContext';
 import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
 import { OrdersProvider } from '@/contexts/OrdersContext';
@@ -224,21 +223,19 @@ export default function RootLayout() {
                                 <RoomProvider>
                                 <PlanProvider>
                                 <MessagingProvider>
-                                  <MarketplaceProvider>
-                                    <BookingsProvider>
-                                      <PlannerProvider>
-                                        <OrdersProvider>
-                                          <TabBarProvider>
-                                            <CreatePostProvider>
-                                              <AppErrorBoundary>
-                                                <RootLayoutNavWithTheme />
-                                              </AppErrorBoundary>
-                                            </CreatePostProvider>
-                                          </TabBarProvider>
-                                        </OrdersProvider>
-                                      </PlannerProvider>
-                                    </BookingsProvider>
-                                  </MarketplaceProvider>
+                                  <BookingsProvider>
+                                    <PlannerProvider>
+                                      <OrdersProvider>
+                                        <TabBarProvider>
+                                          <CreatePostProvider>
+                                            <AppErrorBoundary>
+                                              <RootLayoutNavWithTheme />
+                                            </AppErrorBoundary>
+                                          </CreatePostProvider>
+                                        </TabBarProvider>
+                                      </OrdersProvider>
+                                    </PlannerProvider>
+                                  </BookingsProvider>
                                 </MessagingProvider>
                                 </PlanProvider>
                                 </RoomProvider>
