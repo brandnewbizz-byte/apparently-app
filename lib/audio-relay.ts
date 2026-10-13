@@ -304,9 +304,17 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   // ── Push-to-talk: start recording a segment ──
 
   async function startNewSegment() {
-    const rec = new AudioModule.AudioRecorder(RECORDING_OPTIONS);
+    // expo-audio's `useAudioRecorder` passes FLAT, platform-resolved options
+    // (via its internal `createRecordingOptions`) to the constructor. We can't
+    // call that helper directly, but `prepareToRecordAsync(options)` is
+    // monkey-patched to flatten a nested `RecordingOptions` for us. So we pass
+    // an empty map to the constructor and hand the nested options to
+    // `prepareToRecordAsync` — otherwise the native recorder never sees
+    // `outputFormat`/`audioEncoder`/`audioQuality` and records in a mismatched
+    // default container (which is why Talk silently produced no usable audio).
+    const rec = new AudioModule.AudioRecorder({});
     recording = rec;
-    await rec.prepareToRecordAsync();
+    await rec.prepareToRecordAsync(RECORDING_OPTIONS);
     rec.record();
     isRecording = true;
   }

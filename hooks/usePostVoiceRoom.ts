@@ -110,9 +110,9 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
       await client.connect();
       setConnectionState('connected');
       setIsListening(true);
-    } catch {
+    } catch (e) {
       setConnectionState('error');
-      setError('Voice connection failed');
+      setError(e instanceof Error && e.message ? e.message : 'Voice connection failed');
       setIsListening(false);
     }
   }, [getClient]);
@@ -143,8 +143,8 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
       await client.startSpeaking(); // requests mic permission if needed
       setIsMicActive(true);
       setIsMuted(false);
-    } catch {
-      setError('Microphone unavailable');
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Microphone unavailable');
       setIsMicActive(false);
     }
   }, [getClient]);
