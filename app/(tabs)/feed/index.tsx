@@ -506,11 +506,6 @@ function PostCard({
                 <Forward size={24} strokeWidth={2} color="#FFFFFF" />
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
-              <View style={igCardStyles.railIconWrap}>
-                <Repeat size={24} strokeWidth={2} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
             <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave}>
               <View style={igCardStyles.railIconWrap}>
                 <Bookmark size={24} strokeWidth={2} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
@@ -1516,9 +1511,9 @@ const igCardStyles = StyleSheet.create({
   timestamp: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 },
   ctaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
   ctaPillText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-  actionRail: { position: 'absolute', right: 8, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 11 },
-  railBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
-  railIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.30)', alignItems: 'center', justifyContent: 'center', marginBottom: 3 },
+  actionRail: { position: 'absolute', right: 8, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 2, zIndex: 11 },
+  railBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 0 },
+  railIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.30)', alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
   railCount: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
   commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 52, paddingLeft: 12, paddingRight: 12, paddingBottom: 10, paddingTop: 12, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
   commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6, paddingRight: 12 },
