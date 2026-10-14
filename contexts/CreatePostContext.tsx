@@ -137,6 +137,7 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   const handleCameraClose = useCallback(() => {
     setShowCamera(false);
     showTabBar();
+    setShowChooser(true);
   }, [showTabBar]);
 
   const value = useMemo<CreatePostContextValue>(() => ({ openCreate }), [openCreate]);

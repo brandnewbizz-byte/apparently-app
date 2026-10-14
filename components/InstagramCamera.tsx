@@ -21,7 +21,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import {
-  X, Zap, ZapOff, RefreshCw, Grid3x3, Image as ImageIcon,
+  X, Zap, ZapOff, RefreshCw, Grid3x3, Image as ImageIcon, ChevronLeft,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -446,7 +446,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         {/* Top controls */}
         <View style={styles.topBar}>
           <TouchableOpacity style={styles.topBtn} onPress={onClose}>
-            <X size={28} color="#FFF" />
+            <ChevronLeft size={28} color="#FFF" />
           </TouchableOpacity>
 
           <View style={styles.topRightControls}>
