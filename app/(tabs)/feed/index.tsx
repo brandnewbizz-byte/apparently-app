@@ -1113,6 +1113,12 @@ export default function FeedScreen() {
         style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}
       >
         <View style={styles.headerRow}>
+          <View style={styles.brandRow}>
+            <View style={styles.brandIcon}>
+              <Sparkles size={16} color="#FFF" />
+            </View>
+            <Text style={[styles.brandName, { color: colors.text }]}>Apparently</Text>
+          </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -1370,6 +1376,9 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
   headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: '#7B61FF', alignItems: 'center', justifyContent: 'center' },
+  brandName: { fontSize: 20, fontWeight: '700' as const, letterSpacing: -0.5 },
   headerActions: { marginLeft: 'auto', flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Card
