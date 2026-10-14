@@ -1503,7 +1503,7 @@ const igCardStyles = StyleSheet.create({
   overlayLocation: { color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 1 },
   overlayMenuBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   overlayMenuDots: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', letterSpacing: 1 },
-  textOnlyArea: { paddingHorizontal: 16, paddingVertical: 24, minHeight: 120, justifyContent: 'center' },
+  textOnlyArea: { paddingHorizontal: 16, paddingVertical: 14, justifyContent: 'center' },
   textOnlyCaption: { fontSize: 16, lineHeight: 24 },
   actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
   actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },

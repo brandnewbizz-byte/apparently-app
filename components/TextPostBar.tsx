@@ -81,7 +81,7 @@ export default function TextPostBar({
             onChangeText={setText}
             onSubmitEditing={submit}
             returnKeyType="send"
-            maxLength={500}
+            maxLength={1000}
             blurOnSubmit={false}
           />
           <TouchableOpacity
