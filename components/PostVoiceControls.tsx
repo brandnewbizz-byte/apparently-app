@@ -101,14 +101,14 @@ export default function PostVoiceControls({
 
         {/* Listen */}
         <TouchableOpacity
-          style={[pillBase, { backgroundColor: listening && !live ? 'rgba(34,197,94,0.85)' : 'rgba(0,0,0,0.55)' }]}
+          style={[pillBase, { backgroundColor: listening ? 'rgba(34,197,94,0.85)' : 'rgba(0,0,0,0.55)' }]}
           onPress={onToggleListen}
-          disabled={connecting}
+          disabled={connecting || live}
           activeOpacity={0.8}
         >
           <Headphones size={15} color="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-            {listening && !live ? 'Listening Live' : 'Listen Live'}
+            {listening ? 'Listening Live' : 'Listen Live'}
           </Text>
         </TouchableOpacity>
 

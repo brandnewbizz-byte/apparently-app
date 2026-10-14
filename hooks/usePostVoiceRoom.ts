@@ -138,8 +138,9 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
         setConnectionState('connecting');
         await client.connect();
         setConnectionState('connected');
-        setIsListening(true);
       }
+      // Talking implies you're also in the room listening.
+      setIsListening(true);
       await client.startSpeaking(); // requests mic permission if needed
       setIsMicActive(true);
       setIsMuted(false);
