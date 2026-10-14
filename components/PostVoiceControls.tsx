@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, Text, TouchableOpacity, View } from 'react-native';
-import { Headphones, Mic, MicOff, Radio, X } from 'lucide-react-native';
+import { Headphones, Mic, MicOff, X } from 'lucide-react-native';
 import type { VoiceConnectionState } from '@/hooks/usePostVoiceRoom';
 
 interface PostVoiceControlsProps {
@@ -93,9 +93,9 @@ export default function PostVoiceControls({
           disabled={connecting}
           activeOpacity={0.8}
         >
-          {live ? <LiveDot /> : <Radio size={15} color="#FFFFFF" />}
+          {live ? <LiveDot /> : <Mic size={15} color="#FFFFFF" />}
           <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '800' }}>
-            {live ? 'LIVE' : 'Go Live'}
+            {live ? 'Talking' : 'Talk'}
           </Text>
         </TouchableOpacity>
 
@@ -108,7 +108,7 @@ export default function PostVoiceControls({
         >
           <Headphones size={15} color="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-            {listening && !live ? 'Listening' : 'Listen'}
+            {listening && !live ? 'Listening Live' : 'Listen Live'}
           </Text>
         </TouchableOpacity>
 
