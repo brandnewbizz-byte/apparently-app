@@ -145,8 +145,8 @@ export default function PostComposer({
   const canPost = caption.trim().length > 0 || mediaUri != null;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
-      <View style={[styles.root, { backgroundColor }]}>
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={[styles.root, { backgroundColor: 'rgba(0,0,0,0.82)' }]}>
         {/* ── Header ── */}
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={handleClose} style={styles.headerBtn}>
