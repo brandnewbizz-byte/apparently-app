@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import PostComposer from '@/components/PostComposer';
+import TextPostBar from '@/components/TextPostBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSocial } from '@/contexts/SocialContext';
 import { useUserPosts } from '@/contexts/UserPostsContext';
@@ -43,6 +44,7 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   const router = useRouter();
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showTextBar, setShowTextBar] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
   const [createPreloadMedia, setCreatePreloadMedia] = useState<string | null>(null);
@@ -88,8 +90,14 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
     setCreatePreloadMedia(null);
     setCreatePreloadMediaWidth(undefined);
     setCreatePreloadMediaHeight(undefined);
-    setShowCreate(true);
+    // Text-only posts use a compact inline bar, not the full composer.
+    setShowTextBar(true);
   }, []);
+
+  const handleTextPost = useCallback((text: string) => {
+    setShowTextBar(false);
+    handleCreatePost({ caption: text });
+  }, [handleCreatePost]);
 
   const startBundle = useCallback(() => {
     setShowChooser(false);
@@ -259,6 +267,17 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
           onPickFromGallery={handlePickFromGallery}
         />
       </Modal>
+
+      <TextPostBar
+        visible={showTextBar}
+        onClose={() => setShowTextBar(false)}
+        onPost={handleTextPost}
+        backgroundColor={colors.background}
+        textColor={colors.text}
+        accentColor={colors.accent}
+        surfaceColor={colors.surface}
+        borderColor={colors.border}
+      />
 
       <PostComposer
         visible={showCreate}
