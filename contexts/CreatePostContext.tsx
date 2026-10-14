@@ -19,6 +19,14 @@ interface CreatePostContextValue {
 
 const CreatePostContext = createContext<CreatePostContextValue | null>(null);
 
+// Append an alpha channel to a #RRGGBB hex color (react-native 8-digit hex).
+function withAlpha(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255).toString(16).padStart(2, '0');
+  return '#' + full + a;
+}
+
 export function useCreatePost(): CreatePostContextValue {
   const ctx = useContext(CreatePostContext);
   if (!ctx) throw new Error('useCreatePost must be used within CreatePostProvider');
@@ -151,7 +159,7 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
       {/* Chooser — what do you want to create? */}
       <Modal visible={showChooser} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowChooser(false)}>
         <View style={styles.backdrop}>
-          <View style={[styles.chooserSheet, { backgroundColor: colors.background }]}>
+          <View style={[styles.chooserSheet, { backgroundColor: withAlpha(colors.background, 0.82) }]}>
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
             <View style={styles.chooserHeader}>
