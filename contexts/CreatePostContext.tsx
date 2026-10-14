@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState } from
 import { Alert, Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Camera, FileText, Gift, Wrench, CalendarDays, X, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
@@ -159,7 +160,14 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
       {/* Chooser — what do you want to create? */}
       <Modal visible={showChooser} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowChooser(false)}>
         <View style={styles.backdrop}>
-          <View style={[styles.chooserSheet, { backgroundColor: withAlpha(colors.background, 0.82) }]}>
+          <View style={styles.chooserSheet}>
+            {/* Slightly transparent top edge — feed shows through the top of the sheet */}
+            <LinearGradient
+              pointerEvents="none"
+              colors={[withAlpha(colors.background, 0.6), colors.background]}
+              locations={[0, 0.25]}
+              style={StyleSheet.absoluteFill}
+            />
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
             <View style={styles.chooserHeader}>
@@ -279,6 +287,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 28,
+    overflow: 'hidden',
   },
   handle: {
     alignSelf: 'center',
