@@ -922,7 +922,7 @@ export default function PlannerScreen() {
             style={styles.actionCard}
             onPress={() => {
               if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/bundles' as any);
+              router.push('/(tabs)/manage' as any);
             }}
             activeOpacity={0.9}
           >
@@ -1106,7 +1106,7 @@ export default function PlannerScreen() {
                       padding: 12, marginBottom: 12, borderRadius: 12,
                       backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B55',
                     }}
-                    onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); router.push('/orders' as any); }}
+                    onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); router.push('/(tabs)/manage' as any); }}
                     activeOpacity={0.7}
                   >
                     <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B26' }}>

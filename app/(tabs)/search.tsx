@@ -211,9 +211,11 @@ export default function SearchScreen() {
     router.push(`/user/${userId}` as any);
   };
 
-  const handlePostPress = (postId: string) => {
+  const handlePostPress = (item: PostResult) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/post/${postId}` as any);
+    // No dedicated /post/[id] route exists — open the author's profile instead,
+    // where the post appears in their grid.
+    if (item.user_id) router.push(`/user/${item.user_id}` as any);
   };
 
   const handleToggleFollow = async (targetUserId: string) => {
@@ -309,7 +311,7 @@ export default function SearchScreen() {
   const renderPostRow = ({ item }: { item: PostResult }) => {
     const avatar = item.user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100';
     return (
-      <TouchableOpacity style={styles.resultRow} onPress={() => handlePostPress(item.id)} activeOpacity={0.6}>
+      <TouchableOpacity style={styles.resultRow} onPress={() => handlePostPress(item)} activeOpacity={0.6}>
         {item.image_url ? (
           <Image source={{ uri: item.image_url }} style={styles.postThumb} />
         ) : (
