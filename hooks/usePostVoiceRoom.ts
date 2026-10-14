@@ -41,6 +41,7 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
   const roomId = postId ? `post-${postId}` : '';
 
   const clientRef = useRef<AudioRelayClient | null>(null);
+  const autoJoinedRef = useRef<string>('');
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>('disconnected');
   const [isListening, setIsListening] = useState(false);
   const [isMicActive, setIsMicActive] = useState(false);
@@ -58,6 +59,7 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
     setSpeakers([]);
     setError(null);
     setConnectionState('disconnected');
+    autoJoinedRef.current = '';
   }, [postId]);
 
   // ── Final cleanup on unmount ──
@@ -127,6 +129,18 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
     setSpeakers([]);
     setConnectionState('disconnected');
   }, []);
+
+  // ── Auto-join: every post is a live room ──
+  // The moment a post becomes the active post, join its voice room as a
+  // listener automatically (no tap required) — so "every post is live" and
+  // Talk is the only explicit action. Once the user leaves a post's room,
+  // we don't re-join until the post changes.
+  useEffect(() => {
+    if (!enabled || !postId || !userId) return;
+    if (autoJoinedRef.current === postId) return;
+    autoJoinedRef.current = postId;
+    startListening().catch(() => {});
+  }, [enabled, postId, userId, startListening]);
 
   // ── Talk (explicit mic) ──
   const startTalking = useCallback(async () => {

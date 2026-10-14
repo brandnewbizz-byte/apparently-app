@@ -1,8 +1,9 @@
 /**
  * PostVoiceControls — compact live-voice controls overlaid on a post.
  *
- * Control surface: Listen (join audio, no mic) · Go Live (broadcast your mic)
- * · Mute · End. A pulsing LIVE state makes it obvious when you're on air.
+ * Every post is a live room: viewers auto-join as listeners, so the controls
+ * reduce to one primary action — Talk (broadcast your mic) — plus a Listen
+ * toggle (join/leave the room) and Mute/End while you're talking.
  *
  * Flat rows (no flexShrink / flex:1 / space-between) to avoid the native
  * flex-row-in-absolute-overlay crash seen on RN 0.86.
@@ -87,14 +88,14 @@ export default function PostVoiceControls({
         <TouchableOpacity
           style={[
             pillBase,
-            { backgroundColor: live ? 'rgba(239,68,68,0.95)' : 'rgba(239,68,68,0.35)' },
+            { backgroundColor: live ? 'rgba(239,68,68,0.95)' : 'rgba(239,68,68,0.55)', paddingVertical: 9 },
           ]}
           onPress={onToggleTalk}
           disabled={connecting}
           activeOpacity={0.8}
         >
-          {live ? <LiveDot /> : <Mic size={15} color="#FFFFFF" />}
-          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '800' }}>
+          {live ? <LiveDot /> : <Mic size={16} color="#FFFFFF" />}
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>
             {live ? 'Talking' : 'Talk'}
           </Text>
         </TouchableOpacity>
@@ -108,7 +109,7 @@ export default function PostVoiceControls({
         >
           <Headphones size={15} color="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
-            {listening ? 'Listening Live' : 'Listen Live'}
+            {listening ? 'Listening' : 'Listen'}
           </Text>
         </TouchableOpacity>
 
