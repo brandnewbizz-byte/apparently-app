@@ -137,7 +137,9 @@ export function CreatePostProvider({ children }: { children: React.ReactNode }) 
   const handleCameraClose = useCallback(() => {
     setShowCamera(false);
     showTabBar();
-    setShowChooser(true);
+    // Re-open the chooser AFTER the full-screen camera modal finishes dismissing.
+    // Presenting a modal while another is still dismissing fails silently on iOS.
+    setTimeout(() => setShowChooser(true), 400);
   }, [showTabBar]);
 
   const value = useMemo<CreatePostContextValue>(() => ({ openCreate }), [openCreate]);
