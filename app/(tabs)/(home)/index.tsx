@@ -10,7 +10,6 @@ import {
   Bookmark,
   Trophy,
   Bell,
-  Sparkles,
   Wrench,
   Star,
   Heart,
@@ -1697,10 +1696,11 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
         <View style={styles.headerMain}>
           <View style={styles.logoContainer}>
-            <View style={styles.logoIcon}>
-              <Sparkles size={18} color="#FFF" />
-            </View>
-            <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
+            <Image
+              source={require('@/assets/images/apparently-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -2014,6 +2014,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#7B61FF',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logoImage: {
+    height: 40,
+    width: 45,
+    borderRadius: 10,
   },
   appName: {
     fontSize: 24,
