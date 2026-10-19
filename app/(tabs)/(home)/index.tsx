@@ -169,13 +169,11 @@ interface SkillDeal {
 }
 
 // All skill deals, service requests, and live updates now come from live Supabase.
-const LIVE_UPDATES: Array<{ name: string; action: string; amount: number; service: string; time: string }> = [
-  { name: 'Mike D.', action: 'grabbed', amount: 85, service: 'Resume Review', time: '2 min ago' },
-  { name: 'Sarah K.', action: 'booked', amount: 240, service: 'Headshot Session', time: '7 min ago' },
-  { name: 'Jay T.', action: 'completed', amount: 150, service: 'Mix & Master', time: '12 min ago' },
-  { name: 'Lena P.', action: 'grabbed', amount: 60, service: 'Meal Prep Bundle', time: '18 min ago' },
-  { name: 'Chris R.', action: 'booked', amount: 320, service: 'Logo Design', time: '23 min ago' },
-];
+// No fabricated "live activity" — the ticker only renders when there is real
+// recent activity to show (see realLiveUpdates below). Showing made-up names
+// ("Mike D. grabbed Resume Review") looked like fake social proof, so it was
+// removed in favor of real data.
+const LIVE_UPDATES: Array<{ name: string; action: string; amount: number; service: string; time: string }> = [];
 
 interface SwipeableBundlesProps {
   bundles: BundlePlan[];
@@ -1721,6 +1719,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {currentUpdate && (
         <Animated.View
           style={[
             styles.liveTicker,
@@ -1732,12 +1731,11 @@ export default function HomeScreen() {
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>
           </View>
-          {currentUpdate && (
           <Text style={[styles.tickerText, { color: colors.textSecondary }]}>
             {currentUpdate.name} {currentUpdate.action} ${currentUpdate.amount} {currentUpdate.service} - {currentUpdate.time}
           </Text>
-          )}
         </Animated.View>
+        )}
       </View>
 
       <ScrollView
