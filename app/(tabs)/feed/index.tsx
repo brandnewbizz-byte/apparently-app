@@ -131,12 +131,14 @@ function PostDetailModal({
   onClose,
   colors,
   onSave,
+  onPlayVideo,
 }: {
   post: FeedPost;
   visible: boolean;
   onClose: () => void;
   colors: any;
   onSave: (postId: string) => void;
+  onPlayVideo?: (uri: string) => void;
 }) {
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
@@ -238,10 +240,7 @@ function PostDetailModal({
                     resizeMode="cover"
                   />
                   {post.type === 'video' && post.videoUrl && (
-                    <TouchableOpacity style={styles.playOverlay} onPress={() => {
-                      // TODO: wire expo-av video player
-                      Alert.alert('Coming Soon', 'Video playback will be available soon.');
-                    }}>
+                    <TouchableOpacity style={styles.playOverlay} onPress={() => onPlayVideo?.(post.videoUrl!)}>
                       <View style={[styles.playBtn, { width: 56, height: 56, borderRadius: 28 }]}>
                         <Play size={24} color="#FFF" fill="#FFF" style={{ marginLeft: 2 }} />
                       </View>
@@ -349,7 +348,7 @@ function PostCard({
   onSave: (postId: string) => void;
   onComment: (post: FeedPost) => void;
   onTagTap: (tag: string) => void;
-  onMediaTap: (uri: string) => void;
+  onMediaTap: (uri: string, isVideo?: boolean) => void;
   onShare: (post: FeedPost) => void;
   onDelete?: (postId: string) => void;
   onReport: (postId: string) => void;
@@ -438,7 +437,7 @@ function PostCard({
       {/* Media — Reels-style full-screen fill, author overlaid top-left (Instagram style) */}
       {post.media ? (
         <View style={height ? { flex: 1 } : undefined}>
-          <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.media!)} style={height ? { flex: 1 } : undefined}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.videoUrl || post.media!, post.type === 'video' && !!post.videoUrl)} style={height ? { flex: 1 } : undefined}>
             <RNImage
               source={{ uri: post.media }}
               style={[
@@ -448,9 +447,7 @@ function PostCard({
               resizeMode="cover"
             />
             {post.type === 'video' && post.videoUrl && (
-              <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => {
-                Alert.alert('Coming Soon', 'Video playback will be available soon.');
-              }}>
+              <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => onMediaTap(post.videoUrl!, true)}>
                 <View style={igCardStyles.playBtn}>
                   <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
                 </View>
@@ -1256,7 +1253,7 @@ export default function FeedScreen() {
               onComment={handleComment}
               onShare={handleSharePost}
               onTagTap={handleTagTap}
-              onMediaTap={(uri) => { setViewerMediaIsVideo(false); setViewerMedia(uri); }}
+              onMediaTap={(uri, isVideo) => { setViewerMediaIsVideo(!!isVideo); setViewerMedia(uri); }}
               onDelete={handleDeletePost}
               onReport={handleReportPost}
               onHide={handleHidePost}
@@ -1299,6 +1296,7 @@ export default function FeedScreen() {
           onClose={() => setSelectedPost(null)}
           colors={colors}
           onSave={handleSavePost}
+          onPlayVideo={(uri) => { setViewerMediaIsVideo(true); setViewerMedia(uri); }}
         />
       )}
 
