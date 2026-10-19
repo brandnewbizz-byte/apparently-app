@@ -178,9 +178,11 @@ export default function WelcomeScreen() {
       if (!res.success) {
         const msg = res.error || 'Signup failed';
         setLocalError(msg);
-      } else {
+      } else if (!res.needsEmailVerification) {
         Alert.alert('Success', 'Account created! You are now signed in.');
       }
+      // When needsEmailVerification is true, don't claim the user is signed in —
+      // the verification UI ("We sent a verification link to …") renders instead.
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Signup failed';
       console.error('[Welcome] handleSignup exception:', msg);
