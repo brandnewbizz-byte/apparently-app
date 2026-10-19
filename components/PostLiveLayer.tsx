@@ -53,8 +53,8 @@ export default function PostLiveLayer({ postId, userId, userName, avatar }: Post
         <ActiveSpeakers participants={presence.participants} speakingIds={voice.speakingIds} />
       </View>
 
-      {/* Voice controls — bottom-left, above the comment preview (which reaches ~102px tall) */}
-      <View style={{ position: 'absolute', bottom: 112, left: 12, zIndex: 13 }}>
+      {/* Voice controls — bottom-center, above the comment preview (which reaches ~102px tall) */}
+      <View style={{ position: 'absolute', bottom: 112, left: 0, right: 0, alignItems: 'center', zIndex: 13 }}>
         <PostVoiceControls
           listening={voice.isListening}
           micActive={voice.isMicActive}

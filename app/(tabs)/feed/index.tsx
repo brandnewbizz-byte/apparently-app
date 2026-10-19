@@ -46,6 +46,7 @@ import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostCom
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
+import { useMessaging } from '@/contexts/MessagingContext';
 import PostLiveLayer from '@/components/PostLiveLayer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -632,6 +633,8 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
+  const { conversations: messagingConversations } = useMessaging();
+  const unreadTotal = useMemo(() => messagingConversations.reduce((s, c) => s + (c.unreadCount || 0), 0), [messagingConversations]);
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
@@ -1131,6 +1134,11 @@ export default function FeedScreen() {
               onPress={() => router.push('/inbox')}
             >
               <Bell size={20} color={colors.text} />
+              {unreadTotal > 0 && (
+                <View style={[styles.badgeDot, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.badgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -1381,6 +1389,23 @@ const styles = StyleSheet.create({
   brandName: { fontSize: 20, fontWeight: '700' as const, letterSpacing: -0.5 },
   headerActions: { marginLeft: 'auto', flexDirection: 'row', gap: 8 },
   headerBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  badgeDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700' as const,
+    lineHeight: 12,
+  },
   // Card
   card: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },

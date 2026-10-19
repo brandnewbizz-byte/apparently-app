@@ -61,6 +61,7 @@ import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
 import { useBundles, type UserBundle } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
 import { useServiceRequests, type ServiceRequest } from '@/contexts/ServiceRequestContext';
+import { useMessaging } from '@/contexts/MessagingContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1257,6 +1258,8 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
+  const { conversations: messagingConversations } = useMessaging();
+  const unreadTotal = useMemo(() => messagingConversations.reduce((s, c) => s + (c.unreadCount || 0), 0), [messagingConversations]);
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
@@ -1709,6 +1712,11 @@ export default function HomeScreen() {
               activeOpacity={0.8}
             >
               <Bell size={20} color={colors.text} />
+              {unreadTotal > 0 && (
+                <View style={[styles.badgeDot, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.badgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -2032,6 +2040,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+  },
+  badgeDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700' as const,
+    lineHeight: 12,
   },
   liveTicker: {
     flexDirection: 'row',

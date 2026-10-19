@@ -132,9 +132,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       username = generateUsername(userId);
       supabase
         .from('profiles')
-        .upsert({ id: userId, username }, { onConflict: 'id' })
+        .update({ username })
+        .eq('id', userId)
         .then(({ error }) => {
-          if (error) logger.error('Auth', 'username auto-assign upsert error', { message: error.message });
+          if (error) logger.error('Auth', 'username auto-assign update error', { message: error.message });
         });
     }
     const updated: UserProfile = {
@@ -163,9 +164,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         username = generateUsername(userId);
         supabase
           .from('profiles')
-          .upsert({ id: userId, username }, { onConflict: 'id' })
+          .update({ username })
+          .eq('id', userId)
           .then(({ error }) => {
-            if (error) logger.error('Auth', 'username auto-assign (build) upsert error', { message: error.message });
+            if (error) logger.error('Auth', 'username auto-assign (build) update error', { message: error.message });
           });
       }
       const bio = dbProfile?.bio ?? cached?.bio ?? null;
@@ -400,15 +402,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (authData.user) {
         const { error: profileError } = await supabase
           .from('profiles')
-          .upsert(
+          .update(
             {
-              id: authData.user.id,
               full_name: cleanedFullName,
               username: trimmedUsername,
               email: trimmedEmail,
-            },
-            { onConflict: 'id' }
-          );
+            }
+          )
+          .eq('id', authData.user.id);
 
         if (profileError) {
           logger.error('Auth', 'Profile save error', { message: profileError.message });
@@ -577,7 +578,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const abortController = new AbortController();
         // Save to profiles table (used by AuthContext)
         const profileResult = await withAbortSignal(
-          supabase.from('profiles').upsert({ ...base, full_name: trimmed }, { onConflict: 'id' }),
+          supabase.from('profiles').update({ full_name: trimmed, phone }).eq('id', userId),
           abortController.signal
         );
         if (!profileResult.error) {
@@ -704,7 +705,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           const profileResult = await withAbortSignal(
             supabase
               .from('profiles')
-              .upsert({ id: userId, avatar: dataUri }, { onConflict: 'id' }),
+              .update({ avatar: dataUri })
+              .eq('id', userId),
             abortController.signal
           );
           if (!profileResult.error) {

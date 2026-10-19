@@ -35,19 +35,41 @@ import { OrdersProvider } from '@/contexts/OrdersContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
+import {
+  configureNotificationHandler,
+  ensureNotificationChannel,
+  registerForPushNotifications,
+} from '@/lib/notifications';
 
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { completed: onboardingCompleted, isLoading: onboardingLoading } = useOnboarding();
   const { colors } = useTheme();
   const hasInitialized = React.useRef(false);
   const navigationTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isLoading = authLoading || onboardingLoading;
+
+  // ── Push notifications: configure handler once, register token on login ──
+  useEffect(() => {
+    configureNotificationHandler();
+    ensureNotificationChannel();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    let cancelled = false;
+    registerForPushNotifications(user.id).then((token) => {
+      if (!cancelled && token) {
+        logger.info('RootLayout', 'Push token registered');
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
     if (isLoading) {

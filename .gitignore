@@ -46,3 +46,10 @@ rork-eslint.config.js
 core*.db
 logs/
 backend/local-server/*.db
+
+# scratch debugging scripts (throwaway)
+scripts/_*.mjs
+scripts/check-*.mjs
+scripts/repro-*.mjs
+scripts/test-upsert-scoped.mjs
+scripts/db-connect-test.mjs

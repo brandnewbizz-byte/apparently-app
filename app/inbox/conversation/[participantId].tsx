@@ -1,4 +1,4 @@
-import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle, Tag } from 'lucide-react-native';
+import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle, Tag, ImagePlus, Check, CheckCheck } from 'lucide-react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -11,10 +11,12 @@ import {
   ScrollView,
   Image,
   Alert,
+  Modal,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
@@ -30,7 +32,7 @@ export default function ConversationScreen() {
   const insets = useSafeAreaInsets();
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
   const { colors } = useTheme();
-  const { getConversation, sendMessage, markConversationAsRead, deleteMessage } = useMessaging();
+  const { getConversation, sendMessage, markConversationAsRead, deleteMessage, loadEarlierMessages } = useMessaging();
   const { user: authUser } = useAuth();
   const [messageText, setMessageText] = useState('');
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
@@ -39,6 +41,10 @@ export default function ConversationScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  // Image attachment state
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUrlCache, setImageUrlCache] = useState<Record<string, string>>({});
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
   const recordingRef = useRef<AudioTypes.Recording | null>(null);
   const soundRef = useRef<AudioTypes.Sound | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -153,11 +159,65 @@ export default function ConversationScreen() {
       const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: 'audio/m4a' });
       if (uploadErr) { Alert.alert('Error', 'Failed to upload voice note'); return; }
       if (participantId) {
-        sendMessage(participantId, `🎤 Voice note • ${dur}s`, undefined, { voice_note: { path: filePath, duration: dur } });
+        sendMessage(participantId, '', undefined, { voice_note: { path: filePath, duration: dur } });
       }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to send voice note');
     }
+  };
+
+  // ── Image attachments ──
+  const pickImage = async () => {
+    if (!participantId) return;
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission Required', 'We need access to your photos to send images.');
+        return;
+      }
+    }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setImageUploading(true);
+      const ext = (asset.fileName?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const mime = asset.mimeType || `image/${ext === 'png' ? 'png' : 'jpeg'}`;
+      const filePath = `images/${participantId}/${Date.now()}.${ext}`;
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: mime });
+      if (uploadErr) {
+        Alert.alert('Error', 'Failed to upload image. Please try again.');
+        return;
+      }
+      sendMessage(participantId, '', undefined, {
+        image: { path: filePath, width: asset.width, height: asset.height },
+      });
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to send image');
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  const resolveImageUrl = async (meta: any) => {
+    const path = meta?.path || meta?.url;
+    if (!path) return null;
+    if (String(path).startsWith('http')) return path;
+    if (imageUrlCache[path]) return imageUrlCache[path];
+    const { data: signed } = await supabase.storage.from('messages').createSignedUrl(path, 3600);
+    if (signed?.signedUrl) {
+      setImageUrlCache(prev => ({ ...prev, [path]: signed.signedUrl }));
+      return signed.signedUrl;
+    }
+    return null;
   };
 
   const togglePlayAudio = async (voiceNote: any, messageId: string) => {
@@ -240,6 +300,21 @@ export default function ConversationScreen() {
   };
 
   const [mentionUsers, setMentionUsers] = useState<{ id: string; name: string; username: string; avatar: string; isVerified: boolean; followersCount: number }[]>([]);
+
+  // Resolve signed URLs for image messages in this conversation.
+  useEffect(() => {
+    const imageMessages = (conversation?.messages || []).filter((m: any) => m.metadata?.image);
+    imageMessages.forEach((m: any) => {
+      const path = m.metadata.image.path || m.metadata.image.url;
+      if (path && !String(path).startsWith('http') && !imageUrlCache[path]) {
+        supabase.storage.from('messages').createSignedUrl(path, 3600).then(({ data }) => {
+          if (data?.signedUrl) {
+            setImageUrlCache(prev => ({ ...prev, [path]: data.signedUrl }));
+          }
+        }).catch(() => {});
+      }
+    });
+  }, [conversation?.messages]);
 
   // Fetch mention suggestions when the user types @ (e.g. "@john").
   useEffect(() => {
@@ -373,6 +448,17 @@ export default function ConversationScreen() {
     );
   };
 
+  const renderTicks = (message: Message) => {
+    const pending = message.id.startsWith('pending-');
+    if (message.read) {
+      return <CheckCheck size={14} color="#67B7F7" />;
+    }
+    if (message.delivered || !pending) {
+      return <CheckCheck size={14} color="rgba(255,255,255,0.7)" />;
+    }
+    return <Check size={14} color="rgba(255,255,255,0.7)" />;
+  };
+
   const renderMessage = (message: Message) => {
     const isMe = message.senderId === (authUser?.id || '');
     const user = isMe ? { name: 'You', avatar: ((authUser as any)?.avatar as string) || myAvatar } : participant;
@@ -445,14 +531,37 @@ export default function ConversationScreen() {
               </Text>
             </TouchableOpacity>
           )}
+          {(message as any).metadata?.image && (() => {
+            const meta = (message as any).metadata.image;
+            const uri = imageUrlCache[meta.path] || meta.url || null;
+            if (!uri) {
+              return (
+                <View style={[styles.imagePlaceholder, { backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : colors.backgroundTertiary }]}>
+                  <ImagePlus size={24} color={isMe ? '#FFFFFF' : colors.textTertiary} />
+                </View>
+              );
+            }
+            return (
+              <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerImage(uri)}>
+                <Image
+                  source={{ uri }}
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            );
+          })()}
           {message.text.trim() && (
             <Text style={[styles.messageText, isMe ? styles.myMessageText : { color: colors.textSecondary }]}>
               {textWithMentions}
             </Text>
           )}
-          <Text style={[styles.messageTimestamp, isMe ? styles.myMessageTimestamp : { color: colors.textTertiary }]}>
-            {formatTimestamp(message.timestamp)}
-          </Text>
+          <View style={styles.messageMetaRow}>
+            <Text style={[styles.messageTimestamp, isMe ? styles.myMessageTimestamp : { color: colors.textTertiary }]}>
+              {formatTimestamp(message.timestamp)}
+            </Text>
+            {isMe && renderTicks(message)}
+          </View>
           </TouchableOpacity>
         {isMe && (
           <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
@@ -526,7 +635,18 @@ export default function ConversationScreen() {
               </Text>
             </View>
           ) : (
-            messages.map(renderMessage)
+            <>
+              {conversation?.hasMore && (
+                <TouchableOpacity
+                  style={[styles.loadEarlierBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => loadEarlierMessages(participantId || '')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.loadEarlierText, { color: colors.accent }]}>Load earlier messages</Text>
+                </TouchableOpacity>
+              )}
+              {messages.map(renderMessage)}
+            </>
           )}
 
         </ScrollView>
@@ -579,6 +699,13 @@ export default function ConversationScreen() {
               >
                 <AtSign size={20} color={colors.textSecondary} />
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.mentionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImage}
+                disabled={imageUploading}
+              >
+                <ImagePlus size={20} color={imageUploading ? colors.textTertiary : colors.textSecondary} />
+              </TouchableOpacity>
               {!messageText.trim() && (
                 <TouchableOpacity
                   style={[styles.micButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -616,6 +743,26 @@ export default function ConversationScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={!!viewerImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerImage(null)}
+      >
+        <View style={styles.viewerBackdrop}>
+          <TouchableOpacity
+            style={styles.viewerClose}
+            onPress={() => setViewerImage(null)}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+          >
+            <Text style={styles.viewerCloseText}>✕</Text>
+          </TouchableOpacity>
+          {viewerImage ? (
+            <Image source={{ uri: viewerImage }} style={styles.viewerImage} resizeMode="contain" />
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -809,8 +956,26 @@ const styles = StyleSheet.create({
   },
   messageTimestamp: {
     fontSize: 11,
-    marginTop: 4,
     color: 'rgba(255,255,255,0.7)',
+  },
+  messageMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-end',
+    marginTop: 4,
+  },
+  loadEarlierBtn: {
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginVertical: 8,
+  },
+  loadEarlierText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
   },
   myMessageTimestamp: {
     color: 'rgba(255,255,255,0.7)',
@@ -932,6 +1097,48 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  // Image attachment styles
+  messageImage: {
+    width: 220,
+    height: 180,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  imagePlaceholder: {
+    width: 160,
+    height: 120,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerClose: {
+    position: 'absolute',
+    top: 56,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  viewerCloseText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '80%',
   },
   // Bundle/Skill card in messages
   bundleCard: {

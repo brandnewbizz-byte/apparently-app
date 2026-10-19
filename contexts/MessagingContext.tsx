@@ -23,6 +23,7 @@ export interface Message {
   receiverId: string;
   timestamp: string;
   read: boolean;
+  delivered?: boolean;
   sharedPost?: SharedPost;
   metadata?: {
     bundle_card?: {
@@ -46,6 +47,7 @@ export interface Message {
       creator_name?: string;
     };
     voice_note?: { url?: string; path?: string; duration: number };
+    image?: { url?: string; path?: string; width?: number; height?: number };
   };
 }
 
@@ -58,6 +60,8 @@ export interface Conversation {
   messages: Message[];
   lastMessageAt: string;
   unreadCount: number;
+  /** True when older messages exist in the DB but aren't loaded yet. */
+  hasMore?: boolean;
 }
 
 interface MessagingState {
@@ -70,6 +74,8 @@ interface MessagingState {
   getTotalUnreadCount: () => number;
   deleteMessage: (messageId: string, participantId: string) => Promise<void>;
   deleteConversation: (participantId: string) => Promise<void>;
+  /** Fetch + prepend older messages for a conversation (pagination). */
+  loadEarlierMessages: (participantId: string) => Promise<void>;
   /** participantId => presence payload (typing / online) */
   presence: Record<string, { typing?: boolean; online?: boolean }>;
   /** Signal typing to the given participant. */
@@ -77,6 +83,7 @@ interface MessagingState {
 }
 
 const STORAGE_KEY = 'apparently_messaging_state';
+const MESSAGE_PAGE_SIZE = 50;
 
 export const [MessagingProvider, useMessaging] = createContextHook<MessagingState>(() => {
   const queryClient = useQueryClient();
@@ -172,13 +179,16 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             .from('messages')
             .select('*')
             .eq('conversation_id', cv.id)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false })
+            .limit(MESSAGE_PAGE_SIZE);
+          const hasMore = (msgs || []).length >= MESSAGE_PAGE_SIZE;
+          const orderedMsgs = (msgs || []).slice().reverse();
 
-          const messages: Message[] = (msgs || []).map((m: any) => ({
+          const messages: Message[] = orderedMsgs.map((m: any) => ({
             id: m.id, text: m.content || '', content: m.content,
             senderId: m.sender_id,
             receiverId: m.receiver_id || (m.sender_id === authUser.id ? otherId : authUser.id),
-            timestamp: m.created_at, read: m.read,
+            timestamp: m.created_at, read: m.read, delivered: m.delivered ?? false,
             metadata: m.metadata || undefined,
           }));
 
@@ -189,6 +199,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             existingConv.participantAvatar = profileAvatar;
             existingConv.participantUsername = profileUsername;
             existingConv.messages = messages;
+            existingConv.hasMore = hasMore;
             existingConv.lastMessageAt = messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at;
             existingConv.unreadCount = messages.filter(m => !m.read && m.receiverId === authUser.id).length;
             continue;
@@ -197,7 +208,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           existing.push({
             id: cv.id, participantId: otherId,
             participantName: profileName, participantAvatar: profileAvatar, participantUsername: profileUsername,
-            messages, lastMessageAt: messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at,
+            messages, hasMore, lastMessageAt: messages.length ? messages.slice(-1)[0].timestamp : cv.last_message_at || cv.created_at,
             unreadCount: messages.filter(m => !m.read && m.receiverId === authUser.id).length,
           });
         }
@@ -229,6 +240,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         receiverId,
         timestamp: incoming.created_at,
         read: incoming.read ?? false,
+        delivered: incoming.delivered ?? false,
         metadata: incoming.metadata || undefined,
       };
 
@@ -293,18 +305,26 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           const row = payload.new as any;
           if (row.sender_id === me) return; // ignore own echoes (handled optimistically)
           upsertMessageLocally(row);
+          // Mark delivered in the DB so the sender sees ✓✓ (realtime UPDATE propagates).
+          if (!row.delivered) {
+            (async () => {
+              try {
+                await supabase.from('messages').update({ delivered: true }).eq('id', row.id);
+              } catch {}
+            })();
+          }
         }
       )
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
           const row = payload.new as any;
-          // Reflect read-state changes pushed by the other participant
+          // Reflect read + delivered state changes pushed by the other participant
           setConversations(prev =>
             prev.map(c => ({
               ...c,
               messages: c.messages.map(m =>
-                m.id === row.id ? { ...m, read: row.read ?? m.read } : m
+                m.id === row.id ? { ...m, read: row.read ?? m.read, delivered: row.delivered ?? m.delivered } : m
               ),
             }))
           );
@@ -342,18 +362,21 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             .from('messages')
             .select('*')
             .eq('conversation_id', cv.id)
-            .order('created_at', { ascending: true });
-          const messages: Message[] = (msgs || []).map((m: any) => ({
+            .order('created_at', { ascending: false })
+            .limit(MESSAGE_PAGE_SIZE);
+          const hasMore = (msgs || []).length >= MESSAGE_PAGE_SIZE;
+          const messages: Message[] = (msgs || []).slice().reverse().map((m: any) => ({
             id: m.id, text: m.content || '', content: m.content,
             senderId: m.sender_id,
             receiverId: m.receiver_id || (m.sender_id === me ? otherId : me),
-            timestamp: m.created_at, read: m.read,
+            timestamp: m.created_at, read: m.read, delivered: m.delivered ?? false,
             metadata: m.metadata || undefined,
           }));
           newState.push({
             id: cv.id, participantId: otherId,
             participantName: profileName, participantAvatar: profileAvatar, participantUsername: profileUsername,
             messages: messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
+            hasMore,
             lastMessageAt: cv.last_message_at || cv.created_at,
             unreadCount: messages.filter(m => !m.read && m.receiverId === me).length,
           });
@@ -456,7 +479,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
   }, [conversations, getOrCreateConversation, persistState]);
 
   const sendMessage = useCallback((participantId: string, text: string, participantInfo?: { name?: string; avatar?: string; username?: string }, metadata?: Message['metadata']) => {
-    if (!text.trim()) return;
+    // Allow metadata-only messages (e.g. image/voice attachments) with no text.
+    if (!text.trim() && !metadata) return;
     const me = authUser?.id || '';
     if (!me) return;
 
@@ -479,6 +503,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       receiverId: participantId,
       timestamp,
       read: false,
+      delivered: false,
       metadata,
     };
     conversation.messages = [...conversation.messages, optimistic];
@@ -620,6 +645,45 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     persistState(updated);
   }, [conversations, persistState]);
 
+  const loadEarlierMessages = useCallback(async (participantId: string) => {
+    const conv = conversations.find(c => c.participantId === participantId);
+    if (!conv || !conv.hasMore) return;
+    // Local-only conversations (conv-* id) can't paginate against the DB.
+    if (!conv.id || conv.id.startsWith('conv-')) return;
+    const earliest = conv.messages[0];
+    if (!earliest) return;
+    try {
+      const { data: older } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conv.id)
+        .lt('created_at', earliest.timestamp)
+        .order('created_at', { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE);
+      if (!older?.length) {
+        setConversations(prev => prev.map(c => (c.participantId === participantId ? { ...c, hasMore: false } : c)));
+        return;
+      }
+      const olderMsgs: Message[] = older.slice().reverse().map((m: any) => ({
+        id: m.id, text: m.content || '', content: m.content,
+        senderId: m.sender_id,
+        receiverId: m.receiver_id || conv.participantId,
+        timestamp: m.created_at, read: m.read, delivered: m.delivered ?? false,
+        metadata: m.metadata || undefined,
+      }));
+      const nextHasMore = older.length >= MESSAGE_PAGE_SIZE;
+      const updated = conversations.map(c => {
+        if (c.participantId !== participantId) return c;
+        const merged = [...olderMsgs, ...c.messages];
+        return { ...c, messages: merged, hasMore: nextHasMore };
+      });
+      persistState(updated);
+      logger.info('MessagingContext', 'Loaded earlier messages', { participantId, added: olderMsgs.length });
+    } catch (e) {
+      logger.warn('MessagingContext', 'loadEarlierMessages failed', { error: String(e) });
+    }
+  }, [conversations, persistState]);
+
   const deleteConversation = useCallback(async (participantId: string) => {
     const conv = conversations.find(c => c.participantId === participantId);
     if (!conv) return;
@@ -661,6 +725,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     getTotalUnreadCount,
     deleteMessage,
     deleteConversation,
+    loadEarlierMessages,
     presence,
     notifyTyping,
   };

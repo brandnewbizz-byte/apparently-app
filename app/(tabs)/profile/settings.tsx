@@ -1,4 +1,4 @@
-import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign, Lock, Info } from 'lucide-react-native';
+import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign, Lock, Info, Bell } from 'lucide-react-native';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert, Switch, TextInput, Image } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -24,6 +24,8 @@ export default function SettingsScreen() {
   const [editingAvatar, setEditingAvatar] = useState((user as any)?.avatar || '');
   const [editingAvatarBase64, setEditingAvatarBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   useEffect(() => {
     setEditingName(user?.fullName || '');
@@ -31,6 +33,27 @@ export default function SettingsScreen() {
     setEditingBio(user?.bio || '');
     setEditingAvatar((user as any)?.avatar || '');
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from('profiles').select('notification_prefs').eq('id', user.id).maybeSingle();
+        if (data?.notification_prefs) setNotifPrefs(data.notification_prefs as Record<string, boolean>);
+      } catch {}
+      setPrefsLoaded(true);
+    })();
+  }, [user?.id]);
+
+  const toggleNotifPref = async (key: string) => {
+    if (!user?.id) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = { ...notifPrefs, [key]: !(notifPrefs[key] ?? true) };
+    setNotifPrefs(next);
+    try {
+      await supabase.from('profiles').update({ notification_prefs: next }).eq('id', user.id);
+    } catch {}
+  };
 
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -97,7 +120,7 @@ export default function SettingsScreen() {
         setEditingAvatarBase64(null);
       }
       const profileUpdates: any = { full_name: sanitizeFullName(editingName), username: sanitizeUsername(editingUsername), bio: sanitizeBio(editingBio), avatar: finalAvatar, updated_at: new Date().toISOString() };
-      const { error: saveErr } = await supabase.from('profiles').upsert({ id: user.id, ...profileUpdates }, { onConflict: 'id' });
+      const { error: saveErr } = await supabase.from('profiles').update(profileUpdates).eq('id', user.id);
       if (saveErr) {
         Alert.alert('Error', saveErr.message);
         setSaving(false);
@@ -270,6 +293,34 @@ export default function SettingsScreen() {
               <Switch value={isDark} onValueChange={handleToggleTheme} trackColor={{ false: colors.border, true: colors.accent }} thumbColor="#FFFFFF" ios_backgroundColor={colors.border} />
             </View>
           </View>
+        </View>
+
+        {/* Account */}
+        <View style={[styles.section, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Notifications</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>Choose which push notifications you receive</Text>
+
+          <View style={[styles.settingItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.settingIcon, { backgroundColor: colors.accentGlow }]}>
+              <Bell size={20} color={colors.accent} />
+            </View>
+            <View style={[styles.settingContent, styles.themeToggleRow]}>
+              <View>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>Push Notifications</Text>
+                <Text style={[styles.settingValue, { color: colors.textSecondary }]}>{notifPrefs.all === false ? 'Off' : 'On'}</Text>
+              </View>
+              <Switch value={notifPrefs.all !== false} onValueChange={() => toggleNotifPref('all')} trackColor={{ false: colors.border, true: colors.accent }} thumbColor="#FFFFFF" ios_backgroundColor={colors.border} />
+            </View>
+          </View>
+
+          {[['messages', 'Messages'], ['like', 'Likes'], ['comment', 'Comments'], ['mention', 'Mentions'], ['follow', 'New Followers']].map(([key, label]) => (
+            <View key={key} style={[styles.settingItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={styles.settingContent}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>{label}</Text>
+              </View>
+              <Switch value={notifPrefs[key] !== false} onValueChange={() => toggleNotifPref(key)} trackColor={{ false: colors.border, true: colors.accent }} thumbColor="#FFFFFF" ios_backgroundColor={colors.border} />
+            </View>
+          ))}
         </View>
 
         {/* Account */}
