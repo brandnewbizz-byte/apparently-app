@@ -64,7 +64,7 @@ const defaultData: OnboardingData = {
   goals: [],
   priorities: [],
   location: '',
-  completed: true, // DEV MODE: skip onboarding
+  completed: false, // new users land on the welcome/onboarding screen first
   personalization: defaultPersonalization,
   profile: defaultProfile,
 };
