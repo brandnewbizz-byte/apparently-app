@@ -21,10 +21,45 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Audio as AudioTypes } from 'expo-av';
-import { SafeAudio as Audio } from '@/lib/safe-av';
+import {
+  AudioModule,
+  createAudioPlayer,
+  setAudioModeAsync,
+  requestRecordingPermissionsAsync,
+  IOSOutputFormat,
+  AudioQuality,
+} from 'expo-audio';
+import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
 import { generateUsername } from '@/lib/sanitize';
+
+// Voice notes are recorded as AAC/M4A so they decode natively on both iOS and
+// Android (mirrors lib/audio-relay.ts, which already migrated off expo-av).
+const RECORDING_OPTIONS: RecordingOptions = {
+  extension: '.m4a',
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 64000,
+  android: {
+    outputFormat: 'mpeg4',
+    audioEncoder: 'aac',
+  },
+  ios: {
+    outputFormat: IOSOutputFormat.MPEG4AAC,
+    audioQuality: AudioQuality.LOW,
+  },
+  web: {
+    mimeType: 'audio/webm',
+    bitsPerSecond: 64000,
+  },
+};
+
+// `fetch(uri).blob()` does not work on local file:// paths in React Native —
+// read bytes via expo-file-system's File class instead (SDK 57 API).
+async function readLocalFileBytes(uri: string): Promise<Uint8Array> {
+  const { File } = await import('expo-file-system');
+  return new File(uri).bytes();
+}
 
 
 export default function ConversationScreen() {
@@ -45,8 +80,8 @@ export default function ConversationScreen() {
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUrlCache, setImageUrlCache] = useState<Record<string, string>>({});
   const [viewerImage, setViewerImage] = useState<string | null>(null);
-  const recordingRef = useRef<AudioTypes.Recording | null>(null);
-  const soundRef = useRef<AudioTypes.Sound | null>(null);
+  const recordingRef = useRef<AudioRecorder | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -127,41 +162,56 @@ export default function ConversationScreen() {
   // ── Voice recording ──
   const startRecording = async () => {
     try {
-      await Audio.requestPermissionsAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync((Audio as any).RecordingOptionsPresets?.HIGH_QUALITY);
-      await rec.startAsync();
+      const { granted } = await requestRecordingPermissionsAsync();
+      if (!granted) {
+        Alert.alert('Permission Required', 'We need microphone access to send voice notes.');
+        return;
+      }
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        shouldRouteThroughEarpiece: false,
+      });
+      const rec = new AudioModule.AudioRecorder({});
+      await rec.prepareToRecordAsync(RECORDING_OPTIONS);
+      rec.record();
       recordingRef.current = rec;
       setIsRecording(true);
       setRecordingDuration(0);
       recordingTimerRef.current = setInterval(() => setRecordingDuration(p => p + 1), 1000);
-    } catch {
+    } catch (e) {
+      console.warn('[Conversation] startRecording failed:', e);
       Alert.alert('Error', 'Could not access microphone.');
     }
   };
 
   const stopRecording = async () => {
     if (!recordingRef.current) return;
+    const rec = recordingRef.current;
+    recordingRef.current = null;
     try {
       setIsRecording(false);
       if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
-      if (!uri) return;
+      await rec.stop();
+      const uri = rec.uri;
+      if (!uri) { setRecordingDuration(0); return; }
       const dur = recordingDuration;
       setRecordingDuration(0);
-      // Upload to messages bucket
+      // Read local bytes and upload to the private `messages` bucket.
+      const bytes = await readLocalFileBytes(uri);
       const filePath = `voice/${participantId || 'anon'}/${Date.now()}.m4a`;
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: 'audio/m4a' });
-      if (uploadErr) { Alert.alert('Error', 'Failed to upload voice note'); return; }
+      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: 'audio/m4a' });
+      if (uploadErr) {
+        console.warn('[Conversation] voice upload failed:', uploadErr.message);
+        Alert.alert('Error', 'Failed to upload voice note');
+        return;
+      }
       if (participantId) {
         sendMessage(participantId, '', undefined, { voice_note: { path: filePath, duration: dur } });
       }
     } catch (e: any) {
+      console.warn('[Conversation] stopRecording failed:', e);
       Alert.alert('Error', e.message || 'Failed to send voice note');
     }
   };
@@ -189,9 +239,10 @@ export default function ConversationScreen() {
       const ext = (asset.fileName?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
       const mime = asset.mimeType || `image/${ext === 'png' ? 'png' : 'jpeg'}`;
       const filePath = `images/${participantId}/${Date.now()}.${ext}`;
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, blob, { contentType: mime });
+      // `fetch(asset.uri).blob()` does not work on device file:// paths — use
+      // expo-file-system's File class to read raw bytes instead.
+      const bytes = await readLocalFileBytes(asset.uri);
+      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: mime });
       if (uploadErr) {
         Alert.alert('Error', 'Failed to upload image. Please try again.');
         return;
@@ -223,17 +274,18 @@ export default function ConversationScreen() {
   const togglePlayAudio = async (voiceNote: any, messageId: string) => {
     try {
       if (playingAudioId === messageId) {
-        await soundRef.current?.stopAsync();
-        await soundRef.current?.unloadAsync();
+        soundRef.current?.pause();
+        soundRef.current?.remove();
         soundRef.current = null;
         setPlayingAudioId(null);
         return;
       }
       if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
+        soundRef.current.pause();
+        soundRef.current.remove();
+        soundRef.current = null;
       }
-      // Resolve a signed URL from the stored path (bucket is now private).
+      // Resolve a signed URL from the stored path (bucket is private).
       let audioUrl: string | null = null;
       const path = voiceNote?.path || voiceNote?.url;
       if (path && !String(path).startsWith('http')) {
@@ -246,16 +298,17 @@ export default function ConversationScreen() {
         Alert.alert('Error', 'Voice note unavailable');
         return;
       }
-      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, { shouldPlay: true });
-      soundRef.current = sound;
+      const player = createAudioPlayer({ uri: audioUrl });
+      soundRef.current = player;
       setPlayingAudioId(messageId);
-      sound.setOnPlaybackStatusUpdate((status: any) => {
+      player.addListener('playbackStatusUpdate', (status: any) => {
         if (status.didJustFinish) {
           setPlayingAudioId(null);
-          sound.unloadAsync();
+          player.remove();
           soundRef.current = null;
         }
       });
+      player.play();
     } catch (e) {
       console.warn('[Conversation] audio playback error:', e);
     }
