@@ -1,6 +1,6 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Post } from '@/mocks/data';
@@ -86,7 +86,6 @@ const STORAGE_KEY = 'apparently_messaging_state';
 const MESSAGE_PAGE_SIZE = 50;
 
 export const [MessagingProvider, useMessaging] = createContextHook<MessagingState>(() => {
-  const queryClient = useQueryClient();
   const { user: authUser } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [presence, setPresence] = useState<Record<string, { typing?: boolean; online?: boolean }>>({});
@@ -126,9 +125,10 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       logger.info('MessagingContext', 'Persisted messaging state');
       return payload;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messagingState'] });
-    },
+    // No cache invalidation here: in-memory state is the source of truth.
+    // Re-reading storage after every write raced the optimistic→confirmed id
+    // swap in sendMessage and could revert a sent message to its `pending-*`
+    // id (breaking read receipts and delete for that message).
   });
 
   useEffect(() => {
@@ -192,8 +192,14 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
             metadata: m.metadata || undefined,
           }));
 
-          const existingConv = existing.find(e => e.id === cv.id);
+          // Match by DB id, or by participant for a conversation that was
+          // started on this device before its DB row existed (`conv-*` id) —
+          // otherwise the inbox showed the same person twice after a restart.
+          const existingConv =
+            existing.find(e => e.id === cv.id) ||
+            existing.find(e => e.participantId === otherId && e.id.startsWith('conv-'));
           if (existingConv) {
+            existingConv.id = cv.id;
             // Refresh participant info + messages for existing conversations.
             existingConv.participantName = profileName;
             existingConv.participantAvatar = profileAvatar;
@@ -244,12 +250,13 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         metadata: incoming.metadata || undefined,
       };
 
+      let unknownParticipant = false;
       setConversations(prev => {
         const idx = prev.findIndex(c => c.participantId === otherId);
         if (idx < 0) {
-          // Unknown participant — re-run the sync to build the conversation with
-          // profile info, or create a light entry.
-          syncFromSupabase();
+          // Unknown participant — handled below by re-running the sync (side
+          // effects must not run inside a state updater).
+          unknownParticipant = true;
           return prev;
         }
         const conv = prev[idx];
@@ -271,6 +278,9 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         next.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
         return next;
       });
+      if (unknownParticipant) {
+        setTimeout(() => { syncFromSupabase(); }, 0);
+      }
     };
 
     const channel = supabase
@@ -300,7 +310,11 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         });
       })
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=in.(select id from conversations where participant_one=eq.${me} or participant_two=eq.${me})` },
+        // Realtime filters can't contain sub-queries — the previous
+        // `conversation_id=in.(select …)` filter was invalid, so incoming
+        // messages never arrived live. Every message addressed to me carries
+        // receiver_id = me.
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${me}` },
         (payload) => {
           const row = payload.new as any;
           if (row.sender_id === me) return; // ignore own echoes (handled optimistically)
@@ -542,6 +556,15 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
         }
         if (!convId) return;
 
+        // Remember the real conversation id so read receipts, pagination and
+        // delete work for conversations started on this device.
+        if (conversation.id !== convId) {
+          const realId = convId;
+          setConversations(prev =>
+            prev.map(c => (c.participantId === participantId && c.id.startsWith('conv-') ? { ...c, id: realId } : c))
+          );
+        }
+
         const { data: row } = await supabase
           .from('messages')
           .insert({
@@ -556,6 +579,14 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           .maybeSingle();
 
         if (!row) return;
+        // Keep the conversation list ordered correctly on other devices.
+        supabase
+          .from('conversations')
+          .update({ last_message_at: row.created_at || timestamp })
+          .eq('id', convId)
+          .then(({ error }) => {
+            if (error) logger.warn('MessagingContext', 'last_message_at update failed', { error: error.message });
+          });
         // Swap the optimistic (pending-*) message for the confirmed DB row.
         const confirmed: Message = { ...optimistic, id: row.id };
         setConversations(prev =>

@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
@@ -38,14 +39,51 @@ export default function ResetPasswordScreen() {
   const [done, setDone] = useState(false);
   const [hasRecoverySession, setHasRecoverySession] = useState<boolean | null>(null);
 
+  // The recovery email opens `rork-app://reset-password#access_token=…&refresh_token=…`
+  // (or `?code=…` for PKCE). The Supabase client runs with detectSessionInUrl
+  // disabled, so nothing turns those tokens into a session unless we do it
+  // here — without this the screen always said the link was invalid.
+  const incomingUrl = Linking.useURL();
+
   // Detect the recovery session (deep link or in-app event)
   useEffect(() => {
     let cancelled = false;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
-      setHasRecoverySession(!!data.session);
-    }).catch(() => {
+    const establishSession = async () => {
+      if (incomingUrl) {
+        const [beforeHash, hash = ''] = incomingUrl.split('#');
+        const query = beforeHash.includes('?') ? beforeHash.split('?')[1] : '';
+        const params = new URLSearchParams(`${query}&${hash}`);
+        const errorDescription = params.get('error_description');
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+        const code = params.get('code');
+        if (errorDescription) {
+          if (!cancelled) {
+            setError(errorDescription.replace(/\+/g, ' '));
+            setHasRecoverySession(false);
+          }
+          return;
+        }
+        if (accessToken && refreshToken) {
+          const { error: setErr } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!cancelled) setHasRecoverySession(!setErr);
+          return;
+        }
+        if (code) {
+          const { error: exErr } = await supabase.auth.exchangeCodeForSession(code);
+          if (!cancelled) setHasRecoverySession(!exErr);
+          return;
+        }
+      }
+      const { data } = await supabase.auth.getSession();
+      if (!cancelled) setHasRecoverySession(!!data.session);
+    };
+
+    establishSession().catch(() => {
       if (!cancelled) setHasRecoverySession(false);
     });
 
@@ -59,7 +97,7 @@ export default function ResetPasswordScreen() {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [incomingUrl]);
 
   const isValid = password.length >= 6 && password === confirmPassword;
 

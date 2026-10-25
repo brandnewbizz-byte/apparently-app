@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { getQueuedActions, dequeueAction, QueuedAction, MAX_RETRIES } from '@/lib/offlineQueue';
+import { getQueuedActions, dequeueAction, queueAction, MAX_RETRIES } from '@/lib/offlineQueue';
 import { logger } from '@/lib/logger';
 
 type RetryHandler = {
@@ -50,8 +50,11 @@ export function useOfflineRetry(handlers: RetryHandler) {
           if (ok) {
             await dequeueAction(action.id);
             logger.info('useOfflineRetry', 'Action replayed successfully', { id: action.id });
+          } else {
+            // Re-queueing the same id bumps its retry count, so a permanently
+            // failing action is eventually discarded instead of retried forever.
+            await queueAction({ id: action.id, type: action.type, payload: action.payload, createdAt: action.createdAt });
           }
-          // On failure the action stays in the queue (retry count incremented by the queueAction call)
         }
       } catch (e: any) {
         logger.warn('useOfflineRetry', 'Queue drain error', { error: e?.message });

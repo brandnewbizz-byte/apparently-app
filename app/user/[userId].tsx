@@ -244,33 +244,43 @@ export default function UserProfileScreen() {
     if (!authUser?.id || !userId || followLoading) return;
     setFollowLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isFollowing) {
-      await supabase.from('follows').delete().eq('follower_id', authUser.id).eq('following_id', userId);
-      setIsFollowing(false);
-      setFollowersCount((c) => Math.max(0, c - 1));
-    } else {
-      await supabase.from('follows').insert({ follower_id: authUser.id, following_id: userId });
-      setIsFollowing(true);
-      setFollowersCount((c) => c + 1);
-      // Send follow notification (DB columns: user_id, actor_id, actor_name, etc.)
-      const actorName = authUser.fullName || authUser.username || 'Someone';
-      const actorAvatar = (authUser as any)?.avatarUrl || '';
-      supabase.from('notifications').insert({
-        user_id: userId,
-        actor_id: authUser.id,
-        actor_name: actorName,
-        actor_avatar: actorAvatar,
-        type: 'follow',
-        title: `${actorName} started following you`,
-        body: 'started following you',
-        data: {},
-        read: false,
-        created_at: new Date().toISOString(),
-      }).then(({ error }) => {
-        if (error) console.warn('[Follow] notification insert failed', error);
-      });
+    try {
+      if (isFollowing) {
+        const { error } = await supabase.from('follows').delete().eq('follower_id', authUser.id).eq('following_id', userId);
+        if (error) throw error;
+        setIsFollowing(false);
+        setFollowersCount((c) => Math.max(0, c - 1));
+      } else {
+        const { error } = await supabase.from('follows').insert({ follower_id: authUser.id, following_id: userId });
+        // 23505 = already following (e.g. tapped on another device) — treat as success.
+        if (error && error.code !== '23505') throw error;
+        setIsFollowing(true);
+        if (!error) {
+          setFollowersCount((c) => c + 1);
+          // Send follow notification (DB columns: user_id, actor_id, actor_name, etc.)
+          const actorName = authUser.fullName || authUser.username || 'Someone';
+          const actorAvatar = authUser.avatar || '';
+          supabase.from('notifications').insert({
+            user_id: userId,
+            actor_id: authUser.id,
+            actor_name: actorName,
+            actor_avatar: actorAvatar,
+            type: 'follow',
+            title: `${actorName} started following you`,
+            body: 'started following you',
+            data: {},
+            read: false,
+            created_at: new Date().toISOString(),
+          }).then(({ error: notifErr }) => {
+            if (notifErr) console.warn('[Follow] notification insert failed', notifErr);
+          });
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not update follow. Please try again.');
+    } finally {
+      setFollowLoading(false);
     }
-    setFollowLoading(false);
   };
 
   const handlePostPress = (post: any, posts: any[]) => {

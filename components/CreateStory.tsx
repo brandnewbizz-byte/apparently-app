@@ -53,36 +53,6 @@ export default function CreateStory({
   const accent = themeColors?.accent ?? '#2196F3';
   const surface = themeColors?.surface ?? '#1C1C1E';
 
-  // Handle camera capture
-  const handleCameraCapture = useCallback(
-    async (media: CapturedMedia) => {
-      setShowCamera(false);
-      await uploadAndCreateStory(media.uri);
-    },
-    [],
-  );
-
-  // Handle gallery pick
-  const handleGalleryPick = useCallback(async () => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.9,
-      });
-
-      if (!result.canceled && result.assets.length > 0) {
-        const asset = result.assets[0];
-        await uploadAndCreateStory(asset.uri);
-      }
-    } catch (err) {
-      console.error('[CreateStory] Gallery pick error:', err);
-      Alert.alert('Error', 'Failed to pick image from gallery.');
-    }
-  }, []);
-
   // Shared upload + create flow
   const uploadAndCreateStory = useCallback(
     async (imageUri: string) => {
@@ -108,6 +78,37 @@ export default function CreateStory({
     },
     [createStory, onStoryCreated],
   );
+
+  // Handle camera capture
+  const handleCameraCapture = useCallback(
+    async (media: CapturedMedia) => {
+      setShowCamera(false);
+      await uploadAndCreateStory(media.uri);
+    },
+    [uploadAndCreateStory],
+  );
+
+  // Handle gallery pick
+  const handleGalleryPick = useCallback(async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.9,
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const asset = result.assets[0];
+        await uploadAndCreateStory(asset.uri);
+      }
+    } catch (err) {
+      console.error('[CreateStory] Gallery pick error:', err);
+      Alert.alert('Error', 'Failed to pick image from gallery.');
+    }
+  }, [uploadAndCreateStory]);
+
 
   return (
     <>

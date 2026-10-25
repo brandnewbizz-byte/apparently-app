@@ -81,6 +81,14 @@ function RootLayoutNav() {
     const inAuthGroup = currentSegment === 'welcome' as string;
     const inOnboardingGroup = currentSegment === 'onboarding' as string;
     const inTabs = currentSegment === '(tabs)';
+    // The password-reset screen is opened from an email link while the user is
+    // signed out; it must not be bounced to /welcome (or to /home once the
+    // recovery session signs them in) before they can set a new password.
+    const inPasswordReset = currentSegment === ('reset-password' as string);
+    if (inPasswordReset) {
+      hasInitialized.current = true;
+      return;
+    }
 
     logger.info('RootLayout', 'Navigation check', {
       isAuthenticated,

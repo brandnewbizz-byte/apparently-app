@@ -53,3 +53,8 @@ scripts/check-*.mjs
 scripts/repro-*.mjs
 scripts/test-upsert-scoped.mjs
 scripts/db-connect-test.mjs
+
+# local secrets & generated output
+.env
+.rork-tunnel.log
+dist-test/

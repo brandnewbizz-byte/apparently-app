@@ -152,6 +152,32 @@ export async function toggleLike(postId: string, userId: string) {
   }
 }
 
+/**
+ * Idempotently set the like state (used when replaying queued offline actions,
+ * where a blind toggle could undo a like that already reached the server).
+ */
+export async function setLike(postId: string, userId: string, liked: boolean) {
+  if (liked) {
+    const { data: existing } = await supabase
+      .from('post_likes')
+      .select('id')
+      .eq('post_id', postId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existing) return { liked: true };
+    const { error } = await supabase.from('post_likes').insert({ post_id: postId, user_id: userId });
+    if (error) throw error;
+    return { liked: true };
+  }
+  const { error } = await supabase
+    .from('post_likes')
+    .delete()
+    .eq('post_id', postId)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return { liked: false };
+}
+
 export async function getLikeStatus(postId: string, userId?: string) {
   const uid = userId ;
   const { data, error } = await supabase

@@ -71,6 +71,10 @@ const defaultData: OnboardingData = {
 
 export const [OnboardingProvider, useOnboarding] = createContextHook(() => {
   const [data, setData] = useState<OnboardingData>(defaultData);
+  // True once stored data has been copied into `data`. Without this there is a
+  // render where the query has finished but `data` is still the default
+  // (completed: false), which flashed returning users through /onboarding.
+  const [hydrated, setHydrated] = useState(false);
 
   const safeProfile: UserProfile = data.profile ?? defaultProfile;
 
@@ -106,6 +110,7 @@ export const [OnboardingProvider, useOnboarding] = createContextHook(() => {
   useEffect(() => {
     if (query.data) {
       setData(query.data);
+      setHydrated(true);
     }
   }, [query.data]);
 
@@ -177,7 +182,7 @@ export const [OnboardingProvider, useOnboarding] = createContextHook(() => {
   return {
     ...data,
     profile: safeProfile,
-    isLoading: query.isLoading,
+    isLoading: query.isLoading || !hydrated,
     updateInterests,
     updateGoals,
     updatePriorities,

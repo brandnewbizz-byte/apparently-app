@@ -154,7 +154,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const buildProfile = useCallback(
     async (session: Session): Promise<{ profile: UserProfile; needsName: boolean }> => {
       const userId = session.user.id;
-      const cached = await loadCachedProfile();
+      // Only trust the cache if it belongs to this account — otherwise a
+      // previous user's bio/phone/avatar could leak into a new sign-in when the
+      // old session expired without an explicit signOut().
+      const rawCached = await loadCachedProfile();
+      const cached = rawCached && rawCached.id === userId ? rawCached : null;
       const dbProfile = await fetchProfileFromDb(userId);
 
       const dbName = dbProfile?.full_name ?? null;
@@ -250,50 +254,41 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   useEffect(() => {
     setIsLoading(true);
+    let cancelled = false;
 
-    // Listen for auth state changes (login, logout, session refresh)
+    // Listen for auth state changes (initial session, login, logout, refresh).
+    // INITIAL_SESSION fires once on subscribe, so no separate getSession() call
+    // is needed (running both raced two profile builds against each other).
+    //
+    // IMPORTANT: the callback must not await other Supabase calls directly —
+    // supabase-js holds its auth lock while invoking it, so awaiting rpc()/
+    // from()/signOut() inside can deadlock and leave the app stuck on the
+    // loading screen. Defer the work to the next tick instead.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         logger.info('Auth', 'Auth state changed', { event, hasSession: !!session });
-        if (session) {
-          await setSessionState(session);
-        } else {
-          setProfileNeedsName(false);
-          setEmailVerificationRequired(false);
-          setPendingVerificationEmail(null);
-          setState({
-            session: null,
-            user: null,
-            isAuthenticated: false,
-            emailVerificationRequired: false,
-            pendingVerificationEmail: null,
-          });
-        }
-        setIsLoading(false);
+        setTimeout(async () => {
+          if (cancelled) return;
+          try {
+            if (session) {
+              await setSessionState(session);
+            } else {
+              setProfileNeedsName(false);
+              setEmailVerificationRequired(false);
+              setPendingVerificationEmail(null);
+              setState(defaultState);
+            }
+          } catch (e: any) {
+            logger.error('Auth', 'Handling auth state change failed', { message: e?.message });
+          } finally {
+            if (!cancelled) setIsLoading(false);
+          }
+        }, 0);
       }
     );
 
-    // Get initial session (already logged in from previous session)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSessionState(session).finally(() => setIsLoading(false));
-      } else {
-        // No session — set unauthenticated immediately
-        setState({
-          session: null,
-          user: null,
-          isAuthenticated: false,
-          emailVerificationRequired: false,
-          pendingVerificationEmail: null,
-        });
-        setIsLoading(false);
-      }
-    }).catch((e) => {
-      logger.error('Auth', 'getSession failed', { message: e?.message });
-      setIsLoading(false);
-    });
-
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
     };
   }, []);
@@ -510,6 +505,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signOut = async (): Promise<void> => {
     try {
       logger.info('Auth', 'Signing out user...');
+      // Stop sending this account's pushes to this device once signed out
+      // (must run while the session is still valid, before auth.signOut()).
+      const signingOutId = state.session?.user?.id;
+      if (signingOutId) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({ push_token: null, push_token_updated_at: new Date().toISOString() })
+            .eq('id', signingOutId);
+        } catch (e) {
+          logger.warn('Auth', 'Failed to clear push token on sign out', { e });
+        }
+      }
       const { error } = await supabase.auth.signOut();
       if (error) {
         logger.error('Auth', 'Sign out error', { message: error.message });

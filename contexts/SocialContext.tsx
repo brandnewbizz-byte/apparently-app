@@ -241,8 +241,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   // Retry failed likes/comments when app comes to foreground
   useOfflineRetry({
     retryLike: async (payload) => {
-      const { postId, userId } = payload as { postId: string; userId: string };
-      await localApi.toggleLike(postId, userId);
+      const { postId, userId, liked } = payload as { postId: string; userId: string; liked?: boolean };
+      // Older queue entries have no `liked` flag; their intent can't be known
+      // safely, so drop them rather than blindly toggling.
+      if (typeof liked !== 'boolean') return true;
+      await localApi.setLike(postId, userId, liked);
       return true;
     },
     retryComment: async (payload) => {
@@ -526,7 +529,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     if (authUserId && authUserId !== 'u-dev') {
       localApi.toggleLike(postId, authUserId).catch((e: any) => {
         logger.warn('SocialContext', 'toggleLike API failed — queuing for retry', { error: e?.message, postId });
-        queueAction({ id: `like_${postId}_${authUserId}`, type: current.isLiked ? 'like' : 'unlike', payload: { postId, userId: authUserId }, createdAt: Date.now() });
+        // `updated.isLiked` is the state the user wants (the old code queued the
+        // opposite action, so a failed like was replayed as an unlike).
+        queueAction({ id: `like_${postId}_${authUserId}`, type: updated.isLiked ? 'like' : 'unlike', payload: { postId, userId: authUserId, liked: updated.isLiked }, createdAt: Date.now() });
       });
     }
     // Send notification if liking (DB columns: user_id, actor_id, actor_name, data)
