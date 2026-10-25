@@ -97,6 +97,8 @@ interface BundlePlan {
   mediaType?: 'image' | 'video';
   category?: string;
   grabCount?: number;
+  /** Spots the creator allows (how many people can grab). */
+  availableCount?: number;
   location?: string;
 }
 
@@ -129,6 +131,7 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     mediaType: b.mediaType,
     category: b.category,
     grabCount: b.grabCount,
+    availableCount: b.availableCount,
     location: b.location,
   };
 }
@@ -613,6 +616,14 @@ function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps)
             <Text style={styles.bundlePrice}>${bundle.price}</Text>
             <Text style={[styles.bundlePriceLabel, { color: colors.textTertiary }]}>bundle</Text>
           </View>
+          {bundle.availableCount != null && (
+            <Text style={[styles.bundlePriceLabel, { color: '#10B981', fontWeight: '600' }]}>
+              {(() => {
+                const left = Math.max((bundle.availableCount || 1) - (bundle.grabCount || 0), 0);
+                return `${left} of ${bundle.availableCount} spot${bundle.availableCount === 1 ? '' : 's'} left`;
+              })()}
+            </Text>
+          )}
           <View style={styles.bundleDistanceRow}>
             <MapPin size={14} color={colors.textTertiary} />
             <Text style={[styles.bundleDistanceText, { color: colors.textTertiary }]}>
@@ -1412,11 +1423,21 @@ export default function HomeScreen() {
       console.warn('Card action: skip grab_bundle (no real creator)', bundle.id);
       return;
     }
-    setConfettiAmount(bundle.price);
-    setShowConfetti(true);
-    // grabBundle() internally creates the conversation + notification + one DM
-    // with the real owner (sort-pair dedupe). No extra sendMessage here.
-    grabBundle(bundle.id);
+    // grabBundle() claims a spot, then creates the conversation + notification
+    // + one DM with the real owner (sort-pair dedupe). No extra sendMessage here.
+    grabBundle(bundle.id).then((res) => {
+      if (res.ok) {
+        setConfettiAmount(bundle.price);
+        setShowConfetti(true);
+        return;
+      }
+      const msg =
+        res.reason === 'full' ? 'All spots for this bundle have been grabbed.'
+        : res.reason === 'already_grabbed' ? "You've already grabbed this bundle."
+        : res.reason === 'own_bundle' ? "You can't grab your own bundle."
+        : 'Could not grab this bundle. Please try again.';
+      Alert.alert('Bundle unavailable', msg);
+    });
   }, [grabBundle]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {

@@ -303,6 +303,7 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
+          receiver_id: request.creatorId,
           content: `🛠️ Hey! I can help with "${request.title}". My budget is ${budgetLabel}. Still looking?`,
           created_at: new Date().toISOString(),
           read: false,

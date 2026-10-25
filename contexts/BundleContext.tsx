@@ -53,8 +53,20 @@ interface BundleContextValue {
   myBundles: UserBundle[];
   createBundle: (bundle: Omit<UserBundle, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
   updateBundle: (id: string, patch: Partial<UserBundle>) => void;
-  grabBundle: (id: string) => void;
+  /** Claims one spot. Fails when the bundle is full, already grabbed by you, or your own. */
+  grabBundle: (id: string) => Promise<GrabResult>;
   deleteBundle: (id: string) => void;
+}
+
+export interface GrabResult {
+  ok: boolean;
+  reason?: 'full' | 'already_grabbed' | 'own_bundle' | 'not_found' | 'error';
+  spotsLeft?: number;
+}
+
+/** How many more people can grab this bundle. */
+export function spotsLeft(b: Pick<UserBundle, 'availableCount' | 'grabCount'>): number {
+  return Math.max((b.availableCount || 1) - (b.grabCount || 0), 0);
 }
 
 const BundleContext = createContext<BundleContextValue | undefined>(undefined);
@@ -98,7 +110,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         status: row.status || 'available',
         grabCount: row.grabs ?? row.grab_count ?? 0,
         createdAt: row.created_at || new Date().toISOString(),
-        availableCount: row.available_count || 1,
+        // Number of people who can grab this bundle (set by the creator).
+        availableCount: Math.max(Number(row.available_count) || 1, 1),
       };
     };
 
@@ -184,7 +197,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     });
     setMyBundles((prev) => [newBundle, ...prev]);
     // Sync to Supabase — use actual DB column names
-    supabase.from('bundles').insert({
+    const bundleRow: Record<string, unknown> = {
       id: newBundle.id,
       user_id: newBundle.creatorId,
       type: 'bundle',
@@ -201,9 +214,21 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       provider_avatar: newBundle.creator?.avatar || '',
       status: 'draft',
       grabs: 0,
+      available_count: Math.max(Math.floor(newBundle.availableCount || 1), 1),
       created_at: newBundle.createdAt,
-    }).then(({ error }) => {
-      if (error) logger.error('BundleContext', 'Supabase insert failed', { error });
+    };
+    supabase.from('bundles').insert(bundleRow).then(({ error }) => {
+      if (!error) return;
+      // Database without the available_count column yet (migration 020):
+      // save the bundle anyway rather than losing it.
+      if (String(error.message || '').includes('available_count')) {
+        const { available_count: _omit, ...rest } = bundleRow;
+        supabase.from('bundles').insert(rest).then(({ error: retryErr }) => {
+          if (retryErr) logger.error('BundleContext', 'Supabase insert failed', { error: retryErr });
+        });
+        return;
+      }
+      logger.error('BundleContext', 'Supabase insert failed', { error });
     });
     return { success: true };
   }, [isLoaded, saveBundles, myBundles.length]);
@@ -224,33 +249,65 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     if (patch.imageUrl !== undefined) { dbPatch.image = patch.imageUrl; dbPatch.cover_image = patch.imageUrl; }
     if (patch.videoUrl !== undefined) { dbPatch.image = ''; dbPatch.cover_image = patch.videoUrl; }
     if (patch.category !== undefined) dbPatch.category = patch.category;
+    if (patch.availableCount !== undefined) {
+      const spots = Math.max(Math.floor(patch.availableCount) || 1, 1);
+      dbPatch.available_count = spots;
+      // Raising the limit re-opens a full bundle; lowering it can close one.
+      const current = bundles.find((b) => b.id === id);
+      if (current) dbPatch.status = (current.grabCount || 0) >= spots ? 'grabbed' : (current.status === 'grabbed' ? 'available' : current.status);
+    }
     supabase.from('bundles').update(dbPatch).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase update failed', { error });
     });
-  }, [isLoaded, saveBundles]);
+  }, [isLoaded, saveBundles, bundles]);
 
-  const grabBundle = useCallback((id: string) => {
+  const grabBundle = useCallback(async (id: string): Promise<GrabResult> => {
     const bundle = bundles.find((b) => b.id === id);
     if (bundle && user?.id && bundle.creatorId === user.id) {
       logger.warn('BundleContext', 'Cannot grab own bundle');
-      return;
+      return { ok: false, reason: 'own_bundle' };
     }
+
+    // Claim a spot on the server (atomic — two people can't take the last
+    // spot). Falls back to a client-side check on databases without the
+    // grab_bundle function.
+    let newGrabCount = (bundle?.grabCount || 0) + 1;
+    const capacity = Math.max(bundle?.availableCount || 1, 1);
+    const { data: claim, error: claimErr } = await supabase.rpc('grab_bundle', { p_bundle: id });
+    if (!claimErr && claim) {
+      const res = claim as { ok: boolean; reason?: GrabResult['reason']; grabs?: number; spots_left?: number };
+      if (!res.ok) {
+        if (res.reason === 'full') {
+          setBundles((prev) => prev.map((b) => (b.id === id ? { ...b, status: 'grabbed' as const, grabCount: res.grabs ?? b.grabCount } : b)));
+        }
+        return { ok: false, reason: res.reason || 'error', spotsLeft: res.spots_left };
+      }
+      newGrabCount = res.grabs ?? newGrabCount;
+    } else {
+      if (bundle && spotsLeft(bundle) <= 0) return { ok: false, reason: 'full', spotsLeft: 0 };
+      supabase.rpc('increment_deal_stat', { p_kind: 'bundle', p_id: id, p_column: 'grabs' }).then(({ error: rpcErr }) => {
+        if (!rpcErr) return;
+        supabase
+          .from('bundles')
+          .update({ grabs: newGrabCount, ...(newGrabCount >= capacity ? { status: 'grabbed' } : {}) })
+          .eq('id', id)
+          .then(({ error }) => {
+            if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
+          });
+      });
+    }
+
+    // Only a full bundle is marked 'grabbed' (which removes it from discovery).
     setBundles((prev) => {
       const updated = prev.map((b) =>
-        b.id === id ? { ...b, status: 'grabbed' as const, grabCount: b.grabCount + 1 } : b
+        b.id === id
+          ? { ...b, grabCount: newGrabCount, status: newGrabCount >= Math.max(b.availableCount || 1, 1) ? ('grabbed' as const) : b.status }
+          : b
       );
       if (isLoaded) saveBundles(updated);
       return updated;
     });
-    // Sync to Supabase — use actual column names
-    // Only bump the shared grab counter — setting status:'grabbed' on the
-    // shared row hid the bundle from every other user's discovery feed.
-    supabase.rpc('increment_deal_stat', { p_kind: 'bundle', p_id: id, p_column: 'grabs' }).then(({ error: rpcErr }) => {
-      if (!rpcErr) return;
-      supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1 }).eq('id', id).then(({ error }) => {
-        if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
-      });
-    });
+
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
       const grabMessage = `👋 I'm interested in your bundle "${bundle.title}" — let's chat!`;
@@ -278,7 +335,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       })();
       // 2. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
       const actorName = user.fullName || user.username || 'Someone';
-      const actorAvatar = (user as any)?.avatarUrl || '';
+      const actorAvatar = user.avatar || '';
       supabase.from('notifications').insert({
         user_id: bundle.creatorId,
         actor_id: user.id,
@@ -329,6 +386,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
+          // receiver_id lets the owner get this DM live + counted as unread.
+          receiver_id: bundle.creatorId,
           content: grabMessage,
           created_at: new Date().toISOString(),
           read: false,
@@ -336,7 +395,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         if (msgErr) logger.warn('BundleContext', 'Grab DM message insert failed', { error: msgErr });
       })();
     }
-  }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, bundles]);
+    return { ok: true, spotsLeft: Math.max(capacity - newGrabCount, 0) };
+  }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, user?.avatar, bundles]);
 
   const deleteBundle = useCallback((id: string) => {
     setBundles((prev) => {

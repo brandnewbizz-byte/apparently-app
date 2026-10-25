@@ -79,7 +79,8 @@ export default function BundleBuilderScreen() {
   const [category, setCategory] = useState('');
   const [location, setLocation] = useState('');
   const [dateRange, setDateRange] = useState('');
-  const [availableCount, setAvailableCount] = useState('10');
+  // How many people can grab this bundle (one spot by default).
+  const [availableCount, setAvailableCount] = useState('1');
   const [plannerNotes, setPlannerNotes] = useState('');
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [coverMediaType, setCoverMediaType] = useState<'image' | 'video'>('image');
@@ -199,7 +200,7 @@ export default function BundleBuilderScreen() {
         reviews: 0,
       },
       creatorId: user?.id || '',
-      availableCount: parseInt(availableCount, 10) || 10,
+      availableCount: Math.max(parseInt(availableCount, 10) || 1, 1),
       plannerNotes: plannerNotes.trim() || undefined,
     });
 
@@ -297,15 +298,15 @@ export default function BundleBuilderScreen() {
             </View>
           </View>
           <View style={styles.half}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Available</Text>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Spots (people who can grab)</Text>
             <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={{ color: colors.textSecondary, fontSize: 15, marginRight: 4 }}>×</Text>
               <TextInput
                 style={[styles.priceField, { color: colors.text }]}
-                placeholder="10"
+                placeholder="1"
                 placeholderTextColor={colors.textTertiary}
                 value={availableCount}
-                onChangeText={setAvailableCount}
+                onChangeText={(t) => setAvailableCount(t.replace(/[^0-9]/g, '').slice(0, 4))}
                 keyboardType="number-pad"
               />
             </View>

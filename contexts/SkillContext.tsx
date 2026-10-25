@@ -208,8 +208,10 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     // Sync to Supabase
-    supabase.from('skill_deals').update({ status: 'grabbed', grabs: (skill?.grabCount || 0) + 1 }).eq('id', id).then(({ error }) => {
-      if (error) logger.error('SkillContext', 'Supabase grab update failed', { error });
+    // Skills can be booked by many people: only bump the shared counter
+    // (marking the shared row 'grabbed' would hide it from everyone).
+    supabase.rpc('increment_deal_stat', { p_kind: 'skill', p_id: id, p_column: 'grabs' }).then(({ error }) => {
+      if (error) logger.warn('SkillContext', 'Grab counter update failed', { error });
     });
     // Create inbox notification + auto-create DM for the skill owner
     if (skill?.creatorId && user?.id && skill.creatorId !== user.id) {
@@ -289,6 +291,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
         const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: user.id,
+          receiver_id: skill.creatorId,
           content: grabMessage,
           created_at: new Date().toISOString(),
           read: false,

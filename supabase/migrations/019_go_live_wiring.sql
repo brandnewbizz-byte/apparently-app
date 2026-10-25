@@ -6,7 +6,8 @@
 --   2. delete_my_account()    — in-app account deletion (required by Apple / Google)
 --   3. increment_deal_stat()  — bundle/skill view & grab counters for non-owners
 --   4. realtime for messages + notifications (live chat, unread badges)
---   5. `messages` storage bucket + policies (chat photos and voice notes)
+--   5. `messages` storage bucket (chat photos and voice notes)
+--   6. skill deals readable by everyone
 
 -- ─────────────────────────────────────────────────────────────
 -- 1. user_blocks
@@ -61,8 +62,9 @@ create policy "messages insert not blocked" on public.messages
 
 -- ─────────────────────────────────────────────────────────────
 -- 2. delete_my_account()
--- Deletes the caller's auth user. profiles.id → auth.users is ON DELETE
--- CASCADE (migration 012), and user-owned rows cascade from profiles.
+-- Several tables reference profiles/auth.users with ON DELETE NO ACTION, so
+-- the caller's rows are removed (or unlinked) first, then the auth user.
+-- profiles.id → auth.users cascades; post likes/comments and messages cascade.
 -- ─────────────────────────────────────────────────────────────
 create or replace function public.delete_my_account()
 returns void
@@ -71,12 +73,37 @@ security definer
 set search_path = public, auth
 as $$
 declare
-  v_uid uuid := auth.uid();
+  v uuid := auth.uid();
 begin
-  if v_uid is null then
+  if v is null then
     raise exception 'Not signed in';
   end if;
-  delete from auth.users where id = v_uid;
+
+  update public.chauffeur_applications set reviewed_by = null where reviewed_by = v;
+  update public.service_requests set assigned_to = null where assigned_to = v;
+  update public.virtual_room_objects set owner_id = null where owner_id = v;
+
+  delete from public.activity_logs where user_id = v;
+  delete from public.product_inquiries
+    where user_id = v or product_id in (select id from public.products where seller_id = v);
+  delete from public.products where seller_id = v;
+  delete from public.bookings
+    where user_id = v or listing_id in (select id from public.listings where user_id = v);
+  delete from public.listings where user_id = v;
+  delete from public.user_grabs where user_id = v or provider_id = v;
+  delete from public.user_saves where user_id = v;
+  delete from public.conversations where participant_one = v or participant_two = v;
+  delete from public.job_requests where user_id = v;
+  delete from public.plans where user_id = v;
+  delete from public.posts where user_id = v;
+  delete from public.stories where user_id = v;
+  delete from public.calendar_events where user_id = v;
+  delete from public.income_sources where user_id = v;
+  delete from public.bundles where user_id = v or creator_id = v;
+  delete from public.skill_deals where user_id = v or creator_id = v;
+  delete from public.service_requests where requester_id = v or creator_id = v;
+  delete from public.profiles where id = v;
+  delete from auth.users where id = v;
 end;
 $$;
 revoke all on function public.delete_my_account() from public, anon;
@@ -130,28 +157,24 @@ begin
 end $$;
 
 -- ─────────────────────────────────────────────────────────────
--- 5. `messages` storage bucket (private)
--- Paths used by the app: voice/<recipient_id>/<file>, images/<recipient_id>/<file>
--- Uploader owns the object; the recipient (folder 2) can read it.
+-- 5. `messages` storage bucket (private). The live project already has it
+-- with upload + participant-read policies; this only ensures it exists and
+-- lets senders delete their own uploads.
 -- ─────────────────────────────────────────────────────────────
 insert into storage.buckets (id, name, public)
 values ('messages', 'messages', false)
 on conflict (id) do nothing;
 
-drop policy if exists "messages bucket upload" on storage.objects;
-create policy "messages bucket upload" on storage.objects
-  for insert to authenticated
-  with check (bucket_id = 'messages' and owner = auth.uid());
-
-drop policy if exists "messages bucket read" on storage.objects;
-create policy "messages bucket read" on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'messages'
-    and (owner = auth.uid() or (storage.foldername(name))[2] = auth.uid()::text)
-  );
-
 drop policy if exists "messages bucket delete own" on storage.objects;
 create policy "messages bucket delete own" on storage.objects
   for delete to authenticated
   using (bucket_id = 'messages' and owner = auth.uid());
+
+-- ─────────────────────────────────────────────────────────────
+-- 6. Skills are created with status 'available', but the only read policy
+-- allowed status 'active' (or your own) — so nobody else could see them.
+-- Match bundles: published skill deals are publicly readable.
+-- ─────────────────────────────────────────────────────────────
+drop policy if exists "Public read skill deals" on public.skill_deals;
+create policy "Public read skill deals" on public.skill_deals
+  for select using (true);
