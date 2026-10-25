@@ -23,7 +23,7 @@ const PostCard = React.memo(function PostCard({ post, onPress }: Props) {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost } = useSocial();
+  const { interactions, toggleLike, addComment, toggleCommentLike, sharePost, getComments, deletePost, hidePost } = useSocial();
   const { sharePostToUsers } = useMessaging();
   const { user: currentUser } = useAuth();
 const authorAvatar = post.user.avatar || '';
@@ -244,23 +244,9 @@ const authorAvatar = post.user.avatar || '';
 
   const handleHidePost = () => {
     setShowOptionsModal(false);
-    // Persist to backend
-    if (currentUser?.id) {
-      supabase.from('hidden_posts').insert({
-        post_id: post.id,
-        user_id: currentUser.id,
-      }).then(({ error }) => {
-        if (error) console.log('[hide] DB not ready:', error.message);
-      });
-    }
-    Alert.alert(
-      'Post Hidden',
-      'You won\'t see this post anymore. You can undo this in your settings.',
-      [
-        { text: 'Undo', style: 'cancel' },
-        { text: 'OK' }
-      ]
-    );
+    // Persisted per account and filtered out of the feed on every load.
+    hidePost(post.id);
+    Alert.alert('Post Hidden', "You won't see this post anymore.");
   };
 
   const handleReportPost = () => {

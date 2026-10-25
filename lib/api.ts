@@ -477,15 +477,15 @@ export async function createSkillDeal(deal: {
 }) {
   const { data, error } = await supabase
     .from('skill_deals')
+    // Column names match the live skill_deals table (service / featured_image;
+    // there are no title/icon/image_url/creator_* columns).
     .insert({
       creator_id: deal.creator_id,
-      creator_name: deal.creator_name,
-      creator_avatar: deal.creator_avatar,
-      title: deal.title,
+      user_id: deal.creator_id,
+      service: deal.title,
       description: deal.description,
       price: deal.price,
-      icon: deal.icon,
-      image_url: deal.image_url || null,
+      featured_image: deal.image_url || null,
       category: deal.category || null,
     })
     .select()
@@ -495,20 +495,29 @@ export async function createSkillDeal(deal: {
 }
 
 export async function trackDealStat(type: 'skill' | 'bundle', id: string, field: 'grab' | 'skip' | 'view') {
+  // The tables count `grabs` and `views`; skips aren't stored. The old code
+  // read/wrote non-existent `grab`/`view`/`skip` columns, so every swipe
+  // produced an unhandled error and no stats were ever recorded.
+  const column = field === 'grab' ? 'grabs' : field === 'view' ? 'views' : null;
+  if (!column || !id) return null;
   const table = type === 'skill' ? 'skill_deals' : 'bundles';
-  const { data: existing } = await supabase
-    .from(table)
-    .select(field)
-    .eq('id', id)
-    .single();
-
-  const current = (existing as any)?.[field] || 0;
-  const { error } = await supabase
-    .from(table)
-    .update({ [field]: current + 1 })
-    .eq('id', id);
-  if (error) throw error;
-  return { [field]: current + 1 };
+  try {
+    // Preferred: server-side increment (works for viewers who don't own the
+    // row; see migration 019). Falls back to read+update for older databases.
+    const { error: rpcError } = await supabase.rpc('increment_deal_stat', {
+      p_kind: type,
+      p_id: id,
+      p_column: column,
+    });
+    if (!rpcError) return { [column]: null };
+    const { data: existing } = await supabase.from(table).select(column).eq('id', id).maybeSingle();
+    const current = Number((existing as any)?.[column] || 0);
+    const { error } = await supabase.from(table).update({ [column]: current + 1 }).eq('id', id);
+    if (error) return null;
+    return { [column]: current + 1 };
+  } catch {
+    return null;
+  }
 }
 
 export async function updateDeal(type: 'skill' | 'bundle', id: string, data: any) {
@@ -541,15 +550,20 @@ export async function createBundle(bundle: {
 }) {
   const { data, error } = await supabase
     .from('bundles')
+    // Column names match the live bundles table (provider_* / image / cover_image).
     .insert({
       creator_id: bundle.creator_id,
-      creator_name: bundle.creator_name,
-      creator_avatar: bundle.creator_avatar,
+      user_id: bundle.creator_id,
+      type: 'bundle',
+      provider_name: bundle.creator_name,
+      provider_avatar: bundle.creator_avatar,
       title: bundle.title,
       description: bundle.description,
+      bundle_price: bundle.price,
       price: bundle.price,
       items: bundle.items,
-      image_url: bundle.image_url || null,
+      image: bundle.image_url || null,
+      cover_image: bundle.image_url || null,
       category: bundle.category || null,
     })
     .select()

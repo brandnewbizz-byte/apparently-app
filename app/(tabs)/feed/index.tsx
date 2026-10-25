@@ -636,7 +636,7 @@ export default function FeedScreen() {
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts } = useSocial();
+  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts, hidePost } = useSocial();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -961,11 +961,8 @@ export default function FeedScreen() {
 
   const handleHidePost = (postId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (authUser?.id) {
-      supabase.from('hidden_posts').insert({ user_id: authUser.id, post_id: postId, created_at: new Date().toISOString() }).then(({ error }) => {
-        if (error) console.warn('[Feed] Hide failed:', error.message);
-      });
-    }
+    // Persisted per account; SocialContext filters hidden posts out of the feed.
+    hidePost(postId);
     // Remove from the local feed immediately so it disappears for this user.
     setUserPosts((prev) => prev.filter((p) => p.id !== postId));
   };

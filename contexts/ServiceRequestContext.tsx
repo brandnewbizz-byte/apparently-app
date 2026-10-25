@@ -5,6 +5,7 @@ import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { logger } from '@/lib/logger';
+import { uuid } from '@/lib/uuid';
 
 export type ServiceCategory =
   | 'photography'
@@ -82,7 +83,7 @@ const STORAGE_KEY = 'apparently_service_requests_v1';
 const SEED_REQUESTS: ServiceRequest[] = [];
 
 function generateId(): string {
-  return `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return uuid();
 }
 
 export function ServiceRequestProvider({ children }: { children: React.ReactNode }) {

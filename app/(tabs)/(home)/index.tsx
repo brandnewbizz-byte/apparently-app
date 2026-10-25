@@ -639,11 +639,10 @@ function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps)
 interface GrabbedBundle {
   id: string;
   title: string;
-  proposed_budget: number;
+  price: number;
   pickup_time: string | null;
   status: string;
   booked_at: string;
-  plan_details: any;
 }
 
 interface ConfettiModalProps {
@@ -1343,11 +1342,15 @@ export default function HomeScreen() {
       try {
         const { data, error } = await withAbortSignal(
           supabase
-            .from('job_requests')
-            .select('id, title, proposed_budget, pickup_time, status, booked_at, plan_details')
+            // Grabs are recorded in user_grabs (see BundleContext.grabBundle).
+            // The old query asked job_requests for columns it doesn't have,
+            // so this list was always empty.
+            .from('user_grabs')
+            .select('id, title, price, pickup_time, status, booked_at')
             .eq('user_id', user.id)
-            .eq('type', 'plan_for_hire')
-            .order('booked_at', { ascending: false }),
+            .eq('item_type', 'bundle')
+            .order('booked_at', { ascending: false })
+            .limit(20),
           signal
         );
 
@@ -1523,8 +1526,8 @@ export default function HomeScreen() {
     return grabbedBundles.map(b => ({
       id: b.id,
       title: b.title,
-      price: b.proposed_budget,
-      items: b.plan_details?.items?.length || 1,
+      price: Number(b.price || 0),
+      items: 1,
       type: 'grabbed',
       image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       distance: 0,

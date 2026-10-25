@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 import { sanitizeBundleDesc, sanitizeCaption } from '@/lib/sanitize';
 import { isVideoUrl } from '@/lib/media';
+import { uuid } from '@/lib/uuid';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -171,7 +172,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     }
     const newBundle: UserBundle = {
       ...bundle,
-      id: `bundle-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: uuid(),
       createdAt: new Date().toISOString(),
       status: 'available',
       grabCount: 0,
@@ -242,8 +243,13 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     // Sync to Supabase — use actual column names
-    supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1, status: 'grabbed' }).eq('id', id).then(({ error }) => {
-      if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
+    // Only bump the shared grab counter — setting status:'grabbed' on the
+    // shared row hid the bundle from every other user's discovery feed.
+    supabase.rpc('increment_deal_stat', { p_kind: 'bundle', p_id: id, p_column: 'grabs' }).then(({ error: rpcErr }) => {
+      if (!rpcErr) return;
+      supabase.from('bundles').update({ grabs: (bundle?.grabCount || 0) + 1 }).eq('id', id).then(({ error }) => {
+        if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });
+      });
     });
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {

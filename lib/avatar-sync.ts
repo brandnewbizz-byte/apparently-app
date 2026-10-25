@@ -53,8 +53,7 @@ export async function syncUserAvatar(userId: string, avatarUrl: string): Promise
   // user_grabs.provider_avatar
   fire(supabase.from('user_grabs').update({ provider_avatar: avatarUrl }).eq('provider_id', userId));
 
-  // bundles.provider_avatar (provider can be tracked by provider_id or creator_id)
-  fire(supabase.from('bundles').update({ provider_avatar: avatarUrl }).eq('provider_id', userId));
+  // bundles.provider_avatar (bundles are owned via creator_id)
   fire(supabase.from('bundles').update({ provider_avatar: avatarUrl }).eq('creator_id', userId));
 
   // product_inquiries.user_avatar

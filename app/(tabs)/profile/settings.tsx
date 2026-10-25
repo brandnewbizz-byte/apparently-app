@@ -1,4 +1,4 @@
-import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign, Lock, Info, Bell } from 'lucide-react-native';
+import { ArrowLeft, Moon, Sun, LogOut, Mail, Camera, User, MapPin, FileText, Save, AtSign, Lock, Info, Bell, Trash2 } from 'lucide-react-native';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert, Switch, TextInput, Image } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -182,6 +182,37 @@ export default function SettingsScreen() {
       setNewEmail('');
       setShowEmailChange(false);
     }
+  };
+
+  // App Store / Play Store require apps with sign-up to offer in-app account
+  // deletion. Uses the delete_my_account() database function (migration 019).
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account, profile, posts, messages and bookings. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Forever',
+          style: 'destructive',
+          onPress: async () => {
+            setAccountLoading(true);
+            try {
+              const { error } = await supabase.rpc('delete_my_account');
+              if (error) {
+                Alert.alert('Could not delete account', error.message);
+                return;
+              }
+              await signOut();
+            } catch (e: any) {
+              Alert.alert('Could not delete account', e?.message || 'Please try again.');
+            } finally {
+              setAccountLoading(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleSignOut = () => {
@@ -378,6 +409,20 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.settingContent}>
               <Text style={{ fontSize: 15, fontWeight: '600', color: '#FF5252' }}>Sign Out</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.settingItem, styles.logoutItem]}
+            onPress={handleDeleteAccount}
+            disabled={accountLoading}
+            testID="delete-account"
+          >
+            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255,82,82,0.2)' }]}>
+              <Trash2 size={20} color="#FF5252" />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: '#FF5252' }}>Delete Account</Text>
             </View>
           </TouchableOpacity>
         </View>

@@ -5,6 +5,7 @@ import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
 import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { useAuth } from '@/contexts/AuthContext';
+import { uuid } from '@/lib/uuid';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     }
     const newSkill: UserSkill = {
       ...skill,
-      id: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: uuid(),
       createdAt: new Date().toISOString(),
       status: 'available',
       grabCount: 0,

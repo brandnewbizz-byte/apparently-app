@@ -152,6 +152,11 @@ interface SocialState {
   toggleSave: (postId: string) => void;
   isSaved: (postId: string) => boolean;
   getSavedPosts: () => Post[];
+  /** Hide a post for the current user (persisted in hidden_posts). */
+  hidePost: (postId: string) => void;
+  /** Block a user: their posts disappear from this user's feed. */
+  blockUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  blockedUserIds: string[];
 }
 
 
@@ -1010,16 +1015,63 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     });
   }, []);
 
+  // ── Hidden posts + blocked users (persisted per account) ──
+  // hidden_posts rows were written before but never read back, so hidden
+  // posts reappeared on the next refresh.
+  const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!authUserId || authUserId === 'u-dev') {
+      setHiddenPostIds([]);
+      setBlockedUserIds([]);
+      return;
+    }
+    let cancelled = false;
+    supabase.from('hidden_posts').select('post_id').eq('user_id', authUserId).then(({ data }) => {
+      if (!cancelled && data) setHiddenPostIds(data.map((r: any) => String(r.post_id)));
+    });
+    supabase.from('user_blocks').select('blocked_id').eq('blocker_id', authUserId).then(({ data, error }) => {
+      if (!cancelled && !error && data) setBlockedUserIds(data.map((r: any) => String(r.blocked_id)));
+    });
+    return () => { cancelled = true; };
+  }, [authUserId]);
+
+  const hidePost = useCallback((postId: string) => {
+    setHiddenPostIds(prev => (prev.includes(postId) ? prev : [...prev, postId]));
+    if (authUserId && authUserId !== 'u-dev') {
+      supabase.from('hidden_posts').insert({ user_id: authUserId, post_id: postId }).then(({ error }) => {
+        if (error) logger.warn('SocialContext', 'Hide post failed', { message: error.message });
+      });
+    }
+  }, [authUserId]);
+
+  const blockUser = useCallback(async (userId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!authUserId || authUserId === 'u-dev' || !userId) return { success: false, error: 'Not signed in.' };
+    const { error } = await supabase
+      .from('user_blocks')
+      .upsert({ blocker_id: authUserId, blocked_id: userId }, { onConflict: 'blocker_id,blocked_id' });
+    if (error) {
+      logger.warn('SocialContext', 'Block user failed', { message: error.message });
+      return { success: false, error: error.message };
+    }
+    setBlockedUserIds(prev => (prev.includes(userId) ? prev : [...prev, userId]));
+    return { success: true };
+  }, [authUserId]);
+
   const getAllPosts = useCallback((): Post[] => {
     const source = (apiPosts && apiPosts.length > 0) ? apiPosts : feedPosts;
+    const hidden = new Set(hiddenPostIds);
+    const blocked = new Set(blockedUserIds);
     // Drop blank posts (no caption text and no media). These are failed uploads
     // or leftover rows from deleted posts, and must never render as empty cards.
     return source.filter((p) => {
+      if (hidden.has(p.id)) return false;
+      if (p.user?.id && blocked.has(p.user.id)) return false;
       const hasText = !!(p.content && p.content.trim());
       const hasMedia = !!(p.imageUrl || p.videoUrl);
       return hasText || hasMedia;
     });
-  }, [apiPosts, feedPosts]);
+  }, [apiPosts, feedPosts, hiddenPostIds, blockedUserIds]);
 
   const getAllStories = useCallback((): Story[] => {
     return [...feedStories];
@@ -1059,5 +1111,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     toggleSave,
     isSaved,
     getSavedPosts,
+    hidePost,
+    blockUser,
+    blockedUserIds,
   };
 });

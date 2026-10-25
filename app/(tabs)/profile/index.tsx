@@ -418,13 +418,16 @@ export default function ProfileScreen() {
       // Streak: consecutive days ending at today, not just unique days
       const recentPosts = postsResult.data;
       if (recentPosts && recentPosts.length > 0) {
-        const activeDays = new Set(recentPosts.map((p: any) => p.created_at?.split('T')[0]));
+        // Compare calendar days in the user's own time zone (UTC dates made
+        // evening posts count toward the next day and broke streaks).
+        const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+        const activeDays = new Set(recentPosts.filter((p: any) => p.created_at).map((p: any) => localDay(new Date(p.created_at))));
         let streakCount = 0;
         const today = new Date();
         for (let i = 0; i < 7; i++) {
           const check = new Date(today);
           check.setDate(check.getDate() - i);
-          const day = check.toISOString().split('T')[0];
+          const day = localDay(check);
           if (activeDays.has(day)) {
             streakCount++;
           } else if (i > 0) {
@@ -921,7 +924,7 @@ function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onD
     setCommentText('');
     supabase
       .from('post_comments')
-      .select('id, content, created_at, author_id, profiles:profiles(full_name, username, avatar)')
+      .select('id, content:text, created_at, author_id, profiles:profiles(full_name, username, avatar)')
       .eq('post_id', postId)
       .order('created_at', { ascending: true })
       .limit(50)

@@ -68,7 +68,7 @@ export default function UserProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const { user: authUser } = useAuth();
-  const { deletePost: clearSocialCache } = useSocial();
+  const { deletePost: clearSocialCache, blockUser } = useSocial();
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -239,6 +239,18 @@ export default function UserProfileScreen() {
   // ═══════════════════════════════════════
   // Actions
   // ═══════════════════════════════════════
+
+  // reports has (post_id text, reported_by uuid, reason) — there are no
+  // reporter_id/reported_id columns, so user reports were silently dropped.
+  // Profile reports use post_id = `user:<id>` so moderators can tell them apart.
+  const reportUser = async (reason: string) => {
+    if (!authUser?.id || !userId) return;
+    const { error } = await supabase
+      .from('reports')
+      .insert({ post_id: `user:${userId}`, reported_by: authUser.id, reason: `user_${reason}` });
+    if (error) Alert.alert('Report failed', error.message);
+    else Alert.alert('Reported', 'Thank you. We will review this report.');
+  };
 
   const handleFollow = async () => {
     if (!authUser?.id || !userId || followLoading) return;
@@ -521,9 +533,17 @@ export default function UserProfileScreen() {
                   Alert.alert('Block User', 'Are you sure you want to block this user? You will no longer see their posts or messages.', [
                     { text: 'Cancel', style: 'cancel' },
                     { text: 'Block', style: 'destructive', onPress: async () => {
-                      if (authUser?.id && userId) {
-                        await supabase.from('blocks').upsert({ blocker_id: authUser.id, blocked_id: userId });
-                        Alert.alert('Blocked', 'User has been blocked');
+                      if (!authUser?.id || !userId) return;
+                      const res = await blockUser(userId);
+                      if (res.success) {
+                        if (isFollowing) {
+                          await supabase.from('follows').delete().eq('follower_id', authUser.id).eq('following_id', userId);
+                          setIsFollowing(false);
+                        }
+                        Alert.alert('Blocked', "You won't see this user's posts anymore.");
+                        router.back();
+                      } else {
+                        Alert.alert('Could not block', res.error || 'Please try again.');
                       }
                     }}
                   ]);
@@ -535,24 +555,9 @@ export default function UserProfileScreen() {
                   setShowOptions(false);
                   Alert.alert('Report User', 'Please select a reason for reporting this user:', [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Spam', onPress: async () => {
-                      if (authUser?.id && userId) {
-                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'spam' });
-                      }
-                      Alert.alert('Reported', 'Thank you. We will review this report.');
-                    }},
-                    { text: 'Harassment', onPress: async () => {
-                      if (authUser?.id && userId) {
-                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'harassment' });
-                      }
-                      Alert.alert('Reported', 'Thank you. We will review this report.');
-                    }},
-                    { text: 'Inappropriate Content', onPress: async () => {
-                      if (authUser?.id && userId) {
-                        await supabase.from('reports').insert({ reporter_id: authUser.id, reported_id: userId, reason: 'inappropriate' });
-                      }
-                      Alert.alert('Reported', 'Thank you. We will review this report.');
-                    }},
+                    { text: 'Spam', onPress: () => reportUser('spam') },
+                    { text: 'Harassment', onPress: () => reportUser('harassment') },
+                    { text: 'Inappropriate Content', onPress: () => reportUser('inappropriate') },
                   ]);
                 }}>
                   <AlertTriangle size={20} color={ACCENT_COLORS.amber} />
