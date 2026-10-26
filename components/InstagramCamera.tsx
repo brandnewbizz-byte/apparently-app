@@ -49,12 +49,36 @@ interface Props {
   onPickFromGallery: () => void;
 }
 
-// Lens presets (0-1 range mapped to device zoom)
-const LENS_PRESETS = [
-  { label: '0.5', zoom: 0 },       // Ultra-wide
-  { label: '1', zoom: 1 / 9 },     // Standard wide (default)
-  { label: '2', zoom: 2 / 9 },     // 2× tele
-] as const;
+// ── Zoom model (iPhone-style "0.5× / 1× / 2×" factors) ──
+// expo-camera takes a 0–1 `zoom`. On iOS it is exponential:
+//   factor = minFactor × (maxFactor / minFactor) ^ zoom
+// With the default lens, zoom 0 is exactly 1× (the main wide lens).
+// Selecting the multi-lens "virtual" camera makes zoom 0 the ultra-wide (0.5×).
+// Android maps zoom linearly onto the zoom ratio (min 1×).
+// The old code started at zoom 1/9 — about 1.5–2× on modern iPhones — which is
+// why the camera always looked zoomed in, and its "0.5" button was really 1×.
+const MAX_ZOOM_FACTOR = 10;                 // like the iPhone camera's digital zoom cap
+const IOS_MAIN_RANGE = Math.log(60);        // ≈ max/min zoom factor on the main lens
+const IOS_ULTRA_RANGE = Math.log(120);      // ≈ same, starting from the ultra-wide
+const ANDROID_MAX_RATIO = 8;                // typical CameraX max zoom ratio
+const ULTRA_WIDE_LENSES = [
+  'AVCaptureDeviceTypeBuiltInTripleCamera',
+  'AVCaptureDeviceTypeBuiltInDualWideCamera',
+  'AVCaptureDeviceTypeBuiltInUltraWideCamera',
+];
+
+/** Convert an on-screen zoom factor (0.5, 1, 2 …) to expo-camera's 0–1 `zoom`. */
+function factorToCameraZoom(factor: number, onUltraWide: boolean): number {
+  if (Platform.OS === 'ios') {
+    const z = onUltraWide
+      ? Math.log(Math.max(factor, 0.5) / 0.5) / IOS_ULTRA_RANGE
+      : Math.log(Math.max(factor, 1)) / IOS_MAIN_RANGE;
+    return Math.min(1, Math.max(0, z));
+  }
+  return Math.min(1, Math.max(0, factor / ANDROID_MAX_RATIO));
+}
+
+const LENS_PRESETS = [0.5, 1, 2] as const;
 
 // ── Component ──
 export default function InstagramCamera({ visible, onClose, onCapture, onPickFromGallery }: Props) {
@@ -67,10 +91,23 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const [isReady, setIsReady] = useState(false);
   const [permission, setPermission] = useState(false);
 
-  // ── Zoom with lens-step awareness ──
-  const DEFAULT_ZOOM = 1 / 9; // 1× standard lens
+  // ── Zoom: tracked as an iPhone-style factor (1 = normal, 0.5 = ultra-wide) ──
+  const DEFAULT_ZOOM = 1;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const pinchRef = useRef({ initialDistance: 0, initialZoom: 0 });
+  const pinchRef = useRef({ initialDistance: 0, initialZoom: 1 });
+  // Lens that gives a true 0.5× (only some back cameras have one)
+  const [ultraWideLens, setUltraWideLens] = useState<string | null>(null);
+  const canUltraWide = facing === 'back' && !!ultraWideLens;
+  const minZoom = canUltraWide ? 0.5 : 1;
+  const clampZoom = useCallback(
+    (f: number) => Math.min(MAX_ZOOM_FACTOR, Math.max(minZoom, f)),
+    [minZoom],
+  );
+  // Below 1× we switch to the ultra-wide lens, exactly like the iPhone camera.
+  const onUltraWide = canUltraWide && zoom < 1;
+  // (zoom never drops below 1× without an ultra-wide lens — see clampZoom)
+  const cameraZoom = factorToCameraZoom(zoom, onUltraWide);
+  const zoomLabel = zoom < 1 ? zoom.toFixed(1).replace(/^0/, '') : (Math.round(zoom * 10) / 10).toString();
 
   // ── Tap-to-focus state ──
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
@@ -180,9 +217,9 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
       swipeRef.current.active = false;
       const currentDistance = getTouchDistance(touches);
       const scale = currentDistance / pinchRef.current.initialDistance;
-      const sensitivity = 1.8;
-      const calculated = pinchRef.current.initialZoom + (scale - 1) * sensitivity;
-      setZoom(Math.min(1, Math.max(0, calculated)));
+      // Pinching scales the zoom proportionally (spread fingers 2× → 2× zoom),
+      // the way the iPhone camera feels.
+      setZoom(clampZoom(pinchRef.current.initialZoom * scale));
     } else if (touches && touches.length === 1 && swipeRef.current.active) {
       // Single-finger swipe
       swipeRef.current.currentX = touches[0].pageX;
@@ -221,10 +258,11 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   };
 
   // ── Lens step tap (0.5× / 1× / 2×) ──
-  const handleLensStep = useCallback((newZoom: number) => {
+  const handleLensStep = useCallback((factor: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setZoom(newZoom);
-  }, []);
+    setZoom(clampZoom(factor));
+  }, [clampZoom]);
+
 
   // ── Capture photo ──
   const handleCapture = useCallback(async () => {
@@ -306,6 +344,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const flipCamera = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
+    // Front camera has no ultra-wide — start it at 1×, like the iPhone.
+    setZoom(DEFAULT_ZOOM);
   };
 
   // ── Toggle grid ──
@@ -381,8 +421,16 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         flash={flash}
         mode="picture"
         ratio="4:3"
-        zoom={zoom}
-        autofocus="off"
+        zoom={cameraZoom}
+        // 'on' = continuous autofocus like the iPhone camera ('off' locked focus,
+        // which made close-ups and moving subjects blurry).
+        autofocus="on"
+        selectedLens={onUltraWide ? ultraWideLens ?? undefined : undefined}
+        onAvailableLensesChanged={({ lenses }) => {
+          if (facing !== 'back') return;
+          const types = lenses.map((l) => l.deviceType);
+          setUltraWideLens(ULTRA_WIDE_LENSES.find((t) => types.includes(t)) ?? null);
+        }}
         onCameraReady={() => setIsReady(true)}
       >
         {/* Pinch-to-zoom + tap-to-focus + swipe touch layer */}
@@ -475,27 +523,31 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
 
         {/* ── Lens stepping buttons (iPhone-style) ── */}
         <View style={styles.lensRow} pointerEvents="box-none">
-          {LENS_PRESETS.map((preset) => {
-            const isActive = Math.abs(zoom - preset.zoom) < 0.01;
+          {LENS_PRESETS.filter((f) => f >= minZoom).map((preset, i, list) => {
+            // Like the iPhone: the button for the range you're in is highlighted
+            // and shows the exact zoom (e.g. "1.4×").
+            const next = list[i + 1] ?? Infinity;
+            const isActive = zoom >= preset - 0.001 && zoom < next - 0.001;
+            const label = isActive ? zoomLabel : preset === 0.5 ? '.5' : String(preset);
             return (
               <TouchableOpacity
-                key={preset.label}
+                key={preset}
                 style={[styles.lensBtn, isActive && styles.lensBtnActive]}
-                onPress={() => handleLensStep(preset.zoom)}
+                onPress={() => handleLensStep(preset)}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.lensLabel, isActive && styles.lensLabelActive]}>
-                  {preset.label}×
+                  {label}{isActive ? '×' : ''}
                 </Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        {/* Zoom indicator (shows during pinch or when not at preset) */}
-        {!LENS_PRESETS.some(p => Math.abs(zoom - p.zoom) < 0.01) && (
+        {/* Zoom indicator (shows when beyond the 2× button) */}
+        {zoom > 2.05 && (
           <View style={styles.zoomIndicator}>
-            <Text style={styles.zoomText}>{(0.5 + 4.5 * zoom).toFixed(1)}×</Text>
+            <Text style={styles.zoomText}>{zoomLabel}×</Text>
           </View>
         )}
 
