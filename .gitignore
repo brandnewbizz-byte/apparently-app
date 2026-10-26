@@ -58,3 +58,11 @@ scripts/db-connect-test.mjs
 .env
 .rork-tunnel.log
 dist-test/
+
+# local one-off DB/debug scripts (may contain credentials) — never commit
+scripts/check-*.mjs
+scripts/repro-*.mjs
+dbcheck*.mjs
+apply-*.mjs
+verify-*.mjs
+.rork-lan.log

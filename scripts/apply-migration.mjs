@@ -1,9 +1,15 @@
 import pg from 'pg';
 import { readFileSync } from 'fs';
 
-const P = 'FtVN7trbAAz08kZM';
-const ref = 'inejlmksbzujgpwvnnch';
-const url = `postgresql://postgres.${ref}:${P}@aws-0-us-west-2.pooler.supabase.com:6543/postgres`;
+// Never hard-code the database password. Provide the connection string via
+// the environment, e.g. (Supabase → Project Settings → Database → Connection string):
+//   SUPABASE_DB_URL='postgresql://postgres.<ref>:<password>@<host>:6543/postgres' \
+//     node scripts/apply-migration.mjs supabase/migrations/0XX_name.sql
+const url = process.env.SUPABASE_DB_URL;
+if (!url) {
+  console.error('Set SUPABASE_DB_URL to your Supabase Postgres connection string.');
+  process.exit(1);
+}
 
 const file = process.argv[2];
 if (!file) { console.error('usage: node apply-migration.mjs <file.sql>'); process.exit(1); }
