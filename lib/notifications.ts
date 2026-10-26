@@ -185,3 +185,27 @@ export async function setBadgeCount(count: number): Promise<void> {
     logger.warn(TAG, 'setBadgeCount exception', { e });
   }
 }
+
+/**
+ * Open the right screen when the user taps a push notification:
+ * a message push opens that chat; anything else opens Notifications.
+ * Returns an unsubscribe function.
+ */
+export async function onNotificationTap(navigate: (path: string) => void): Promise<() => void> {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return () => {};
+  const handle = (data: any) => {
+    if (!data) return;
+    if (data.kind === 'message' && data.senderId) navigate(`/inbox/conversation/${data.senderId}`);
+    else navigate('/notifications');
+  };
+  try {
+    // App opened from a cold start by tapping a notification
+    const last = await Notifications.getLastNotificationResponseAsync();
+    if (last) handle(last.notification.request.content.data);
+  } catch {}
+  const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+    handle(resp.notification.request.content.data);
+  });
+  return () => sub.remove();
+}

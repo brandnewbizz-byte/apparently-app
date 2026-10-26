@@ -22,6 +22,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { TabBarProvider } from '@/contexts/TabBarContext';
 import { CreatePostProvider } from '@/contexts/CreatePostContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
+import { NotificationsProvider } from '@/contexts/NotificationsContext';
 import { RoomProvider } from '@/contexts/RoomContext';
 import { PlanProvider } from '@/contexts/PlanContext';
 import { UserPostsProvider } from '@/contexts/UserPostsContext';
@@ -39,6 +40,7 @@ import {
   configureNotificationHandler,
   ensureNotificationChannel,
   registerForPushNotifications,
+  onNotificationTap,
 } from '@/lib/notifications';
 
 const queryClient = new QueryClient();
@@ -59,6 +61,17 @@ function RootLayoutNav() {
     configureNotificationHandler();
     ensureNotificationChannel();
   }, []);
+
+  // Tapping a push notification opens the chat / Notifications screen.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+    onNotificationTap((path) => router.push(path as never)).then((fn) => {
+      if (cancelled) fn(); else unsubscribe = fn;
+    });
+    return () => { cancelled = true; unsubscribe?.(); };
+  }, [isAuthenticated, router]);
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
@@ -159,6 +172,7 @@ function RootLayoutNav() {
       name="inbox"
       options={{ headerShown: false }}
     />
+    <Stack.Screen name="notifications" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -253,6 +267,7 @@ export default function RootLayout() {
                                 <RoomProvider>
                                 <PlanProvider>
                                 <MessagingProvider>
+                                <NotificationsProvider>
                                   <BookingsProvider>
                                     <PlannerProvider>
                                       <OrdersProvider>
@@ -266,6 +281,7 @@ export default function RootLayout() {
                                       </OrdersProvider>
                                     </PlannerProvider>
                                   </BookingsProvider>
+                                </NotificationsProvider>
                                 </MessagingProvider>
                                 </PlanProvider>
                                 </RoomProvider>

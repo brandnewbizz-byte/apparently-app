@@ -9,7 +9,7 @@ import {
   X,
   Bookmark,
   Trophy,
-  Bell,
+  
   Sparkles,
   Wrench,
   Star,
@@ -61,7 +61,7 @@ import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
 import { useBundles, type UserBundle } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
 import { useServiceRequests, type ServiceRequest } from '@/contexts/ServiceRequestContext';
-import { useMessaging } from '@/contexts/MessagingContext';
+import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1266,8 +1266,6 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
-  const { conversations: messagingConversations } = useMessaging();
-  const unreadTotal = useMemo(() => messagingConversations.reduce((s, c) => s + (c.unreadCount || 0), 0), [messagingConversations]);
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
@@ -1728,18 +1726,7 @@ export default function HomeScreen() {
             <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
           </View>
           <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => handleNavigate('/inbox')}
-              activeOpacity={0.8}
-            >
-              <Bell size={20} color={colors.text} />
-              {unreadTotal > 0 && (
-                <View style={[styles.badgeDot, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.badgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            <HeaderActivityButtons size={24} />
           </View>
         </View>
 

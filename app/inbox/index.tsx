@@ -1,670 +1,400 @@
-import { Bell, MessageCircle, UserPlus, Check, X, MapPin, Clock, Phone, Heart, MessageSquare, AtSign, ShoppingBag, Briefcase, Video } from 'lucide-react-native';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useRouter } from 'expo-router';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Animated,
-  Image,
-  Platform,
-  RefreshControl,
+  ActivityIndicator,
   Alert,
+  FlatList,
+  Image,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { Camera, ChevronLeft, MessageCircle, Search, SquarePen, X } from 'lucide-react-native';
 
-import { useConnections, ConnectionRequest } from '@/contexts/ConnectionsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useTabBar } from '@/contexts/TabBarContext';
-import { useMessaging } from '@/contexts/MessagingContext';
+import { useMessaging, Conversation, Message } from '@/contexts/MessagingContext';
+import { useConnections } from '@/contexts/ConnectionsContext';
+import { supabase } from '@/lib/supabase';
 
-const TABS = [
-  { id: 'notifications' as const, label: 'Notifications', icon: Bell },
-  { id: 'messages' as const, label: 'Messages', icon: MessageCircle },
-  { id: 'requests' as const, label: 'Requests', icon: UserPlus },
-];
+type ProfileHit = { id: string; name: string; username: string; avatar: string };
+
+function shortAgo(ts: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d`;
+  return `${Math.floor(s / 604800)}w`;
+}
+
+/** Instagram-style one-line summary of a message. */
+function summarize(m: Message | undefined, myId: string): string {
+  if (!m) return 'Say hi 👋';
+  const mine = m.senderId === myId;
+  const meta: any = m.metadata || {};
+  let body = (m.text || m.content || '').trim();
+  if (meta.image) body = mine ? 'You sent a photo' : 'Sent a photo';
+  else if (meta.voice_note) body = mine ? 'You sent a voice message' : 'Sent a voice message';
+  else if (meta.bundle_card) body = mine ? 'You sent a bundle' : 'Sent a bundle';
+  else if (meta.skill_card) body = mine ? 'You sent a skill' : 'Sent a skill';
+  else if (m.sharedPost) body = mine ? 'You shared a post' : 'Shared a post';
+  else if (mine) body = `You: ${body}`;
+  return body;
+}
+
+function Avatar({ uri, size, bg, online, ring }: { uri?: string; size: number; bg: string; online?: boolean; ring: string }) {
+  return (
+    <View style={{ width: size, height: size }}>
+      {uri ? (
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bg }} />
+      ) : (
+        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bg }} />
+      )}
+      {online && (
+        <View
+          style={{
+            position: 'absolute', right: 0, bottom: 0,
+            width: size * 0.28, height: size * 0.28, borderRadius: size * 0.14,
+            backgroundColor: '#22C55E', borderWidth: 3, borderColor: ring,
+          }}
+        />
+      )}
+    </View>
+  );
+}
 
 export default function InboxScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const connections = useConnections();
-  const messaging = useMessaging();
   const { colors } = useTheme();
-  const { handleScroll: handleTabBarScroll } = useTabBar();
   const { user } = useAuth();
+  const messaging = useMessaging();
+  const connections = useConnections();
+  const myId = user?.id || '';
 
-  const [activeTab, setActiveTab] = useState<'notifications' | 'messages' | 'requests'>('notifications');
+  const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [peopleHits, setPeopleHits] = useState<ProfileHit[]>([]);
+  const [searchingPeople, setSearchingPeople] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeQuery, setComposeQuery] = useState('');
+  const [composeHits, setComposeHits] = useState<ProfileHit[]>([]);
 
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  // Fetch bundle grab / call notifications from Supabase
-  const [notifs, setNotifs] = useState<any[]>([]);
-
-  const fetchNotifs = useCallback(async () => {
-    if (!user?.id) return;
-    // DB columns: user_id (recipient), actor_id/actor_name/actor_avatar (sender)
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (!error && data) {
-      // actor_name and actor_avatar are already stored on the notification — no profile fetch needed
-      setNotifs(data.map((n: any) => ({
-        id: n.id,
-        type: n.type,
-        senderId: n.actor_id,
-        senderName: n.actor_name || 'Someone',
-        senderAvatar: n.actor_avatar || '',
-        data: n.data || {},
-        message: n.body || n.title || '',
-        read: n.read,
-        createdAt: n.created_at,
-        _raw: n,
-      })));
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    fetchNotifs();
-    const sub = supabase
-      .channel('notifs-inbox')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${user.id}`,
-      }, () => fetchNotifs())
-      .subscribe();
-    return () => { sub.unsubscribe(); };
-  }, [user?.id, fetchNotifs]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await Promise.all([
-        fetchNotifs(),
-        (connections as any).refresh?.() || Promise.resolve(),
-        (messaging as any).refresh?.() || Promise.resolve(),
-      ]);
-    } catch {
-      // contexts may not expose refresh methods — fall through
-    }
-    setRefreshing(false);
-  }, [connections, messaging, fetchNotifs]);
-
-  const formatTimeAgo = (timestamp: string) => {
-    const now = new Date();
-    const date = new Date(timestamp);
-    const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-    if (diff < 60) return 'Just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-    return `${Math.floor(diff / 86400)}d`;
-  };
-
+  const { conversations, presence } = messaging;
   const requestCount = connections.incomingRequests.length;
 
-  // Notifications count
-  const notificationCount = notifs.filter(n => !n.read).length;
+  const sorted = useMemo(
+    () => [...conversations].sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()),
+    [conversations],
+  );
 
-  // ─── Notification sub-tab filter + type icons ───
-  const NOTIF_FILTERS = [
-    { id: 'all' as const, label: 'All' },
-    { id: 'social' as const, label: 'Social' },
-    { id: 'grabs' as const, label: 'Grabs' },
-    { id: 'calls' as const, label: 'Calls' },
-  ];
-  const [notifFilter, setNotifFilter] = useState<'all' | 'social' | 'grabs' | 'calls'>('all');
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (q ? sorted.filter((c) => c.participantName.toLowerCase().includes(q) || c.participantUsername.toLowerCase().includes(q)) : sorted),
+    [sorted, q],
+  );
 
-  const notifCategory = (type: string): 'social' | 'grabs' | 'calls' => {
-    if (type === 'like' || type === 'comment' || type === 'mention' || type === 'follow') return 'social';
-    if (type === 'bundle_grab' || type === 'skill_grab' || type === 'service_grab' || type === 'job_grabbed') return 'grabs';
-    return 'calls';
+  // People row: who's active now first, then recent chats.
+  const peopleRow = useMemo(() => {
+    const online = sorted.filter((c) => presence[c.participantId]?.online);
+    const rest = sorted.filter((c) => !presence[c.participantId]?.online);
+    return [...online, ...rest].slice(0, 12);
+  }, [sorted, presence]);
+
+  // Search people in the app (not just existing chats) — debounced.
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchProfiles = useCallback(async (text: string, setter: (h: ProfileHit[]) => void, setBusy?: (b: boolean) => void) => {
+    const t = text.trim().replace(/[%,()]/g, '');
+    if (t.length < 2) { setter([]); return; }
+    setBusy?.(true);
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, avatar')
+      .or(`full_name.ilike.%${t}%,username.ilike.%${t}%`)
+      .neq('id', myId)
+      .limit(15);
+    setter((data || []).map((p: any) => ({ id: p.id, name: p.full_name || p.username || 'User', username: p.username || '', avatar: p.avatar || '' })));
+    setBusy?.(false);
+  }, [myId]);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => searchProfiles(query, setPeopleHits, setSearchingPeople), 300);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [query, searchProfiles]);
+
+  useEffect(() => {
+    const t = setTimeout(() => searchProfiles(composeQuery, setComposeHits), 250);
+    return () => clearTimeout(t);
+  }, [composeQuery, searchProfiles]);
+
+  const openChat = (participantId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setComposeOpen(false);
+    router.push(`/inbox/conversation/${participantId}` as any);
   };
 
-  const filteredNotifs = notifFilter === 'all'
-    ? notifs
-    : notifs.filter(n => notifCategory(n.type) === notifFilter);
-
-  const markAllRead = async () => {
-    const unreadIds = notifs.filter(n => !n.read).map(n => n.id);
-    if (unreadIds.length === 0) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    supabase.from('notifications').update({ read: true }).in('id', unreadIds).then(() => {});
-    setNotifs(prev => prev.map(n => unreadIds.includes(n.id) ? { ...n, read: true } : n));
-  };
-
-  const NOTIF_ICONS: Record<string, any> = {
-    like: Heart,
-    comment: MessageSquare,
-    mention: AtSign,
-    follow: UserPlus,
-    bundle_grab: ShoppingBag,
-    skill_grab: Briefcase,
-    service_grab: Briefcase,
-    job_grabbed: Briefcase,
-    call_request: Phone,
-    room_invite: Video,
-  };
-
-  const renderNotifIcon = (type: string) => {
-    const I = NOTIF_ICONS[type] || Bell;
-    return <I size={20} color={colors.accent} />;
-  };
-
-  // Rich preview for grab notifications — show WHAT was grabbed, not just "grabbed something"
-  const notifPreview = (n: any) => {
-    const d = n.data || {};
-    if (n.type === 'bundle_grab') return d.bundle_title ? `grabbed your bundle "${d.bundle_title}"` : 'grabbed your bundle';
-    if (n.type === 'skill_grab') return d.skill_title ? `grabbed your skill "${d.skill_title}"` : 'grabbed your skill';
-    if (n.type === 'service_grab') return d.request_title ? `offered to help with "${d.request_title}"` : 'offered to help with your request';
-    if (n.type === 'job_grabbed') return d.job_title ? `grabbed your ${d.job_label || 'job'} "${d.job_title}"` : (d.job_label ? `grabbed your ${d.job_label}` : 'grabbed your job');
-    if (n.type === 'follow') return 'started following you';
-    if (n.type === 'comment') return 'commented on your post';
-    if (n.type === 'like') return 'liked your post';
-    if (n.type === 'mention') return 'mentioned you';
-    if (n.type === 'call_request') return 'wants to call you';
-    if (n.type === 'room_invite') return 'invited you to a room';
-    return n.message;
-  };
-
-  // Image + price for grab notifications (bundle/skill/service) so the card shows the item
-  const notifImage = (n: any): string => {
-    const d = n.data || {};
-    if (n.type === 'bundle_grab') return d.bundle_image || '';
-    if (n.type === 'skill_grab') return d.skill_image || '';
-    if (n.type === 'service_grab') return d.request_image || '';
-    return '';
-  };
-  const notifPriceLabel = (n: any): string => {
-    const d = n.data || {};
-    let raw: any;
-    if (n.type === 'bundle_grab') raw = d.bundle_price;
-    else if (n.type === 'skill_grab') raw = d.skill_price;
-    else if (n.type === 'service_grab') raw = d.request_price;
-    if (!raw) return '';
-    if (typeof raw === 'string') return raw.startsWith('$') ? raw : `$${raw}`;
-    const num = Number(raw);
-    if (!num || num <= 0) return '';
-    return `$${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`;
-  };
-
-  // ─── Notifications Tab ───
-
-  const renderNotifications = () => {
-    if (notifs.length === 0) {
-      return (
-        <View style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-            <Bell size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No notifications</Text>
-          <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-            Likes, comments, follows and more will appear here
-          </Text>
-        </View>
-      );
-    }
-
-    return (
-      <>
-        {/* Notification filter sub-tabs */}
-        <View style={[styles.notifFilterRow, { borderBottomColor: colors.border }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 18, paddingRight: 8 }}>
-            {NOTIF_FILTERS.map((f) => {
-              const active = notifFilter === f.id;
-              return (
-                <TouchableOpacity key={f.id} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setNotifFilter(f.id); }} style={styles.notifFilterTab}>
-                  <Text style={[styles.notifFilterText, { color: active ? colors.text : colors.textTertiary, fontWeight: active ? '700' : '600' }]}>{f.label}</Text>
-                  {active && <View style={[styles.notifFilterIndicator, { backgroundColor: colors.accent }]} />}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          {notificationCount > 0 && (
-            <TouchableOpacity onPress={markAllRead} style={styles.markReadBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Check size={14} color={colors.accent} />
-              <Text style={[styles.markReadText, { color: colors.accent }]}>Mark all read</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {filteredNotifs.length === 0 ? (
-          <View style={styles.empty}>
-            <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-              <Bell size={40} color={colors.textTertiary} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>Nothing here</Text>
-            <Text style={[styles.emptySub, { color: colors.textTertiary }]}>No notifications in this category</Text>
-          </View>
-        ) : (
-        filteredNotifs.map((n) => (
-          <View
-            key={`notif-${n.id}`}
-            style={[styles.card, { backgroundColor: n.read ? colors.surface : colors.accent + '08', borderColor: n.read ? colors.border : colors.accent + '40' }]}
-          >
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
-              activeOpacity={0.8}
-              onPress={() => {
-                if (n.type === 'call_request') return;
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                // Mark as read
-                supabase.from('notifications').update({ read: true }).eq('id', n.id).then(() => {});
-                setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                // Navigate based on type
-                if (n.type === 'bundle_grab' || n.type === 'skill_grab' || n.type === 'service_grab') {
-                  // Someone grabbed my bundle/item — open the conversation with them.
-                  // This resolves to inbox/conversation/[participantId], which renders the
-                  // grabbed bundle/skill card AND has the composer to reply to that buyer.
-                  router.push(`/inbox/conversation/${n.senderId}` as any);
-                } else if (n.type === 'follow') {
-                  router.push(`/user/${n.senderId}` as any);
-                } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention' || n.type === 'job_grabbed') {
-                  // Open the actor's profile (who liked/commented/mentioned you).
-                  router.push(`/user/${n.senderId}` as any);
-                }
-              }}
-            >
-              <View style={styles.avatar}>
-                {n.senderAvatar ? (
-                  <Image source={{ uri: n.senderAvatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-                ) : (
-                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent + '20', alignItems: 'center', justifyContent: 'center' }}>
-                    {renderNotifIcon(n.type)}
-                  </View>
-                )}
-              </View>
-              <View style={styles.cardContent}>
-                <View style={styles.cardHeader}>
-                  <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
-                    {n.senderName}
-                  </Text>
-                  <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
-                    {formatTimeAgo(n.createdAt)}
-                  </Text>
-                </View>
-                <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {notifPreview(n)}
-                </Text>
-                {notifPriceLabel(n) ? (
-                  <Text style={[styles.cardPrice, { color: colors.accent }]} numberOfLines={1}>
-                    {notifPriceLabel(n)}
-                  </Text>
-                ) : null}
-              </View>
-              {/* Item thumbnail: post image for social, or grabbed item image */}
-              {(n.type === 'like' || n.type === 'comment' || n.type === 'mention') && n.data?.post_image_url ? (
-                <Image source={{ uri: n.data.post_image_url }} style={{ width: 48, height: 48, borderRadius: 8, marginLeft: 8 }} />
-              ) : notifImage(n) ? (
-                <Image source={{ uri: notifImage(n) }} style={{ width: 48, height: 48, borderRadius: 8, marginLeft: 8, backgroundColor: colors.backgroundTertiary }} />
-              ) : null}
-              {!n.read && (
-                <View style={[styles.unread, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.unreadText}>1</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            {/* Call request actions */}
-            {n.type === 'call_request' && (
-              <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
-                <TouchableOpacity
-                  style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
-                  onPress={() => {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    const raw = n._raw || {};
-                    router.push({ pathname: '/call/[roomId]' as any, params: {
-                      roomId: raw.room_id || `call-${Date.now()}`,
-                      callerId: n.senderId,
-                      callerName: n.senderName,
-                      targetId: user?.id,
-                      targetName: user?.fullName || 'You',
-                      isOutgoing: '0',
-                      currentUserId: user?.id,
-                      currentUserName: user?.fullName || 'You',
-                    } as any});
-                  }}
-                >
-                  <Phone size={16} color="#10B981" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}
-                  onPress={() => {
-                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
-                    setNotifs(prev => prev.filter(x => x.id !== n.id));
-                  }}
-                >
-                  <X size={16} color="#EF4444" />
-                </TouchableOpacity>
-              </View>
-            )}
-            {/* Room invite actions */}
-            {n.type === 'room_invite' && (
-              <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
-                <TouchableOpacity
-                  style={[styles.approveBtn, { backgroundColor: '#10B98120' }]}
-                  onPress={() => {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    const raw = n._raw || {};
-                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
-                    setNotifs(prev => prev.filter(x => x.id !== n.id));
-                    const inviteRoomId = raw.data?.room_id || raw.room_id;
-                    if (inviteRoomId) router.push(`/(tabs)/live/room/${inviteRoomId}` as any);
-                  }}
-                >
-                  <Check size={16} color="#10B981" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.declineBtn, { backgroundColor: '#EF444420' }]}
-                  onPress={() => {
-                    supabase.from('notifications').delete().eq('id', n.id).then(() => {});
-                    setNotifs(prev => prev.filter(x => x.id !== n.id));
-                  }}
-                >
-                  <X size={16} color="#EF4444" />
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        )))}
-      </>
-    );
-  };
-
-  // ─── Messages Tab ───
-
-  const allConversations = React.useMemo(() => messaging.conversations, [messaging.conversations]);
-
-  const renderMessages = () => {
-    if (allConversations.length === 0) {
-      return (
-        <View style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-            <MessageCircle size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No messages yet</Text>
-          <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-            Grab a bundle or skill from Home to start a conversation
-          </Text>
-        </View>
-      );
-    }
-
-    return (
-      <>
-        {allConversations.map((conv) => {
-      const lastMsg = conv.messages[conv.messages.length - 1];
-      return (
-        <TouchableOpacity
-          key={conv.id}
-          style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          activeOpacity={0.8}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/inbox/conversation/${conv.participantId}` as any);
-          }}
-          onLongPress={() => {
-            Alert.alert('Delete Thread', `Remove conversation with ${conv.participantName}?`, [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => messaging.deleteConversation(conv.participantId) },
-            ]);
-          }}
-          delayLongPress={500}
-        >
-          <Image
-            source={{ uri: conv.participantAvatar }}
-            style={[styles.avatar, { backgroundColor: colors.backgroundTertiary }]}
-          />
-          <View style={styles.cardContent}>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
-                {conv.participantName}
-              </Text>
-              <Text style={[styles.cardTime, { color: colors.textTertiary }]}>
-                {formatTimeAgo(conv.lastMessageAt)}
-              </Text>
-            </View>
-            <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={1}>
-              {lastMsg?.content || lastMsg?.text || 'No messages'}
-            </Text>
-          </View>
-          {conv.unreadCount > 0 && (
-            <View style={[styles.unread, { backgroundColor: colors.accent }]}>
-              <Text style={styles.unreadText}>{conv.unreadCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      );
-    })}
-      </>
-    );
-  };
-
-  // ─── Requests Tab ───
-
-  const approveRequest = async (r: ConnectionRequest) => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    try {
-      await connections.approveRequest(r.id);
-      Alert.alert('Connected!', `You are now connected with ${r.fromProfile.name}.`);
-    } catch {
-      Alert.alert('Error', 'Failed to approve request. Please try again.');
-    }
-  };
-
-  const rejectRequest = (r: ConnectionRequest) => {
-    Alert.alert('Decline', `Decline request from ${r.fromProfile.name}?`, [
+  const confirmDelete = (c: Conversation) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(c.participantName, undefined, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Decline',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await connections.rejectRequest(r.id);
-          } catch {
-            Alert.alert('Error', 'Failed to reject request.');
-          }
-        },
-      },
+      { text: 'Delete chat', style: 'destructive', onPress: () => messaging.deleteConversation(c.participantId) },
     ]);
   };
 
-  const renderRequests = () => {
-    const { incomingRequests, outgoingRequests } = connections;
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await new Promise((r) => setTimeout(r, 600));
+    setRefreshing(false);
+  }, []);
 
-    if (incomingRequests.length === 0 && outgoingRequests.length === 0) {
-      return (
-        <View style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-            <UserPlus size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No requests</Text>
-          <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-            Connection requests will appear here
-          </Text>
-        </View>
-      );
-    }
-
+  const renderRow = ({ item: c }: { item: Conversation }) => {
+    const last = c.messages[c.messages.length - 1];
+    const unread = (c.unreadCount || 0) > 0;
+    const p = presence[c.participantId];
+    let subtitle = summarize(last, myId);
+    if (p?.typing) subtitle = 'Typing…';
+    else if (unread && c.unreadCount > 1) subtitle = `${c.unreadCount > 4 ? '4+' : c.unreadCount} new messages`;
+    else if (last && last.senderId === myId && last.read) subtitle = 'Seen';
+    else if (!last && p?.online) subtitle = 'Active now';
     return (
-      <>
-        {incomingRequests.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-              {incomingRequests.length} pending
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() => openChat(c.participantId)}
+        onLongPress={() => confirmDelete(c)}
+        delayLongPress={450}
+        activeOpacity={0.6}
+        testID={`thread-${c.participantId}`}
+      >
+        <Avatar uri={c.participantAvatar} size={56} bg={colors.backgroundTertiary} online={p?.online} ring={colors.background} />
+        <View style={styles.rowBody}>
+          <Text style={[styles.rowName, { color: colors.text, fontWeight: unread ? '700' : '400' }]} numberOfLines={1}>
+            {c.participantName}
+          </Text>
+          <View style={styles.rowSubLine}>
+            <Text
+              style={[styles.rowSub, { color: unread || p?.typing ? colors.text : colors.textSecondary, fontWeight: unread ? '600' : '400', flexShrink: 1 }]}
+              numberOfLines={1}
+            >
+              {subtitle}
             </Text>
-            {incomingRequests.map((r) => (
-              <View
-                key={r.id}
-                style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: colors.accent + '30' }]}
-              >
-                <Image source={{ uri: r.fromProfile.avatar }} style={[styles.avatar, { backgroundColor: colors.backgroundTertiary }]} />
-                <View style={styles.cardContent}>
-                  <View style={styles.cardHeader}>
-                    <Text style={[styles.cardName, { color: colors.text }]}>{r.fromProfile.name}</Text>
-                    <Text style={[styles.cardTime, { color: colors.textTertiary }]}>{formatTimeAgo(r.createdAt)}</Text>
-                  </View>
-                  {r.fromProfile.location ? (
-                    <View style={styles.metaRow}>
-                      <MapPin size={11} color={colors.textTertiary} />
-                      <Text style={[styles.metaText, { color: colors.textTertiary }]}>{r.fromProfile.location}</Text>
-                    </View>
-                  ) : null}
-                  <Text style={[styles.bio, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {r.fromProfile.bio || 'Wants to connect'}
-                  </Text>
-                </View>
-                <View style={styles.requestBtns}>
-                  <TouchableOpacity style={styles.approveBtn} onPress={() => approveRequest(r)}>
-                    <Check size={16} color="#10B981" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.declineBtn, { backgroundColor: colors.live + '20' }]} onPress={() => rejectRequest(r)}>
-                    <X size={16} color={colors.live} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </>
+            {last && !p?.typing && (
+              <Text style={[styles.rowSub, { color: colors.textSecondary, flexShrink: 0 }]} numberOfLines={1}>{"\u00A0· "}{shortAgo(last.timestamp)}</Text>
+            )}
+          </View>
+        </View>
+        {unread ? (
+          <View style={[styles.unreadDot, { backgroundColor: colors.accent }]} />
+        ) : (
+          <TouchableOpacity onPress={() => openChat(c.participantId)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Camera size={24} color={colors.textSecondary} strokeWidth={1.8} />
+          </TouchableOpacity>
         )}
-
-        {outgoingRequests.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary, marginTop: 20 }]}>Sent</Text>
-            {outgoingRequests.map((r) => (
-              <View key={r.id} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Image source={{ uri: r.toProfile?.avatar }} style={[styles.avatar, { backgroundColor: colors.backgroundTertiary }]} />
-                <View style={styles.cardContent}>
-                  <Text style={[styles.cardName, { color: colors.text }]}>{r.toProfile?.name}</Text>
-                  <View style={styles.metaRow}>
-                    <Clock size={11} color={colors.textTertiary} />
-                    <Text style={[styles.metaText, { color: colors.textTertiary }]}>Pending</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </>
-        )}
-      </>
+      </TouchableOpacity>
     );
   };
+
+  const listHeader = (
+    <View>
+      {/* Search */}
+      <View style={[styles.search, { backgroundColor: colors.backgroundTertiary }]}>
+        <Search size={17} color={colors.textTertiary} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search"
+          placeholderTextColor={colors.textTertiary}
+          style={[styles.searchInput, { color: colors.text }]}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          testID="inbox-search"
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <X size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Active / recent people */}
+      {!q && peopleRow.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peopleRow}>
+          {peopleRow.map((c) => (
+            <TouchableOpacity key={c.id} style={styles.person} onPress={() => openChat(c.participantId)} activeOpacity={0.7}>
+              <Avatar uri={c.participantAvatar} size={70} bg={colors.backgroundTertiary} online={presence[c.participantId]?.online} ring={colors.background} />
+              <Text style={[styles.personName, { color: colors.textSecondary }]} numberOfLines={1}>
+                {c.participantName.split(' ')[0]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Section title */}
+      <View style={styles.sectionRow}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Messages</Text>
+        <TouchableOpacity onPress={() => router.push('/notifications?requests=1' as any)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={[styles.requestsLink, { color: requestCount ? colors.accent : colors.textSecondary }]}>
+            Requests{requestCount ? ` (${requestCount})` : ''}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const newPeople = q ? peopleHits.filter((p) => !conversations.some((c) => c.participantId === p.id)) : [];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-        {/* Tab switcher */}
-        <View style={[styles.segmented, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {TABS.map((tab) => {
-            const active = activeTab === tab.id;
-            const Icon = tab.icon;
-            const badge = tab.id === 'notifications' ? notificationCount : tab.id === 'messages' ? messaging.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0) : requestCount;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                style={[styles.segment, active && { backgroundColor: colors.accent }]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveTab(tab.id);
-                }}
-              >
-                <Icon size={16} color={active ? '#FFF' : colors.textSecondary} />
-                <Text style={[styles.segmentLabel, { color: active ? '#FFF' : colors.textSecondary }]}>{tab.label}</Text>
-                {badge > 0 && (
-                  <View style={[styles.segmentBadge, { backgroundColor: active ? 'rgba(255,255,255,0.92)' : colors.accent }]}>
-                    <Text style={[styles.segmentBadgeText, { color: active ? colors.accent : '#FFF' }]}>{badge}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={styles.headerSide}>
+          <ChevronLeft size={30} color={colors.text} strokeWidth={2.2} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+          {user?.username || user?.fullName || 'Messages'}
+        </Text>
+        <TouchableOpacity
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setComposeOpen(true); }}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.headerSide, { alignItems: 'flex-end' }]}
+          accessibilityLabel="New message"
+          testID="inbox-new-message"
+        >
+          <SquarePen size={24} color={colors.text} strokeWidth={1.9} />
+        </TouchableOpacity>
       </View>
 
-      {/* Content */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollInner}
-        showsVerticalScrollIndicator={false}
-        onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
+      <FlatList
+        data={filtered}
+        keyExtractor={(c) => c.id}
+        renderItem={renderRow}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />}
+        ListFooterComponent={
+          q ? (
+            <View>
+              {(searchingPeople || newPeople.length > 0) && (
+                <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 16, marginTop: 16, marginBottom: 6 }]}>More people</Text>
+              )}
+              {searchingPeople && <ActivityIndicator style={{ marginTop: 8 }} color={colors.textSecondary} />}
+              {newPeople.map((p) => (
+                <TouchableOpacity key={p.id} style={styles.row} onPress={() => openChat(p.id)} activeOpacity={0.6}>
+                  <Avatar uri={p.avatar} size={56} bg={colors.backgroundTertiary} ring={colors.background} />
+                  <View style={styles.rowBody}>
+                    <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>{p.name}</Text>
+                    {!!p.username && <Text style={[styles.rowSub, { color: colors.textSecondary }]} numberOfLines={1}>{p.username}</Text>}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : undefined
         }
-      >
-        <Animated.View style={{ opacity: fadeAnim }}>
-          {activeTab === 'notifications' ? renderNotifications() : activeTab === 'messages' ? renderMessages() : renderRequests()}
-        </Animated.View>
-      </ScrollView>
+        ListEmptyComponent={
+          q ? undefined : (
+            <View style={styles.empty}>
+              <View style={[styles.emptyCircle, { borderColor: colors.text }]}>
+                <MessageCircle size={42} color={colors.text} strokeWidth={1.5} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>Your messages</Text>
+              <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Send private photos, voice notes and messages to a friend.</Text>
+              <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.accent }]} onPress={() => setComposeOpen(true)}>
+                <Text style={styles.primaryBtnText}>Send message</Text>
+              </TouchableOpacity>
+            </View>
+          )
+        }
+      />
+
+      {/* New message */}
+      <Modal visible={composeOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setComposeOpen(false)}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+          <View style={[styles.header, { paddingTop: 14 }]}>
+            <TouchableOpacity onPress={() => setComposeOpen(false)} style={styles.headerSide} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <X size={26} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>New message</Text>
+            <View style={styles.headerSide} />
+          </View>
+          <View style={[styles.toRow, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.toLabel, { color: colors.text }]}>To:</Text>
+            <TextInput
+              value={composeQuery}
+              onChangeText={setComposeQuery}
+              placeholder="Search..."
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.searchInput, { color: colors.text }]}
+              autoFocus
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+          </View>
+          <FlatList
+            data={composeQuery.trim().length >= 2 ? composeHits : sorted.map((c) => ({ id: c.participantId, name: c.participantName, username: c.participantUsername, avatar: c.participantAvatar }))}
+            keyExtractor={(p) => p.id}
+            keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 16, marginTop: 12, marginBottom: 4 }]}>
+                {composeQuery.trim().length >= 2 ? 'Results' : 'Suggested'}
+              </Text>
+            }
+            renderItem={({ item: p }) => (
+              <TouchableOpacity style={styles.row} onPress={() => openChat(p.id)} activeOpacity={0.6}>
+                <Avatar uri={p.avatar} size={48} bg={colors.backgroundTertiary} online={presence[p.id]?.online} ring={colors.background} />
+                <View style={styles.rowBody}>
+                  <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>{p.name}</Text>
+                  {!!p.username && <Text style={[styles.rowSub, { color: colors.textSecondary }]} numberOfLines={1}>{p.username}</Text>}
+                </View>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={[styles.emptySub, { color: colors.textSecondary, marginTop: 30 }]}>
+                {composeQuery.trim().length >= 2 ? 'No account found.' : 'Search for someone to message.'}
+              </Text>
+            }
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1 },
-  segmented: { flexDirection: 'row', borderRadius: 12, padding: 4, borderWidth: 1 },
-  segment: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 9 },
-  segmentLabel: { fontSize: 13, fontWeight: '600' },
-  segmentBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  segmentBadgeText: { fontSize: 10, fontWeight: '700' },
-  notifFilterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10, marginBottom: 12, borderBottomWidth: 1 },
-  notifFilterTab: { paddingVertical: 6, alignItems: 'center' },
-  notifFilterText: { fontSize: 13 },
-  notifFilterIndicator: { height: 3, borderRadius: 2, marginTop: 4, width: '100%' },
-  markReadBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  markReadText: { fontSize: 12, fontWeight: '600' },
-  scroll: { flex: 1 },
-  scrollInner: { padding: 16, paddingBottom: 100 },
-  empty: { alignItems: 'center', paddingVertical: 60, gap: 10 },
-  emptyIcon: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  emptyTitle: { fontSize: 17, fontWeight: '600' },
-  emptySub: { fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 20 },
-  card: {
-    flexDirection: 'row', alignItems: 'center', padding: 14,
-    borderRadius: 14, marginBottom: 10, borderWidth: 1,
-  },
-  requestCard: {
-    flexDirection: 'row', alignItems: 'flex-start', padding: 14,
-    borderRadius: 14, marginBottom: 10, borderWidth: 1,
-  },
-  avatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
-  cardContent: { flex: 1 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
-  cardName: { fontSize: 15, fontWeight: '600', flex: 1 },
-  cardTime: { fontSize: 12, marginLeft: 8 },
-  cardPreview: { fontSize: 13, lineHeight: 18 },
-  cardPrice: { fontSize: 13, fontWeight: '700', marginTop: 2 },
-  unread: {
-    width: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', marginLeft: 8,
-  },
-  unreadText: { fontSize: 10, fontWeight: '700', color: '#FFF' },
-  sectionLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.3 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
-  metaText: { fontSize: 12 },
-  bio: { fontSize: 13, lineHeight: 18 },
-  requestBtns: { flexDirection: 'column', gap: 6, marginLeft: 8 },
-  approveBtn: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: '#10B98120',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  declineBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingBottom: 8 },
+  headerSide: { width: 44, justifyContent: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: '700', flex: 1, textAlign: 'center' },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 4, paddingHorizontal: 12, height: 38, borderRadius: 12 },
+  searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  peopleRow: { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 6, gap: 6 },
+  person: { width: 80, alignItems: 'center', gap: 6 },
+  personName: { fontSize: 12, maxWidth: 76 },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  sectionTitle: { fontSize: 16, fontWeight: '700' },
+  requestsLink: { fontSize: 15, fontWeight: '600' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 12 },
+  rowBody: { flex: 1, justifyContent: 'center' },
+  rowName: { fontSize: 15 },
+  rowSubLine: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  rowSub: { fontSize: 14 },
+  unreadDot: { width: 9, height: 9, borderRadius: 5 },
+  empty: { alignItems: 'center', paddingHorizontal: 40, paddingTop: 70, gap: 10 },
+  emptyCircle: { width: 96, height: 96, borderRadius: 48, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  emptyTitle: { fontSize: 20, fontWeight: '700' },
+  emptySub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  primaryBtn: { marginTop: 10, paddingHorizontal: 20, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnText: { color: '#FFF', fontWeight: '600', fontSize: 15 },
+  toRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  toLabel: { fontSize: 16, fontWeight: '600' },
 });

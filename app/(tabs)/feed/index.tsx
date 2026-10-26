@@ -1,7 +1,7 @@
 import {
   MapPin, Sparkles, Dumbbell, Utensils, Palette,
   Plane, Heart, Music, Play, Plus,
-  Bell, Wrench, Bookmark,
+   Wrench, Bookmark,
   FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   Star, MessagesSquare, Forward
@@ -47,9 +47,9 @@ import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostCom
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
-import { useMessaging } from '@/contexts/MessagingContext';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import AppVideo from '@/components/AppVideo';
+import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -632,8 +632,6 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
-  const { conversations: messagingConversations } = useMessaging();
-  const unreadTotal = useMemo(() => messagingConversations.reduce((s, c) => s + (c.unreadCount || 0), 0), [messagingConversations]);
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
@@ -1111,22 +1109,16 @@ export default function FeedScreen() {
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => router.push('/(tabs)/search' as any)}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              style={{ marginRight: 16 }}
+              accessibilityLabel="Search"
             >
-              <Search size={20} color={colors.text} />
+              <Search size={24} color={colors.text} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/inbox')}
-            >
-              <Bell size={20} color={colors.text} />
-              {unreadTotal > 0 && (
-                <View style={[styles.badgeDot, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.badgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            <View style={{ marginLeft: 6 }}>
+              <HeaderActivityButtons size={24} />
+            </View>
           </View>
         </View>
 

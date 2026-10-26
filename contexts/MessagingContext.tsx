@@ -283,32 +283,33 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
       }
     };
 
-    const channel = supabase
-      .channel(`messaging-${me}`)
-    channelRef.current = channel;
-    channel
+    // ── Presence ("Active now" + "typing…") ──
+    // One shared presence channel keyed by user id. The old code put every user
+    // on their own private channel (`messaging-<me>`), so nobody ever saw anyone
+    // else online or typing.
+    const presenceChannel = supabase.channel('messaging-presence', {
+      config: { presence: { key: me } },
+    });
+    channelRef.current = presenceChannel;
+    presenceChannel
       .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState() as Record<string, any>;
+        const state = presenceChannel.presenceState() as Record<string, any[]>;
         const next: Record<string, { typing?: boolean; online?: boolean }> = {};
         for (const key of Object.keys(state)) {
-          const peer = state[key]?.[0];
-          if (!peer || peer.user_id === me) continue;
-          next[key] = { typing: !!peer.typing, online: true };
+          if (key === me) continue;
+          const metas = state[key] || [];
+          next[key] = { online: true, typing: metas.some((m: any) => m?.typing_to === me) };
         }
         setPresence(next);
       })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        const peer = newPresences?.[0];
-        if (!peer || peer.user_id === me) return;
-        setPresence(prev => ({ ...prev, [key]: { typing: false, online: true } }));
-      })
-      .on('presence', { event: 'leave' }, ({ key }) => {
-        setPresence(prev => {
-          const cp = { ...prev };
-          delete cp[key];
-          return cp;
-        });
-      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          presenceChannel.track({ user_id: me, typing_to: null }).catch(() => {});
+        }
+      });
+
+    const channel = supabase.channel(`messaging-${me}`);
+    channel
       .on('postgres_changes',
         // Realtime filters can't contain sub-queries — the previous
         // `conversation_id=in.(select …)` filter was invalid, so incoming
@@ -409,6 +410,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(presenceChannel);
+      if (channelRef.current === presenceChannel) channelRef.current = null;
     };
   }, [authUser?.id]);
 
@@ -578,7 +581,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
           .select('id, content, created_at')
           .maybeSingle();
 
-        if (!row) return;
+        // Never swap in a row without an id (would crash anything reading message.id)
+        if (!row || !(row as any).id) return;
         // Keep the conversation list ordered correctly on other devices.
         supabase
           .from('conversations')
@@ -739,8 +743,8 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     const ch = channelRef.current;
     if (!ch) return;
     try {
-      // Channel presence is keyed by user id; use typed payload so peers can read it.
-      ch.track({ user_id: authUser?.id, typing } as any);
+      // Presence is keyed by user id; peers check `typing_to === their id`.
+      ch.track({ user_id: authUser?.id, typing_to: typing ? participantId : null } as any);
     } catch (e) {
       logger.warn('MessagingContext', 'Typing broadcast failed', { error: String(e) });
     }

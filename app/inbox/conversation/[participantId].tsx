@@ -1,5 +1,5 @@
-import { ArrowLeft, Send, AtSign, Phone, BadgeCheck, Heart, MessageCircle, ExternalLink, Mic, StopCircle, PlayCircle, PauseCircle, Tag, ImagePlus, Check, CheckCheck } from 'lucide-react-native';
-import React, { useState, useRef, useEffect } from 'react';
+import { ChevronLeft, Phone, Video, BadgeCheck, Heart, MessageCircle, Mic, Play, Pause, Tag, Image as ImageIcon, Camera, Trash2, ArrowUp, Smile } from 'lucide-react-native';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
   Image,
   Alert,
   Modal,
+  Animated,
+  ActionSheetIOS,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { ScrollViewInstance } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -67,8 +70,8 @@ export default function ConversationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
-  const { colors } = useTheme();
-  const { getConversation, sendMessage, markConversationAsRead, deleteMessage, loadEarlierMessages } = useMessaging();
+  const { colors, isDark } = useTheme();
+  const { getConversation, sendMessage, markConversationAsRead, deleteMessage, loadEarlierMessages, presence, notifyTyping } = useMessaging();
   const { user: authUser } = useAuth();
   const [messageText, setMessageText] = useState('');
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
@@ -217,23 +220,36 @@ export default function ConversationScreen() {
     }
   };
 
-  // ── Image attachments ──
-  const pickImage = async () => {
+  // Discard an in-progress voice note (trash button while recording)
+  const cancelRecording = async () => {
+    const rec = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+    setRecordingDuration(0);
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    try { await rec?.stop(); } catch {}
+  };
+
+  // ── Image attachments (gallery or camera) ──
+  const pickImage = async (source: 'library' | 'camera' = 'library') => {
     if (!participantId) return;
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const perm = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Permission Required', 'We need access to your photos to send images.');
+        Alert.alert('Permission Required', source === 'camera'
+          ? 'We need camera access to send photos.'
+          : 'We need access to your photos to send images.');
         return;
       }
     }
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
+      const options = { mediaTypes: ['images'] as ImagePicker.MediaType[], allowsEditing: false, quality: 0.8 };
+      const result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
       setImageUploading(true);
@@ -257,19 +273,6 @@ export default function ConversationScreen() {
     } finally {
       setImageUploading(false);
     }
-  };
-
-  const resolveImageUrl = async (meta: any) => {
-    const path = meta?.path || meta?.url;
-    if (!path) return null;
-    if (String(path).startsWith('http')) return path;
-    if (imageUrlCache[path]) return imageUrlCache[path];
-    const { data: signed } = await supabase.storage.from('messages').createSignedUrl(path, 3600);
-    if (signed?.signedUrl) {
-      setImageUrlCache(prev => ({ ...prev, [path]: signed.signedUrl }));
-      return signed.signedUrl;
-    }
-    return null;
   };
 
   const togglePlayAudio = async (voiceNote: any, messageId: string) => {
@@ -323,6 +326,7 @@ export default function ConversationScreen() {
 
       sendMessage(participantId, messageText.trim());
       setMessageText('');
+      stopTyping();
       setShowMentionSuggestions(false);
       
       setTimeout(() => {
@@ -331,8 +335,28 @@ export default function ConversationScreen() {
     }
   };
 
+  // ── "typing…" signal for the other person (cleared after 3s idle) ──
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
+  const stopTyping = () => {
+    if (typingTimerRef.current) { clearTimeout(typingTimerRef.current); typingTimerRef.current = null; }
+    if (isTypingRef.current && participantId) notifyTyping(participantId, false);
+    isTypingRef.current = false;
+  };
+  useEffect(() => () => {
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (isTypingRef.current && participantId) notifyTyping(participantId, false);
+  }, [participantId, notifyTyping]);
+
   const handleTextChange = (text: string) => {
     setMessageText(text);
+    if (participantId && text.trim()) {
+      if (!isTypingRef.current) { notifyTyping(participantId, true); isTypingRef.current = true; }
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(stopTyping, 3000);
+    } else {
+      stopTyping();
+    }
 
     const lastWord = text.split(/\s/).pop() || '';
     if (lastWord.startsWith('@') && lastWord.length > 1) {
@@ -397,424 +421,406 @@ export default function ConversationScreen() {
     return () => { cancelled = true; };
   }, [mentionQuery]);
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Instagram-style rendering
+  // ─────────────────────────────────────────────────────────────────────────
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+  const myId = authUser?.id || '';
+  const peer = presence[participantId || ''];
+  const isOnline = !!peer?.online;
+  const isTyping = !!peer?.typing;
+  const theirBubble = isDark ? '#262626' : '#EFEFEF';
+  const messages = useMemo(() => conversation?.messages || [], [conversation?.messages]);
+
+  // Last message I sent — gets the "Seen / Sent" label under it.
+  const lastMineId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].senderId === myId) return messages[i].id;
+    return null;
+  }, [messages, myId]);
+
+  const GROUP_GAP_MS = 5 * 60 * 1000;
+  const SEPARATOR_GAP_MS = 30 * 60 * 1000;
+  const ts = (m?: Message) => (m ? new Date(m.timestamp).getTime() : 0);
+
+  const separatorLabel = (iso: string) => {
+    const d = new Date(iso);
+    const now = new Date();
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const sameDay = d.toDateString() === now.toDateString();
+    const yest = new Date(now); yest.setDate(now.getDate() - 1);
+    if (sameDay) return `Today ${time}`;
+    if (d.toDateString() === yest.toDateString()) return `Yesterday ${time}`;
+    const diffDays = (now.getTime() - d.getTime()) / 86400000;
+    if (diffDays < 7) return `${d.toLocaleDateString([], { weekday: 'long' })} ${time}`;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })}, ${time}`;
   };
+
+  const onMessageLongPress = (message: Message) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const isMe = message.senderId === myId;
+    const label = isMe ? 'Unsend' : 'Delete';
+    const run = () => deleteMessage(message.id, participantId || '');
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancel', label], destructiveButtonIndex: 1, cancelButtonIndex: 0 },
+        (i) => { if (i === 1) run(); },
+      );
+    } else {
+      Alert.alert(isMe ? 'Unsend message?' : 'Delete message?', isMe ? 'This removes it for everyone.' : undefined, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: label, style: 'destructive', onPress: run },
+      ]);
+    }
+  };
+
+  const renderTextWithMentions = (text: string, isMe: boolean) =>
+    text.split(/(@\w+)/g).map((part, i) =>
+      part.startsWith('@') ? (
+        <Text key={i} style={{ fontWeight: '700', color: isMe ? '#FFFFFF' : colors.accent }}>{part}</Text>
+      ) : (
+        part
+      ),
+    );
 
   const renderSharedPost = (sharedPost: SharedPost) => {
     const post = sharedPost.post;
-    
-    return (
-      <TouchableOpacity 
-        style={[styles.sharedPostCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-        onPress={() => {
-          if (Platform.OS !== 'web') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }
-          router.push(`/user/${post.user.id}` as any);
-        }}
-        activeOpacity={0.8}
-      >
-        <View style={styles.sharedPostHeader}>
-          <Image source={{ uri: post.user.avatar }} style={styles.sharedPostAvatar} />
-          <View style={styles.sharedPostUserInfo}>
-            <View style={styles.sharedPostNameRow}>
-              <Text style={[styles.sharedPostUserName, { color: colors.text }]} numberOfLines={1}>
-                {post.user.name}
-              </Text>
-              {post.user.isVerified && (
-                <BadgeCheck size={12} color={colors.accent} />
-              )}
-            </View>
-            <Text style={[styles.sharedPostUsername, { color: colors.textTertiary }]}>
-              @{post.user.username}
-            </Text>
-          </View>
-          <ExternalLink size={16} color={colors.textTertiary} />
-        </View>
-        
-        <Text style={[styles.sharedPostContent, { color: colors.textSecondary }]} numberOfLines={3}>
-          {post.content}
-        </Text>
-        
-        {post.imageUrl && (
-          <Image 
-            source={{ uri: post.imageUrl }} 
-            style={styles.sharedPostImage}
-            resizeMode="cover"
-          />
-        )}
-        
-        <View style={styles.sharedPostStats}>
-          <View style={styles.sharedPostStat}>
-            <Heart size={12} color={colors.textTertiary} />
-            <Text style={[styles.sharedPostStatText, { color: colors.textTertiary }]}>{post.likes}</Text>
-          </View>
-          <View style={styles.sharedPostStat}>
-            <MessageCircle size={12} color={colors.textTertiary} />
-            <Text style={[styles.sharedPostStatText, { color: colors.textTertiary }]}>{post.comments}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderBundleCard = (card: any, isMe: boolean) => {
     return (
       <TouchableOpacity
-        style={[styles.bundleCard, { backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : colors.backgroundTertiary, borderColor: colors.border }]}
-        activeOpacity={0.8}
+        style={[styles.card, { backgroundColor: theirBubble }]}
+        onPress={() => router.push(`/user/${post.user.id}` as any)}
+        activeOpacity={0.85}
       >
-        <View style={styles.bundleCardHeader}>
-          <Tag size={14} color={colors.accent} />
-          <Text style={[styles.bundleCardType, { color: colors.accent }]}>
-            {card.type === 'skill_card' ? 'Skill Offer' : 'Bundle Offer'}
-          </Text>
+        <View style={styles.cardHeader}>
+          <Image source={{ uri: post.user.avatar }} style={styles.cardAvatar} />
+          <Text style={[styles.cardUser, { color: colors.text }]} numberOfLines={1}>{post.user.username || post.user.name}</Text>
+          {post.user.isVerified && <BadgeCheck size={13} color={colors.accent} />}
         </View>
-        {card.image_url ? (
-          <Image source={{ uri: card.image_url }} style={styles.bundleCardImage} resizeMode="cover" />
-        ) : null}
-        <View style={styles.bundleCardBody}>
-          <Text style={[styles.bundleCardTitle, { color: isMe ? '#fff' : colors.text }]} numberOfLines={1}>
-            {card.title}
+        {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.cardImage} resizeMode="cover" /> : null}
+        {!!post.content && (
+          <Text style={[styles.cardCaption, { color: colors.text }]} numberOfLines={2}>
+            <Text style={{ fontWeight: '700' }}>{post.user.username || post.user.name} </Text>{post.content}
           </Text>
-          {card.price ? (
-            <Text style={[styles.bundleCardPrice, { color: colors.accent }]}>{card.price}</Text>
-          ) : null}
-          {card.description ? (
-            <Text style={[styles.bundleCardDesc, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]} numberOfLines={2}>
-              {card.description}
-            </Text>
-          ) : null}
+        )}
+        <View style={styles.cardStats}>
+          <Heart size={13} color={colors.textSecondary} />
+          <Text style={[styles.cardStatText, { color: colors.textSecondary }]}>{post.likes}</Text>
+          <MessageCircle size={13} color={colors.textSecondary} />
+          <Text style={[styles.cardStatText, { color: colors.textSecondary }]}>{post.comments}</Text>
         </View>
       </TouchableOpacity>
     );
   };
 
-  const renderTicks = (message: Message) => {
-    const pending = message.id.startsWith('pending-');
-    if (message.read) {
-      return <CheckCheck size={14} color="#67B7F7" />;
-    }
-    if (message.delivered || !pending) {
-      return <CheckCheck size={14} color="rgba(255,255,255,0.7)" />;
-    }
-    return <Check size={14} color="rgba(255,255,255,0.7)" />;
+  const renderOfferCard = (card: any) => (
+    <View style={[styles.card, { backgroundColor: theirBubble }]}>
+      {card.image_url ? <Image source={{ uri: card.image_url }} style={styles.cardImage} resizeMode="cover" /> : null}
+      <View style={{ padding: 12, gap: 3 }}>
+        <View style={styles.offerTag}>
+          <Tag size={12} color={colors.accent} />
+          <Text style={[styles.offerTagText, { color: colors.accent }]}>{card.type === 'skill_card' ? 'Skill' : 'Bundle'}</Text>
+        </View>
+        <Text style={[styles.offerTitle, { color: colors.text }]} numberOfLines={2}>{card.title}</Text>
+        {!!card.price && <Text style={[styles.offerPrice, { color: colors.text }]}>{card.price}</Text>}
+        {!!card.description && <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={2}>{card.description}</Text>}
+      </View>
+    </View>
+  );
+
+  const WAVE = [6, 12, 18, 10, 22, 14, 8, 20, 16, 10, 24, 12, 18, 8, 14, 20, 10, 16, 6, 12];
+  const renderVoice = (voice: any, message: Message, isMe: boolean) => {
+    const playing = playingAudioId === message.id;
+    const fg = isMe ? '#FFFFFF' : colors.text;
+    const secs = Number(voice.duration) || 0;
+    return (
+      <TouchableOpacity style={styles.voiceRow} onPress={() => togglePlayAudio(voice, message.id)} activeOpacity={0.8}>
+        {playing ? <Pause size={20} color={fg} fill={fg} /> : <Play size={20} color={fg} fill={fg} />}
+        <View style={styles.wave}>
+          {WAVE.map((h, i) => (
+            <View key={i} style={{ width: 2.5, height: h, borderRadius: 2, backgroundColor: fg, opacity: playing ? 1 : 0.75 }} />
+          ))}
+        </View>
+        <Text style={[styles.voiceTime, { color: fg }]}>{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</Text>
+      </TouchableOpacity>
+    );
   };
 
-  const renderMessage = (message: Message) => {
-    const isMe = message.senderId === (authUser?.id || '');
-    const user = isMe ? { name: 'You', avatar: ((authUser as any)?.avatar as string) || myAvatar } : participant;
+  const bubbleRadius = (isMe: boolean, joinedAbove: boolean, joinedBelow: boolean) => {
+    const R = 22, r = 5;
+    return isMe
+      ? { borderTopLeftRadius: R, borderBottomLeftRadius: R, borderTopRightRadius: joinedAbove ? r : R, borderBottomRightRadius: joinedBelow ? r : R }
+      : { borderTopRightRadius: R, borderBottomRightRadius: R, borderTopLeftRadius: joinedAbove ? r : R, borderBottomLeftRadius: joinedBelow ? r : R };
+  };
 
-    const textWithMentions = message.text.split(/(@\w+)/g).map((part, i) => {
-      if (part.startsWith('@')) {
-        return (
-          <Text key={i} style={styles.mentionText}>
-            {part}
-          </Text>
-        );
-      }
-      return part;
-    });
+  const renderMessage = (message: Message, index: number) => {
+    const prev = messages[index - 1];
+    const next = messages[index + 1];
+    const isMe = message.senderId === myId;
+    const showSeparator = !prev || ts(message) - ts(prev) > SEPARATOR_GAP_MS;
+    const joinedAbove = !!prev && !showSeparator && prev.senderId === message.senderId && ts(message) - ts(prev) < GROUP_GAP_MS;
+    const nextSeparates = !next || ts(next) - ts(message) > SEPARATOR_GAP_MS;
+    const joinedBelow = !!next && !nextSeparates && next.senderId === message.senderId && ts(next) - ts(message) < GROUP_GAP_MS;
+    const meta: any = (message as any).metadata || {};
+    const offer = meta.bundle_card || meta.skill_card;
+    const text = (message.text || '').trim();
+    const pending = String(message.id || '').startsWith('pending-');
 
-    const handleLongPress = () => {
-      Alert.alert('Delete Message', 'Remove this message?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(message.id, participantId || '') },
-      ]);
-    };
+    let body: React.ReactNode = null;
+    if (meta.image) {
+      const uri = imageUrlCache[meta.image.path] || meta.image.url || null;
+      const w = Number(meta.image.width) || 3;
+      const h = Number(meta.image.height) || 4;
+      const width = 230;
+      const height = Math.min(320, Math.max(140, (width * h) / w));
+      body = uri ? (
+        <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerImage(uri)} onLongPress={() => onMessageLongPress(message)}>
+          <Image source={{ uri }} style={[styles.photo, { width, height, opacity: pending ? 0.6 : 1 }]} resizeMode="cover" />
+        </TouchableOpacity>
+      ) : (
+        <View style={[styles.photo, { width, height, backgroundColor: theirBubble }]} />
+      );
+    } else if (message.sharedPost) {
+      body = renderSharedPost(message.sharedPost);
+    } else if (offer) {
+      body = renderOfferCard(offer);
+    }
+
+    const bubbleContent = meta.voice_note ? renderVoice(meta.voice_note, message, isMe) : text ? (
+      <Text style={[styles.msgText, { color: isMe ? '#FFFFFF' : colors.text }]}>{renderTextWithMentions(text, isMe)}</Text>
+    ) : null;
+
+    const bubbleStyle = [styles.bubble, bubbleRadius(isMe, joinedAbove, joinedBelow)];
 
     return (
-      <View
-        key={message.id}
-        style={[
-          styles.messageContainer,
-          isMe ? styles.myMessageContainer : styles.theirMessageContainer,
-        ]}
-      >
-        {!isMe && (
-          <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
-        )}
-        <TouchableOpacity 
-          activeOpacity={0.7}
-          onLongPress={handleLongPress}
-          delayLongPress={400}
-          style={[
-            styles.messageBubble, 
-            isMe ? [styles.myMessageBubble, { backgroundColor: colors.accent }] : [styles.theirMessageBubble, { backgroundColor: colors.surface, borderColor: colors.border }]
-          ]}>
-          {message.sharedPost && (
-            <>
-              <Text style={[styles.sharedLabel, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
-                Shared a post
-              </Text>
-              {renderSharedPost(message.sharedPost)}
-            </>
+      <View key={message.id}>
+        {showSeparator && <Text style={[styles.separator, { color: colors.textTertiary }]}>{separatorLabel(message.timestamp)}</Text>}
+        <View style={[styles.msgRow, isMe ? styles.rowMine : styles.rowTheirs, { marginTop: joinedAbove ? 2 : 8 }]}>
+          {!isMe && (
+            <View style={styles.msgAvatarSlot}>
+              {!joinedBelow && <Image source={{ uri: participant.avatar }} style={styles.msgAvatar} />}
+            </View>
           )}
-          {((message as any).metadata?.bundle_card || (message as any).metadata?.skill_card) && (
-            <>
-              <Text style={[styles.sharedLabel, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
-                Grabbed your offer ↓
-              </Text>
-              {renderBundleCard((message as any).metadata?.bundle_card || (message as any).metadata?.skill_card, isMe)}
-            </>
-          )}
-          {(message as any).metadata?.voice_note && (
-            <TouchableOpacity
-              style={styles.voicePlayButton}
-              onPress={() => togglePlayAudio((message as any).metadata.voice_note, message.id)}
-            >
-              {playingAudioId === message.id ? (
-                <PauseCircle size={24} color={isMe ? '#FFFFFF' : colors.accent} />
-              ) : (
-                <PlayCircle size={24} color={isMe ? '#FFFFFF' : colors.accent} />
-              )}
-              <Text style={[styles.voiceDuration, { color: isMe ? '#FFFFFF' : colors.text }]}>
-                {(message as any).metadata.voice_note.duration}s
-              </Text>
-            </TouchableOpacity>
-          )}
-          {(message as any).metadata?.image && (() => {
-            const meta = (message as any).metadata.image;
-            const uri = imageUrlCache[meta.path] || meta.url || null;
-            if (!uri) {
-              return (
-                <View style={[styles.imagePlaceholder, { backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : colors.backgroundTertiary }]}>
-                  <ImagePlus size={24} color={isMe ? '#FFFFFF' : colors.textTertiary} />
-                </View>
-              );
-            }
-            return (
-              <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerImage(uri)}>
-                <Image
-                  source={{ uri }}
-                  style={styles.messageImage}
-                  resizeMode="cover"
-                />
+          <View style={{ maxWidth: '75%', alignItems: isMe ? 'flex-end' : 'flex-start', gap: 2 }}>
+            {body}
+            {bubbleContent && (
+              <TouchableOpacity activeOpacity={0.85} onLongPress={() => onMessageLongPress(message)} delayLongPress={350}>
+                {isMe ? (
+                  <LinearGradient
+                    colors={['#7C3AED', '#3B82F6']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[bubbleStyle, { opacity: pending ? 0.7 : 1 }]}
+                  >
+                    {bubbleContent}
+                  </LinearGradient>
+                ) : (
+                  <View style={[bubbleStyle, { backgroundColor: theirBubble }]}>{bubbleContent}</View>
+                )}
               </TouchableOpacity>
-            );
-          })()}
-          {message.text.trim() && (
-            <Text style={[styles.messageText, isMe ? styles.myMessageText : { color: colors.textSecondary }]}>
-              {textWithMentions}
-            </Text>
-          )}
-          <View style={styles.messageMetaRow}>
-            <Text style={[styles.messageTimestamp, isMe ? styles.myMessageTimestamp : { color: colors.textTertiary }]}>
-              {formatTimestamp(message.timestamp)}
-            </Text>
-            {isMe && renderTicks(message)}
+            )}
           </View>
-          </TouchableOpacity>
-        {isMe && (
-          <Image source={{ uri: user.avatar }} style={styles.messageAvatar} />
+        </View>
+        {isMe && message.id === lastMineId && (
+          <Text style={[styles.status, { color: colors.textTertiary }]}>
+            {pending ? 'Sending…' : message.read ? 'Seen' : 'Sent'}
+          </Text>
         )}
       </View>
     );
   };
 
-  const messages = conversation?.messages || [];
+  // Animated "typing…" bubble
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    if (!isTyping) return;
+    const pulse = (v: Animated.Value, delay: number) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(v, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.timing(v, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+        Animated.delay(450 - delay),
+      ]));
+    const anims = [pulse(dot1, 0), pulse(dot2, 150), pulse(dot3, 300)];
+    anims.forEach((a) => a.start());
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
+    return () => anims.forEach((a) => a.stop());
+  }, [isTyping, dot1, dot2, dot3]);
+
+  const hasText = messageText.trim().length > 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <ArrowLeft size={24} color={colors.text} />
+      {/* ── Header ── */}
+      <View style={[styles.header, { paddingTop: insets.top + 4, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={{ paddingRight: 4 }}>
+          <ChevronLeft size={30} color={colors.text} strokeWidth={2.2} />
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.headerUser}
-          onPress={() => router.push(`/user/${participantId}` as any)}
-          activeOpacity={0.7}
-        >
-          <Image source={{ uri: participant.avatar }} style={[styles.headerAvatar, { backgroundColor: colors.backgroundTertiary }]} />
+        <TouchableOpacity style={styles.headerUser} onPress={() => router.push(`/user/${participantId}` as any)} activeOpacity={0.7}>
           <View>
+            <Image source={{ uri: participant.avatar }} style={[styles.headerAvatar, { backgroundColor: colors.backgroundTertiary }]} />
+            {isOnline && <View style={[styles.onlineDot, { borderColor: colors.background }]} />}
+          </View>
+          <View style={{ flexShrink: 1 }}>
             <View style={styles.headerNameRow}>
-              <Text style={[styles.headerName, { color: colors.text }]}>{participant.name}</Text>
-              {participant.isVerified && (
-                <BadgeCheck size={14} color={colors.accent} />
-              )}
+              <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>{participant.name}</Text>
+              {participant.isVerified && <BadgeCheck size={14} color={colors.accent} />}
             </View>
-            <Text style={[styles.headerStatus, { color: colors.textSecondary }]}>@{participant.username}</Text>
+            <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+              {isTyping ? 'typing…' : isOnline ? 'Active now' : participant.username}
+            </Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.callButton, { backgroundColor: colors.accent + '20' }]}
-          onPress={() => {
-            Alert.alert('Call', `Call ${participant.name}?`, [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Call', onPress: startCall },
-            ]);
-          }}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Phone size={22} color={colors.accent} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => Alert.alert('Call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: startCall }])}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Audio call"
+          >
+            <Phone size={24} color={colors.text} strokeWidth={1.9} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => Alert.alert('Video call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: startCall }])}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Video call"
+          >
+            <Video size={26} color={colors.text} strokeWidth={1.9} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           ref={scrollViewRef}
-          style={styles.messagesScrollView}
-          contentContainerStyle={styles.messagesContent}
+          style={styles.flex}
+          contentContainerStyle={styles.thread}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: false })}
         >
-          {messages.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-                <Send size={32} color={colors.textTertiary} />
-              </View>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>Start the conversation</Text>
-              <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
-                Send a message or share something with {participant.name}
-              </Text>
-            </View>
+          {conversation?.hasMore ? (
+            <TouchableOpacity style={styles.loadEarlier} onPress={() => loadEarlierMessages(participantId || '')}>
+              <Text style={[styles.loadEarlierText, { color: colors.textSecondary }]}>Load earlier messages</Text>
+            </TouchableOpacity>
           ) : (
-            <>
-              {conversation?.hasMore && (
-                <TouchableOpacity
-                  style={[styles.loadEarlierBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  onPress={() => loadEarlierMessages(participantId || '')}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.loadEarlierText, { color: colors.accent }]}>Load earlier messages</Text>
-                </TouchableOpacity>
-              )}
-              {messages.map(renderMessage)}
-            </>
+            // Profile intro at the start of the thread, like Instagram
+            <View style={styles.intro}>
+              <Image source={{ uri: participant.avatar }} style={[styles.introAvatar, { backgroundColor: colors.backgroundTertiary }]} />
+              <Text style={[styles.introName, { color: colors.text }]}>{participant.name}</Text>
+              <Text style={[styles.introSub, { color: colors.textSecondary }]}>{participant.username} · Apparently</Text>
+              <TouchableOpacity
+                style={[styles.introBtn, { backgroundColor: colors.backgroundTertiary }]}
+                onPress={() => router.push(`/user/${participantId}` as any)}
+              >
+                <Text style={[styles.introBtnText, { color: colors.text }]}>View profile</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
+          {messages.map(renderMessage)}
+
+          {isTyping && (
+            <View style={[styles.msgRow, styles.rowTheirs, { marginTop: 8 }]}>
+              <View style={styles.msgAvatarSlot}>
+                <Image source={{ uri: participant.avatar }} style={styles.msgAvatar} />
+              </View>
+              <View style={[styles.bubble, styles.typingBubble, { backgroundColor: theirBubble }]}>
+                {[dot1, dot2, dot3].map((d, i) => (
+                  <Animated.View key={i} style={[styles.typingDot, { backgroundColor: colors.textSecondary, opacity: d }]} />
+                ))}
+              </View>
+            </View>
+          )}
         </ScrollView>
 
         {showMentionSuggestions && mentionUsers.length > 0 && (
-          <View style={[styles.mentionSuggestions, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mentionSuggestionsContent}
-            >
-              {mentionUsers.map((user) => (
-                <TouchableOpacity
-                  key={user.id}
-                  style={[styles.mentionSuggestion, { backgroundColor: colors.background, borderColor: colors.border }]}
-                  onPress={() => handleMentionSelect(user.username)}
-                >
-                  <Image source={{ uri: user.avatar }} style={[styles.mentionAvatar, { backgroundColor: colors.backgroundTertiary }]} />
-                  <Text style={[styles.mentionUsername, { color: colors.text }]}>@{user.username}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          <View style={[styles.mentions, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
+            {mentionUsers.map((u) => (
+              <TouchableOpacity key={u.id} style={styles.mentionRow} onPress={() => handleMentionSelect(u.username)}>
+                <Image source={{ uri: u.avatar }} style={[styles.mentionAvatar, { backgroundColor: colors.backgroundTertiary }]} />
+                <View>
+                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>{u.username}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{u.name}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
         )}
 
-        <View style={[styles.inputContainer, { paddingBottom: insets.bottom || 12, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-          {isRecording ? (
-            <View style={styles.recordingContainer}>
-              <View style={styles.recordingIndicator}>
-                <View style={[styles.recordingDot, { backgroundColor: '#EF4444' }]} />
-                <Text style={[styles.recordingTimer, { color: colors.text }]}>
-                  {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.stopRecordingBtn, { backgroundColor: '#EF4444' }]}
-                onPress={stopRecording}
-              >
-                <StopCircle size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={[styles.mentionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                onPress={() => {
-                  setMessageText(prev => prev + '@');
-                  setShowMentionSuggestions(true);
-                }}
-              >
-                <AtSign size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.mentionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                onPress={pickImage}
-                disabled={imageUploading}
-              >
-                <ImagePlus size={20} color={imageUploading ? colors.textTertiary : colors.textSecondary} />
-              </TouchableOpacity>
-              {!messageText.trim() && (
-                <TouchableOpacity
-                  style={[styles.micButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  onPress={startRecording}
-                >
-                  <Mic size={20} color={colors.textSecondary} />
+        {/* ── Composer ── */}
+        <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <View style={[styles.composer, { backgroundColor: colors.backgroundTertiary }]}>
+            {isRecording ? (
+              <>
+                <TouchableOpacity style={[styles.roundBtn, { backgroundColor: '#FF3040' }]} onPress={cancelRecording} accessibilityLabel="Discard voice message">
+                  <Trash2 size={18} color="#FFF" />
                 </TouchableOpacity>
-              )}
-              <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={styles.recording}>
+                  <View style={styles.recDot} />
+                  <Text style={[styles.recTime, { color: colors.text }]}>
+                    {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={stopRecording} style={styles.sendTextBtn} accessibilityLabel="Send voice message">
+                  <View style={[styles.roundBtn, { backgroundColor: colors.accent }]}>
+                    <ArrowUp size={20} color="#FFF" />
+                  </View>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.roundBtn, { backgroundColor: colors.accent }]}
+                  onPress={() => pickImage('camera')}
+                  disabled={imageUploading}
+                  accessibilityLabel="Take a photo"
+                >
+                  <Camera size={19} color="#FFF" />
+                </TouchableOpacity>
                 <TextInput
-                  style={[styles.messageInput, { color: colors.text }]}
-                  placeholder="Type a message..."
+                  style={[styles.input, { color: colors.text }]}
+                  placeholder="Message..."
                   placeholderTextColor={colors.textTertiary}
                   value={messageText}
                   onChangeText={handleTextChange}
                   multiline
-                  maxLength={500}
+                  maxLength={1000}
+                  testID="chat-input"
                 />
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.sendButton, 
-                  { backgroundColor: messageText.trim() ? colors.accent : colors.surface, borderColor: colors.border },
-                  !messageText.trim() && styles.sendButtonDisabled
-                ]}
-                onPress={handleSendMessage}
-                disabled={!messageText.trim()}
-              >
-                <Send
-                  size={20}
-                  color={messageText.trim() ? '#FFFFFF' : colors.textTertiary}
-                />
-              </TouchableOpacity>
-            </>
-          )}
+                {hasText ? (
+                  <TouchableOpacity onPress={handleSendMessage} style={styles.sendTextBtn} testID="chat-send">
+                    <Text style={[styles.sendText, { color: colors.accent }]}>Send</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.composerIcons}>
+                    <TouchableOpacity onPress={startRecording} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Record voice message">
+                      <Mic size={23} color={colors.text} strokeWidth={1.9} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => pickImage('library')} disabled={imageUploading} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Send a photo">
+                      <ImageIcon size={23} color={imageUploading ? colors.textTertiary : colors.text} strokeWidth={1.9} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => { handleTextChange(messageText + '@'); setShowMentionSuggestions(true); }}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      accessibilityLabel="Mention someone"
+                    >
+                      <Smile size={23} color={colors.text} strokeWidth={1.9} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+          {imageUploading && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending photo…</Text>}
         </View>
       </KeyboardAvoidingView>
 
-      <Modal
-        visible={!!viewerImage}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setViewerImage(null)}
-      >
+      <Modal visible={!!viewerImage} transparent animationType="fade" onRequestClose={() => setViewerImage(null)}>
         <View style={styles.viewerBackdrop}>
-          <TouchableOpacity
-            style={styles.viewerClose}
-            onPress={() => setViewerImage(null)}
-            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-          >
+          <TouchableOpacity style={[styles.viewerClose, { top: insets.top + 12 }]} onPress={() => setViewerImage(null)} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
             <Text style={styles.viewerCloseText}>✕</Text>
           </TouchableOpacity>
-          {viewerImage ? (
-            <Image source={{ uri: viewerImage }} style={styles.viewerImage} resizeMode="contain" />
-          ) : null}
+          {viewerImage ? <Image source={{ uri: viewerImage }} style={styles.viewerImage} resizeMode="contain" /> : null}
         </View>
       </Modal>
     </View>
@@ -822,419 +828,68 @@ export default function ConversationScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-  },
-  callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerUser: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginLeft: 8,
-  },
-  headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  headerNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  headerName: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-  },
-  headerStatus: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  messagesScrollView: {
-    flex: 1,
-  },
-  messagesContent: {
-    padding: 16,
-    gap: 16,
-    flexGrow: 1,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600' as const,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  messageContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  myMessageContainer: {
-    justifyContent: 'flex-end',
-  },
-  theirMessageContainer: {
-    justifyContent: 'flex-start',
-  },
-  messageAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  messageBubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 18,
-  },
-  myMessageBubble: {
-    borderBottomRightRadius: 4,
-  },
-  theirMessageBubble: {
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-  },
-  sharedLabel: {
-    fontSize: 11,
-    fontWeight: '500' as const,
-    marginBottom: 8,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
-  },
-  sharedPostCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 8,
-  },
-  sharedPostHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sharedPostAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 8,
-  },
-  sharedPostUserInfo: {
-    flex: 1,
-  },
-  sharedPostNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  sharedPostUserName: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-  },
-  sharedPostUsername: {
-    fontSize: 11,
-  },
-  sharedPostContent: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 8,
-  },
-  sharedPostImage: {
-    width: '100%',
-    height: 120,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  sharedPostStats: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  sharedPostStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  sharedPostStatText: {
-    fontSize: 11,
-  },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: '#FFFFFF',
-  },
-  myMessageText: {
-    color: '#FFFFFF',
-  },
-  mentionText: {
-    color: '#FFB300',
-    fontWeight: '600' as const,
-  },
-  messageTimestamp: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  messageMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  loadEarlierBtn: {
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginVertical: 8,
-  },
-  loadEarlierText: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-  },
-  myMessageTimestamp: {
-    color: 'rgba(255,255,255,0.7)',
-  },
-  mentionSuggestions: {
-    borderTopWidth: 1,
-    paddingVertical: 8,
-  },
-  mentionSuggestionsContent: {
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  mentionSuggestion: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  mentionAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  mentionUsername: {
-    fontSize: 14,
-    fontWeight: '500' as const,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    gap: 8,
-  },
-  mentionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  inputWrapper: {
-    flex: 1,
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  messageInput: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
-    maxHeight: 100,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  // Voice recording styles
-  recordingContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  recordingIndicator: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#FEE2E2',
-    borderRadius: 20,
-  },
-  recordingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  recordingTimer: {
-    fontSize: 16,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  stopRecordingBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  voicePlayButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  voiceDuration: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  // Image attachment styles
-  messageImage: {
-    width: 220,
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 6,
-  },
-  imagePlaceholder: {
-    width: 160,
-    height: 120,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  viewerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewerClose: {
-    position: 'absolute',
-    top: 56,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  viewerCloseText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  viewerImage: {
-    width: '100%',
-    height: '80%',
-  },
-  // Bundle/Skill card in messages
-  bundleCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  bundleCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 4,
-    gap: 6,
-  },
-  bundleCardType: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  bundleCardImage: {
-    width: '100%',
-    height: 120,
-  },
-  bundleCardBody: {
-    padding: 12,
-    paddingTop: 8,
-  },
-  bundleCardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  bundleCardPrice: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  bundleCardDesc: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
+  container: { flex: 1 },
+  flex: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerAvatar: { width: 36, height: 36, borderRadius: 18 },
+  onlineDot: { position: 'absolute', right: -1, bottom: -1, width: 12, height: 12, borderRadius: 6, backgroundColor: '#22C55E', borderWidth: 2 },
+  headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerName: { fontSize: 16, fontWeight: '700' },
+  headerSub: { fontSize: 12 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 20, paddingHorizontal: 8 },
+  thread: { paddingHorizontal: 10, paddingBottom: 12, flexGrow: 1 },
+  loadEarlier: { alignSelf: 'center', paddingVertical: 14 },
+  loadEarlierText: { fontSize: 13, fontWeight: '600' },
+  intro: { alignItems: 'center', paddingTop: 28, paddingBottom: 18, gap: 4 },
+  introAvatar: { width: 96, height: 96, borderRadius: 48, marginBottom: 8 },
+  introName: { fontSize: 20, fontWeight: '700' },
+  introSub: { fontSize: 14 },
+  introBtn: { marginTop: 12, paddingHorizontal: 14, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  introBtnText: { fontSize: 14, fontWeight: '600' },
+  separator: { textAlign: 'center', fontSize: 12, fontWeight: '600', marginTop: 18, marginBottom: 6 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  rowMine: { justifyContent: 'flex-end' },
+  rowTheirs: { justifyContent: 'flex-start' },
+  msgAvatarSlot: { width: 28, marginRight: 8 },
+  msgAvatar: { width: 28, height: 28, borderRadius: 14 },
+  bubble: { paddingHorizontal: 14, paddingVertical: 9 },
+  msgText: { fontSize: 16, lineHeight: 21 },
+  status: { alignSelf: 'flex-end', fontSize: 12, marginTop: 3, marginRight: 4 },
+  photo: { borderRadius: 18 },
+  card: { width: 230, borderRadius: 18, overflow: 'hidden' },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10 },
+  cardAvatar: { width: 24, height: 24, borderRadius: 12 },
+  cardUser: { fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  cardImage: { width: '100%', height: 230 },
+  cardCaption: { fontSize: 13, lineHeight: 18, paddingHorizontal: 10, paddingTop: 8 },
+  cardStats: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 10 },
+  cardStatText: { fontSize: 12, marginRight: 8 },
+  offerTag: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  offerTagText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  offerTitle: { fontSize: 15, fontWeight: '700' },
+  offerPrice: { fontSize: 14, fontWeight: '600' },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 },
+  wave: { flexDirection: 'row', alignItems: 'center', gap: 2.5, flex: 1 },
+  voiceTime: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  typingBubble: { flexDirection: 'row', gap: 5, borderRadius: 22, paddingVertical: 14 },
+  typingDot: { width: 8, height: 8, borderRadius: 4 },
+  mentions: { borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 4 },
+  mentionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8 },
+  mentionAvatar: { width: 36, height: 36, borderRadius: 18 },
+  composerWrap: { paddingHorizontal: 10, paddingTop: 6 },
+  composer: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: 24, paddingLeft: 6, paddingRight: 14, gap: 10 },
+  roundBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  input: { flex: 1, fontSize: 16, maxHeight: 120, paddingTop: Platform.OS === 'ios' ? 12 : 8, paddingBottom: Platform.OS === 'ios' ? 12 : 8 },
+  composerIcons: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  sendTextBtn: { paddingVertical: 6 },
+  sendText: { fontSize: 16, fontWeight: '700' },
+  recording: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3040' },
+  recTime: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  uploading: { fontSize: 12, textAlign: 'center', marginTop: 4 },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
+  viewerClose: { position: 'absolute', right: 20, zIndex: 2 },
+  viewerCloseText: { color: '#FFF', fontSize: 26 },
+  viewerImage: { width: '100%', height: '80%' },
 });
