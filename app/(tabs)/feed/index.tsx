@@ -27,6 +27,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,6 +49,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
 import { useMessaging } from '@/contexts/MessagingContext';
 import PostLiveLayer from '@/components/PostLiveLayer';
+import AppVideo from '@/components/AppVideo';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -141,7 +143,7 @@ function PostDetailModal({
   onPlayVideo?: (uri: string) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const [commentText, setCommentText] = useState('');
   const { interactions, toggleLike, addComment } = useSocial();
   const interaction = interactions[post.id];
@@ -967,17 +969,8 @@ export default function FeedScreen() {
     setUserPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
-  const importVideoRef = useRef<any>(null);
-  const Video = useRef<any>(null);
-  useEffect(() => {
-    let cancelled = false;
-    try {
-      const av = require('expo-av');
-      if (!cancelled) { Video.current = av.Video; importVideoRef.current = av; }
-    } catch (_) {}
-    return () => { cancelled = true; };
-  }, []);
-  const VideoPlayer = Video.current as any;
+  // expo-av was removed in Expo SDK 58 — video now plays through expo-video.
+  const VideoPlayer = AppVideo;
 
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
     const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;

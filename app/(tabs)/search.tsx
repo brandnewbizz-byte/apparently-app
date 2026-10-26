@@ -6,6 +6,7 @@ import {
   View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity,
   Image, ActivityIndicator, Dimensions, Platform, Alert,
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -71,7 +72,7 @@ export default function SearchScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { user: currentUser } = useAuth();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('top');

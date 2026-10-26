@@ -696,14 +696,14 @@ export default function ManageScreen() {
           keyExtractor={(o) => o.id}
           renderItem={renderOrder}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 120 }]}
-          ListEmptyComponent={loading ? null : renderOrdersEmpty}
+          ListEmptyComponent={loading ? undefined : renderOrdersEmpty}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.textSecondary} />}
           ListHeaderComponent={
             sortedOrders.length > 0 ? (
               <Text style={[styles.sectionNote, { color: colors.textSecondary }]}>
                 {pendingCount > 0 ? `${pendingCount} grab${pendingCount !== 1 ? 's' : ''} waiting for your approval. Tap an order for details.` : 'No grabs waiting. Tap an order for details.'}
               </Text>
-            ) : null
+            ) : undefined
           }
         />
       )}

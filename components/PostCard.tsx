@@ -1,7 +1,8 @@
 import { Heart, MessageCircle, ThumbsUp, Share2, MoreHorizontal, BadgeCheck, Zap, Send, X, AtSign, Bookmark, EyeOff, Flag, UserMinus, Link2, Bell, BellOff, Star, CornerDownRight, Copy, MessageSquare, Users, Check, Trash2, MessagesSquare, Forward } from 'lucide-react-native';
 import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, TextInput, Modal, KeyboardAvoidingView, ScrollView, Animated, Alert } from 'react-native';
-import { Video } from 'expo-av';
+import type { TextInputInstance } from 'react-native';
+import AppVideo from '@/components/AppVideo';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -54,7 +55,7 @@ const authorAvatar = post.user.avatar || '';
   const lastTap = useRef<number>(0);
   const likeAnimationScale = useRef(new Animated.Value(0)).current;
   const likeAnimationOpacity = useRef(new Animated.Value(0)).current;
-  const commentInputRef = useRef<TextInput>(null);
+  const commentInputRef = useRef<TextInputInstance>(null);
 
   const handleImageTap = () => {
     const now = Date.now();
@@ -499,7 +500,7 @@ const authorAvatar = post.user.avatar || '';
       {/* Video Post */}
       {(post.videoUrl || post.mediaType === 'video') && post.videoUrl ? (
         <View style={styles.imageContainer}>
-          <Video
+          <AppVideo
             source={{ uri: post.videoUrl }}
             style={styles.postImage}
             shouldPlay={false}

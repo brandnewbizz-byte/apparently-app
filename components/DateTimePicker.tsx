@@ -9,6 +9,7 @@ import {
   Animated,
   Platform,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { Calendar, Clock, X, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -78,7 +79,7 @@ export default function DateTimePicker({
   
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const timeScrollRef = useRef<ScrollView>(null);
+  const timeScrollRef = useRef<ScrollViewInstance>(null);
 
   useEffect(() => {
     if (initialDate) {

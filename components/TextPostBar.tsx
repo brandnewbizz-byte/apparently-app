@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Send } from 'lucide-react-native';
 
@@ -38,7 +39,7 @@ export default function TextPostBar({
   borderColor = '#2C2C2E',
 }: TextPostBarProps) {
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const [text, setText] = useState('');
 
   // Reset + autofocus each time the bar opens.

@@ -8,7 +8,7 @@
  * only fire once the user actually settles on a post.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ViewToken } from 'react-native';
+import type { ListViewToken as ViewToken } from 'react-native';
 
 export interface UseActiveFeedPostResult {
   activePostId: string | null;

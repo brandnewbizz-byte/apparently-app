@@ -1089,7 +1089,7 @@ function RoomContent() {
               ListEmptyComponent={
                 inviteSearch.length >= 2 && !inviteLoading ? (
                   <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 20 }}>No users found</Text>
-                ) : null
+                ) : undefined
               }
             />
             {inviteLoading && <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 10 }}>Searching...</Text>}

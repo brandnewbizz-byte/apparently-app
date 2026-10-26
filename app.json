@@ -13,7 +13,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -84,7 +83,8 @@
           "icon": "./assets/images/icon.png",
           "color": "#001F3D"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

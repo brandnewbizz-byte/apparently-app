@@ -13,6 +13,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -83,7 +84,7 @@ export default function ConversationScreen() {
   const recordingRef = useRef<AudioRecorder | null>(null);
   const soundRef = useRef<AudioPlayer | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
 
   const conversation = getConversation(participantId || '');
   const [fetchedProfile, setFetchedProfile] = useState<{ name: string; username: string; avatar: string } | null>(null);

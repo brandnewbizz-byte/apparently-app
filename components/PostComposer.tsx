@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Move,
@@ -64,7 +65,7 @@ export default function PostComposer({
   accentColor = '#2196F3',
 }: PostComposerProps) {
   const insets = useSafeAreaInsets();
-  const captionRef = useRef<TextInput>(null);
+  const captionRef = useRef<TextInputInstance>(null);
   const [caption, setCaption] = useState('');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaDims, setMediaDims] = useState<{ width: number; height: number } | null>(null);

@@ -213,7 +213,7 @@ export default function PhotoViewer({
       statusBarTranslucent
       onRequestClose={handleClose}
     >
-      <StatusBar backgroundColor="black" barStyle="light-content" />
+      <StatusBar barStyle="light-content" />
       <Animated.View style={[styles.container, { opacity }]}>
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <TouchableOpacity onPress={handleClose} style={styles.closeButton}>

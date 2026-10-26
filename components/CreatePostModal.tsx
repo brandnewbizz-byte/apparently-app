@@ -12,6 +12,7 @@ import {
   Alert,
   ActionSheetIOS,
 } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { X, Image as ImageIcon, Users, Globe, Camera, Plus } from 'lucide-react-native';
@@ -33,7 +34,7 @@ export default function CreatePostModal({ visible, onClose, onPost, preloadMedia
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { createPost } = useSocial();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const [content, setContent] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);

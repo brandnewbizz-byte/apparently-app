@@ -8,14 +8,9 @@
  */
 import { Platform } from 'react-native';
 
-let Audio: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const av = require('expo-av');
-  Audio = av.Audio;
-} catch (e) {
-  Audio = null;
-}
+// expo-av is no longer installed (removed in Expo SDK 58), so callers always
+// get the no-op fallback below. New audio code should use expo-audio.
+const Audio: any = null;
 
 const noop = () => Promise.resolve();
 

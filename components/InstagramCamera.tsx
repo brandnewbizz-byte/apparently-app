@@ -139,7 +139,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   }, [focusOpacity, focusScale]);
 
   // ── Pinch-to-zoom helpers ──
-  const getTouchDistance = (touches: React.TouchList | any[]) => {
+  const getTouchDistance = (touches: ArrayLike<{ pageX: number; pageY: number }>) => {
     if (!touches || touches.length < 2) return 0;
     const dx = touches[0].pageX - touches[1].pageX;
     const dy = touches[0].pageY - touches[1].pageY;
