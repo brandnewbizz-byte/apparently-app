@@ -1,0 +1,67 @@
+# Publishes an over-the-air EAS Update to the "production" channel every time
+# master changes, so app fixes reach installed 1.1.0+ builds in minutes.
+# Requires the EXPO_TOKEN repository secret (expo.dev → Account → Access tokens).
+name: EAS Update (production)
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**/*.md'
+      - 'supabase/**'
+      - 'ops/**'
+      - 'scripts/**'
+      - '.github/workflows/eas-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: eas-update-production
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check for EXPO_TOKEN
+        id: token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::warning::EXPO_TOKEN secret is not set — skipping EAS Update."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.present == 'true'
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.present == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        if: steps.token.outputs.present == 'true'
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Type-check (blocks the update if the code doesn't compile)
+        if: steps.token.outputs.present == 'true'
+        run: npx tsc --noEmit
+
+      - uses: expo/expo-github-action@v8
+        if: steps.token.outputs.present == 'true'
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish update
+        if: steps.token.outputs.present == 'true'
+        run: |
+          MSG="$(git log -1 --pretty=%s | cut -c1-200)"
+          eas update --channel production --message "$MSG" --non-interactive
