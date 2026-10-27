@@ -1,0 +1,15 @@
+# Runs on Expo's servers (EAS Workflows) — no GitHub Actions needed.
+# Every push to master publishes an over-the-air update to the
+# "production" channel, reaching installed 1.1.0+ builds in minutes.
+name: Publish update
+
+on:
+  push:
+    branches: ['master']
+
+jobs:
+  publish_update:
+    name: Publish update to production
+    type: update
+    params:
+      channel: production

@@ -1,0 +1,22 @@
+# One-off native build for iPhone + App Store / TestFlight submit.
+# Triggered by pushing to the "release" branch (Claude does this when a
+# new native build is needed, e.g. after an Expo SDK upgrade).
+name: Build and submit iOS
+
+on:
+  push:
+    branches: ['release']
+
+jobs:
+  build_ios:
+    name: Build iOS (production)
+    type: build
+    params:
+      platform: ios
+      profile: production
+  submit_ios:
+    name: Submit to App Store Connect
+    needs: [build_ios]
+    type: submit
+    params:
+      build_id: ${{ needs.build_ios.outputs.build_id }}
