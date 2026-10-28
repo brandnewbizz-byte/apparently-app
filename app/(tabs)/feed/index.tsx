@@ -266,6 +266,7 @@ function PostCard({
   muted,
   onToggleMute,
   topOffset = 0,
+  onMeasure,
 }: {
   post: FeedPost;
   colors: any;
@@ -285,6 +286,8 @@ function PostCard({
   onToggleMute: () => void;
   /** Space taken by the floating top bar (keeps overlays below it). */
   topOffset?: number;
+  /** Text posts are sized to their text; reports the measured height. */
+  onMeasure?: (id: string, h: number) => void;
 }) {
   const saved = !!isSavedProp;
   const { interactions, toggleLike } = useSocial();
@@ -390,7 +393,13 @@ function PostCard({
   };
 
   return (
-    <View style={[igCardStyles.card, { backgroundColor: post.media ? '#000' : colors.surface, height: height ?? undefined, marginBottom: height ? 0 : 16 }]}>
+    <View
+      style={post.media
+        ? [igCardStyles.card, { backgroundColor: '#000', height: height ?? undefined, marginBottom: height ? 0 : 16 }]
+        // Text posts: a compact card sized to the words, not a full-screen page.
+        : [igCardStyles.textCard, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: TEXT_CARD_GAP + topOffset }]}
+      onLayout={post.media || !onMeasure ? undefined : (e) => onMeasure(post.id, e.nativeEvent.layout.height + TEXT_CARD_GAP * 2 + topOffset)}
+    >
       {post.media ? (
         <View style={height ? { flex: 1 } : undefined}>
           <Pressable onPress={handleMediaPress} style={height ? { flex: 1 } : undefined} accessibilityLabel={isVideo ? 'Video. Double tap to like, tap to mute or unmute' : 'Photo. Double tap to like, tap to view'}>
@@ -503,7 +512,7 @@ function PostCard({
           ) : null}
         </View>
       ) : (
-        <View style={[igCardStyles.header, { paddingTop: 10 + topOffset }]}>
+        <View style={[igCardStyles.header, { paddingTop: 12 }]}>
           <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
             <Avatar uri={authorAvatar} name={post.author.name} size={36} colors={colors} />
             <View style={igCardStyles.headerText}>
@@ -522,8 +531,8 @@ function PostCard({
       {/* Text-only post */}
       {!post.media ? (
         <>
-          <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={[igCardStyles.textOnlyArea, height ? { flex: 1 } : undefined]}>
-            <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={height ? 18 : 6}>
+          <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={igCardStyles.textOnlyArea}>
+            <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={10}>
               {post.caption}
             </Text>
           </TouchableOpacity>
@@ -560,7 +569,7 @@ function PostCard({
               {commentCount > 0 ? `View all ${commentCount} comment${commentCount === 1 ? '' : 's'}` : 'Add a comment…'}
             </Text>
           </TouchableOpacity>
-          <View style={{ height: 14 }} />
+          <View style={{ height: 10 }} />
         </>
       ) : null}
     </View>
@@ -626,6 +635,13 @@ export default function FeedScreen() {
   // already measures exactly the visible content area between the header and the tab bar.
   const contentHeight = feedHeight > 0 ? feedHeight : 0;
 
+  // Media posts are one full page each; text posts are as tall as their card.
+  const [textHeights, setTextHeights] = useState<Record<string, number>>({});
+  const onMeasureText = useCallback((id: string, h: number) => {
+    setTextHeights((prev) => (Math.abs((prev[id] || 0) - h) < 1 ? prev : { ...prev, [id]: h }));
+  }, []);
+  const layoutRef = useRef<{ offsets: number[]; lengths: number[] }>({ offsets: [], lengths: [] });
+
   // ── Live Voice Feed: active-post detection (TikTok-style snap paging) ──
   // Each post is exactly one page tall, so the active post is simply
   // round(scrollY / pageHeight). (FlatList viewability callbacks proved
@@ -634,9 +650,12 @@ export default function FeedScreen() {
   const activeIndexRef = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (settleTimer.current) clearTimeout(settleTimer.current); }, []);
-  const trackActive = useCallback((y: number, pageHeight: number) => {
-    if (pageHeight <= 0) return;
-    const idx = Math.max(0, Math.round(y / pageHeight));
+  const trackActive = useCallback((y: number, _pageHeight?: number) => {
+    const offs = layoutRef.current.offsets;
+    if (!offs.length) return;
+    // The post whose top is closest to the top of the screen.
+    let idx = 0;
+    for (let i = 0; i < offs.length; i++) { if (offs[i] <= y + 40) idx = i; else break; }
     if (idx === activeIndexRef.current) return;
     activeIndexRef.current = idx;
     if (settleTimer.current) clearTimeout(settleTimer.current);
@@ -874,6 +893,24 @@ export default function FeedScreen() {
     // Keep newest-first order (posts are pre-sorted in loadFeedPosts)
     return all;
   }, [userPosts, tagFilter]);
+
+  // Where each post starts in the list, and where scrolling should snap to.
+  const feedLayout = useMemo(() => {
+    const offsets: number[] = []; const lengths: number[] = []; const snaps: number[] = [];
+    let y = 0;
+    const textTopPad = (i: number) => (i === 0 || filteredPosts[i - 1]?.media ? floatBarSpace : 0);
+    filteredPosts.forEach((p, i) => {
+      const padded = !p.media && textTopPad(i) > 0;
+      const len = p.media ? contentHeight : (textHeights[p.id] ?? 220 + textTopPad(i));
+      offsets.push(y); lengths.push(len);
+      // A text card right after a photo/video (or first) gets its own space
+      // under the floating top bar; a run of text cards scrolls like a list.
+      snaps.push(p.media || padded ? y : Math.max(0, y - floatBarSpace));
+      y += len;
+    });
+    return { offsets, lengths, snaps };
+  }, [filteredPosts, contentHeight, textHeights, floatBarSpace]);
+  layoutRef.current = feedLayout;
 
   const activePostId = filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null;
 
@@ -1191,15 +1228,16 @@ export default function FeedScreen() {
           ref={listRef}
           data={filteredPosts}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <PostCard
               post={item}
               colors={colors}
-              height={contentHeight || undefined}
+              height={item.media ? contentHeight || undefined : undefined}
               isActive={item.id === activePostId}
               muted={muted}
               onToggleMute={toggleMute}
-              topOffset={floatBarSpace}
+              topOffset={item.media || index === 0 || filteredPosts[index - 1]?.media ? floatBarSpace : 0}
+              onMeasure={onMeasureText}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1226,10 +1264,10 @@ export default function FeedScreen() {
           scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} progressViewOffset={floatBarSpace} />}
           decelerationRate="fast"
-          snapToInterval={contentHeight || undefined}
+          snapToOffsets={feedLayout.snaps}
           snapToAlignment="start"
           disableIntervalMomentum
-          getItemLayout={(_, index) => ({ length: contentHeight, offset: contentHeight * index, index })}
+          getItemLayout={(_, index) => ({ length: feedLayout.lengths[index] ?? contentHeight, offset: feedLayout.offsets[index] ?? contentHeight * index, index })}
           windowSize={5}
           maxToRenderPerBatch={3}
           initialNumToRender={2}
@@ -1506,7 +1544,10 @@ const styles = StyleSheet.create({
 });
 
 // ── Instagram-Style Post Card Styles ──
+const TEXT_CARD_GAP = 6;
+
 const igCardStyles = StyleSheet.create({
+  textCard: { marginHorizontal: 12, marginBottom: TEXT_CARD_GAP, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   card: { marginBottom: 16, borderBottomWidth: 0.5, borderBottomColor: 'rgba(120,120,120,0.2)' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
@@ -1528,8 +1569,8 @@ const igCardStyles = StyleSheet.create({
   overlayLocation: { color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 1 },
   overlayMenuBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   overlayMenuDots: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', letterSpacing: 1 },
-  textOnlyArea: { paddingHorizontal: 16, paddingVertical: 14, justifyContent: 'center' },
-  textOnlyCaption: { fontSize: 16, lineHeight: 24 },
+  textOnlyArea: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 6 },
+  textOnlyCaption: { fontSize: 17, lineHeight: 25 },
   actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
   actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   actionIconBtn: { padding: 4 },
