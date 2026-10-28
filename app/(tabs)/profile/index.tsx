@@ -2,34 +2,22 @@ import {
   Settings,
   Flame,
   DollarSign,
-  Clock,
-  MapPin,
   ChevronRight,
-  Calendar,
   CalendarDays,
-  Package,
-  Eye,
-  MessageSquare,
-  MessageCircle,
   Edit3,
   Star,
-  TrendingUp,
-  Award,
-  User,
   Briefcase,
-  Heart,
   X,
-  Zap,
   Camera,
   Bookmark,
-  Send,
-  Trash2,
-  Forward,
+  Grid3x3,
+  Share2,
   Plus,
-  MoreHorizontal,
-  BellRing,
+  MessageCircle,
+  Package,
+  Sparkles,
 } from 'lucide-react-native';
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -37,226 +25,90 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Animated,
   FlatList,
   Image,
   Platform,
   RefreshControl,
   Modal,
-  TextInput,
-  Dimensions,
-  Alert,
   Share,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
-import { safeImageUrl } from '@/lib/media';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
-import { useOrders } from '@/contexts/OrdersContext';
-import { useSocial } from '@/contexts/SocialContext';
-import { useUserPosts } from '@/contexts/UserPostsContext';
+import { fetchUserPosts, fetchSavedPosts, type ProfilePost } from '@/lib/profilePosts';
+import PostGrid from '@/components/profile/PostGrid';
+import PostViewer from '@/components/profile/PostViewer';
 
-const ACCENT_COLORS = {
+const ACCENT = {
   gold: '#FFB800',
-  goldDim: 'rgba(255, 184, 0, 0.12)',
-  neonGreen: '#10B981',
-  neonGreenDim: 'rgba(16, 185, 129, 0.12)',
+  green: '#10B981',
   coral: '#FF6B6B',
-  coralDim: 'rgba(255, 107, 107, 0.12)',
-  purple: '#8B5CF6',
-  purpleDim: 'rgba(139, 92, 246, 0.12)',
   blue: '#3B82F6',
-  blueDim: 'rgba(59, 130, 246, 0.12)',
+  purple: '#8B5CF6',
 };
 
-interface GrabbedBundle {
+type Tab = 'posts' | 'saved' | 'activity';
+
+interface Booking {
   id: string;
   title: string;
-  proposed_budget: number;
-  pickup_time: string | null;
+  price: number;
+  pickupTime: string | null;
   status: string;
-  booked_at: string;
-  plan_details: {
-    plan_date?: string;
-    description?: string;
-  } | null;
+  bookedAt: string;
 }
 
-interface StatItem {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  color: string;
-  bgColor: string;
+interface DetailItem {
+  title: string;
+  description: string;
+  price: number;
+  category: string;
+  imageUrl?: string;
+  icon?: string;
+  grabCount?: number;
+  createdAt?: string;
+  status?: string;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Saved Posts Grid — Bookmarks/collection
-// ═══════════════════════════════════════════════════════════════════════════
+const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
-function SavedPostsGrid({ colors, onPostPress }: { colors: any; onPostPress?: (post: any, posts: any[]) => void }) {
-  const { getSavedPosts } = useSocial();
-  const saved = getSavedPosts();
+function money(n: number) {
+  if (n >= 10000) return `$${Math.round(n / 1000)}K`;
+  return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
 
-  if (saved.length === 0) {
-    return (
-      <View style={{ paddingTop: 40, alignItems: 'center' }}>
-        <Bookmark size={40} color={colors.textTertiary || '#8E8E93'} />
-        <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: colors.text }}>No saved posts</Text>
-        <Text style={{ marginTop: 4, fontSize: 13, color: colors.textSecondary || '#8E8E93' }}>Tap the bookmark on any post to save it here</Text>
-      </View>
-    );
+function statusColor(status: string, fallback: string) {
+  switch (status.toLowerCase()) {
+    case 'completed': return ACCENT.green;
+    case 'in_progress': case 'confirmed': return ACCENT.gold;
+    case 'cancelled': return ACCENT.coral;
+    default: return fallback;
   }
+}
 
-  const numCols = 3;
-  const gap = 2;
-  const size = (Dimensions.get('window').width - gap * (numCols + 1)) / numCols;
-
+function Empty({ colors, icon, title, text, cta, onCta }: { colors: any; icon: React.ReactNode; title: string; text: string; cta?: string; onCta?: () => void }) {
   return (
-    <FlatList
-      data={saved}
-      keyExtractor={item => item.id}
-      numColumns={numCols}
-      scrollEnabled={false}
-      contentContainerStyle={{ padding: gap }}
-      renderItem={({ item }: { item: any }) => {
-        const imgUri = item.image || item.media || item.image_url || item.imageUrl;
-        return (
-          <TouchableOpacity
-            style={{ width: size, height: size, margin: gap / 2 }}
-            activeOpacity={0.8}
-            onPress={() => { if (onPostPress) onPostPress(item, saved); }}
-          >
-            {imgUri ? (
-              <Image source={{ uri: imgUri }} style={{ width: '100%', height: '100%', borderRadius: 2 }} />
-            ) : (
-              <View style={{ width: '100%', height: '100%', backgroundColor: colors.surface || '#F0F0F0', borderRadius: 2, alignItems: 'center', justifyContent: 'center' }}>
-                <Bookmark size={24} color={colors.textTertiary || '#8E8E93'} />
-              </View>
-            )}
-          </TouchableOpacity>
-        );
-      }}
-    />
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// My Posts Grid — Instagram 3-column grid
-// ═══════════════════════════════════════════════════════════════════════════
-
-function UserPostsGrid({ colors, onPostPress, refreshKey }: { colors: any; onPostPress?: (post: any, posts: any[]) => void; refreshKey?: number }) {
-  const { user: authUser } = useAuth();
-  const [allPosts, setAllPosts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  // Load user's posts from Supabase — ensures persistence across sessions
-  const loadPosts = useCallback(() => {
-    if (!authUser?.id) { setLoading(false); return; }
-    setError(false);
-    supabase
-      .from('posts')
-      .select('id, content, image_url, created_at, likes')
-      .eq('user_id', authUser.id)
-      .or('post_kind.is.null,post_kind.neq.reshare')
-      .order('created_at', { ascending: false })
-      .limit(100)
-      .then(({ data, error: err }) => {
-        if (err) { console.log('[UserPosts] Supabase error:', err.message); setError(true); setLoading(false); return; }
-        // Filter blank posts (no caption AND no valid image) so dead file:// rows don't render as empty tiles
-        const mapped = (data || [])
-          .map(p => ({
-            id: p.id,
-            imageUrl: safeImageUrl(p.image_url) || '',
-            caption: p.content || '',
-            likes: p.likes || 0,
-            timestamp: p.created_at,
-            type: 'photo',
-            isOwnPost: true,
-            user: {
-              id: authUser?.id || '',
-              name: authUser?.fullName || authUser?.username || 'You',
-              username: authUser?.username || '',
-              avatar: authUser?.avatar || '',
-            },
-          }))
-          .filter(p => (p.caption || '').trim() !== '' || p.imageUrl);
-        setAllPosts(mapped);
-        setLoading(false);
-      });
-  }, [authUser?.id]);
-
-  useEffect(() => { loadPosts(); }, [loadPosts, refreshKey]);
-
-  // Live wiring: refresh the grid whenever any of this user's posts changes
-  useEffect(() => {
-    if (!authUser?.id) return;
-    const channel = supabase
-      .channel(`profile-posts-${authUser.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `user_id=eq.${authUser.id}` }, () => loadPosts())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [authUser?.id, loadPosts]);
-
-  if (loading) {
-    return (
-      <View style={profileStyles.gridEmpty}>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </View>
-    );
-  }
-
-  if (!allPosts || allPosts.length === 0) {
-    return (
-      <View style={profileStyles.gridEmpty}>
-        <View style={[profileStyles.gridEmptyIcon, { backgroundColor: ACCENT_COLORS.blueDim }]}>
-          <Camera size={28} color={ACCENT_COLORS.blue} />
-        </View>
-        <Text style={[profileStyles.gridEmptyTitle, { color: colors.text }]}>No posts yet</Text>
-        <Text style={[profileStyles.gridEmptyText, { color: colors.textSecondary }]}>
-          Create a post to see it here
-        </Text>
-      </View>
-    );
-  }
-
-  const COL_COUNT = 3;
-  const GAP = 2;
-  const IMG_SIZE = (Dimensions.get('window').width - GAP * (COL_COUNT - 1)) / COL_COUNT;
-
-  return (
-    <View style={profileStyles.grid}>
-      {allPosts.map((post: any, idx: number) => (
-        <TouchableOpacity
-          key={post.id || idx}
-          activeOpacity={0.8}
-          style={{ width: IMG_SIZE, height: IMG_SIZE, marginRight: (idx % COL_COUNT) < COL_COUNT - 1 ? GAP : 0, marginBottom: GAP }}
-          onPress={() => {
-            if (onPostPress) onPostPress({ ...post, index: idx }, allPosts);
-          }}
-        >
-          <Image
-            source={{ uri: post.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400' }}
-            style={{ width: '100%', height: '100%', backgroundColor: '#1a1a2e' }}
-            resizeMode="cover"
-          />
-          {post.likes > 0 && (
-            <View style={profileStyles.gridOverlay}>
-              <Heart size={16} color="#FFF" fill="#FFF" />
-              <Text style={profileStyles.gridOverlayText}>{post.likes}</Text>
-            </View>
-          )}
+    <View style={styles.empty}>
+      <View style={[styles.emptyIcon, { borderColor: colors.border }]}>{icon}</View>
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{text}</Text>
+      {cta ? (
+        <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.accent }]} onPress={onCta}>
+          <Text style={styles.emptyBtnText}>{cta}</Text>
         </TouchableOpacity>
-      ))}
+      ) : null}
     </View>
   );
+}
+
+function Loading({ colors }: { colors: any }) {
+  return <View style={styles.empty}><ActivityIndicator color={colors.textTertiary} /></View>;
 }
 
 export default function ProfileScreen() {
@@ -264,1471 +116,571 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
-  const { myBundles, deleteBundle } = useBundles();
-  const { mySkills, deleteSkill } = useSkills();
-  const { pendingCount: pendingOrders } = useOrders();
-  
+  const { myBundles } = useBundles();
+  const { mySkills } = useSkills();
+
+  const [tab, setTab] = useState<Tab>('posts');
   const [refreshing, setRefreshing] = useState(false);
-  const [streak, setStreak] = useState(0);
-  const [totalEarnings, setTotalEarnings] = useState(0);
-  const [completedCount, setCompletedCount] = useState(0);
-  const [avgRating, setAvgRating] = useState(0);
-  const [grabbedBundles, setGrabbedBundles] = useState<GrabbedBundle[]>([]);
-  const [loadingBundles, setLoadingBundles] = useState(true);
-  const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
-  const [selectedPost, setSelectedPost] = useState<any>(null);
-  const [viewerPosts, setViewerPosts] = useState<any[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [detailItem, setDetailItem] = useState<{ title: string; description: string; price: number; category: string; imageUrl?: string; icon?: string; grabCount: number; created_at?: string; creatorName?: string } | null>(null);
+
+  // Posts / saved
+  const [posts, setPosts] = useState<ProfilePost[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const [postsError, setPostsError] = useState(false);
+  const [saved, setSavedPosts] = useState<ProfilePost[]>([]);
+  const [savedLoading, setSavedLoading] = useState(true);
+
+  // Stats
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [followListVisible, setFollowListVisible] = useState(false);
-  const [followListTitle, setFollowListTitle] = useState('');
-  const [followListUsers, setFollowListUsers] = useState<any[]>([]);
-  const [loadingFollowList, setLoadingFollowList] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [earnings, setEarnings] = useState(0);
+  const [completed, setCompleted] = useState(0);
+  const [rating, setRating] = useState(0);
+  const [reviewCount, setReviewCount] = useState(0);
 
-  const fetchFollowUsers = async (type: 'followers' | 'following') => {
-    if (!user?.id) return;
-    setFollowListTitle(type === 'followers' ? 'Followers' : 'Following');
-    setFollowListVisible(true);
-    setLoadingFollowList(true);
+  // Activity
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
+
+  // Viewer + sheets
+  const [viewer, setViewer] = useState<{ list: ProfilePost[]; index: number; title: string } | null>(null);
+  const [detail, setDetail] = useState<DetailItem | null>(null);
+  const [followList, setFollowList] = useState<{ title: string; users: any[]; loading: boolean } | null>(null);
+
+  const myId = user?.id;
+
+  // ── Loaders ────────────────────────────────────────────────────────────────
+  const loadPosts = useCallback(async () => {
+    if (!myId) { setPostsLoading(false); return; }
     try {
-      // Followers = people whose following_id = me  |  Following = people whose follower_id = me
-      const filterCol = type === 'followers' ? 'following_id' : 'follower_id';
-      const joinCol = type === 'followers' ? 'follower_id' : 'following_id';
-      const { data: follows } = await supabase
-        .from('follows')
-        .select(joinCol)
-        .eq(filterCol, user.id)
-        .neq(joinCol, user.id);
-      if (follows && follows.length > 0) {
-        const ids = follows.map((f: any) => f[joinCol]);
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name, username, avatar')
-          .in('id', ids);
-        setFollowListUsers(profiles || []);
-      } else {
-        setFollowListUsers([]);
-      }
+      setPosts(await fetchUserPosts(myId));
+      setPostsError(false);
     } catch {
-      setFollowListUsers([]);
+      setPostsError(true);
     } finally {
-      setLoadingFollowList(false);
+      setPostsLoading(false);
     }
-  };
+  }, [myId]);
 
-  // Helper: get deduplicated post count matching the grid display
-  const { getAllPosts, deletePost: socialDeletePost, updatePost: socialUpdatePost } = useSocial();
-  const { userPosts } = useUserPosts();
-  const getAllPostsForCount = useCallback(() => {
-    const posts = getAllPosts() || [];
-    const userPostIds = new Set(userPosts.map(up => up.id).filter(Boolean));
-    const userPostUrls = new Set(userPosts.map(up => up.mediaUri).filter(Boolean));
-    // Exclude social posts that match a user-created post (prevents double-counting)
-    const uniqueSocial = posts.filter(p => {
-      if (userPostIds.has(p.id)) return false;
-      if (userPostUrls.has(p.imageUrl)) return false;
-      return true;
-    });
-    return uniqueSocial.length + userPosts.length;
-  }, [getAllPosts, userPosts]);
-  
-  // Direct Supabase post count — applies the SAME blank-post filter as the grid so the header number matches what's actually shown
-  const [userPostsCount, setUserPostsCount] = useState<number | null>(null);
-  const fetchPostCount = useCallback(async () => {
-    if (!user?.id) return;
-    const { data, error } = await supabase
-      .from('posts')
-      .select('id, content, image_url')
-      .eq('user_id', user.id)
-      .or('post_kind.is.null,post_kind.neq.reshare')
-      .limit(100);
-    if (!error && data) {
-      const valid = (data || []).filter(p => (p.content || '').trim() !== '' || safeImageUrl(p.image_url));
-      setUserPostsCount(valid.length);
+  const loadSaved = useCallback(async () => {
+    if (!myId) { setSavedLoading(false); return; }
+    try { setSavedPosts(await fetchSavedPosts(myId)); } catch { /* keep current */ } finally { setSavedLoading(false); }
+  }, [myId]);
+
+  const loadStats = useCallback(async () => {
+    if (!myId) return;
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    const [jobs, recent, reviews, followers, following] = await Promise.all([
+      supabase.from('user_grabs').select('price, status').eq('provider_id', myId),
+      supabase.from('posts').select('created_at').eq('user_id', myId).gte('created_at', since.toISOString()),
+      supabase.from('user_reviews').select('rating').eq('target_user_id', myId),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', myId).neq('follower_id', myId),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', myId).neq('following_id', myId),
+    ]);
+    setFollowersCount(followers.count ?? 0);
+    setFollowingCount(following.count ?? 0);
+
+    const done = ((jobs.data || []) as any[]).filter((j) => j.status === 'completed');
+    setCompleted(done.length);
+    setEarnings(done.reduce((sum, j) => sum + Number(j.price || 0), 0));
+
+    // Consecutive posting days ending today (or yesterday), in local time.
+    const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const days = new Set(((recent.data || []) as any[]).map((p) => localDay(new Date(p.created_at))));
+    let count = 0;
+    for (let i = 0; i < 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      if (days.has(localDay(d))) count++;
+      else if (i > 0) break;
     }
-  }, [user?.id]);
-  useEffect(() => { fetchPostCount(); }, [fetchPostCount, refreshKey]);
-  
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+    setStreak(count);
 
-  const stats: StatItem[] = [
-    {
-      label: 'Earnings',
-      value: `$${totalEarnings}`,
-      icon: <DollarSign size={18} color={ACCENT_COLORS.neonGreen} />,
-      color: ACCENT_COLORS.neonGreen,
-      bgColor: ACCENT_COLORS.neonGreenDim,
-    },
-    {
-      label: 'Streak',
-      value: `${streak} days`,
-      icon: <Flame size={18} color={ACCENT_COLORS.gold} />,
-      color: ACCENT_COLORS.gold,
-      bgColor: ACCENT_COLORS.goldDim,
-    },
-    {
-      label: 'Rating',
-      value: avgRating > 0 ? String(avgRating) : '—',
-      icon: <Star size={18} color={ACCENT_COLORS.coral} />,
-      color: ACCENT_COLORS.coral,
-      bgColor: ACCENT_COLORS.coralDim,
-    },
-    {
-      label: 'Completed',
-      value: String(completedCount),
-      icon: <Briefcase size={18} color={ACCENT_COLORS.blue} />,
-      color: ACCENT_COLORS.blue,
-      bgColor: ACCENT_COLORS.blueDim,
-    },
-  ];
+    const r = (reviews.data || []) as any[];
+    setReviewCount(r.length);
+    setRating(r.length ? Math.round((r.reduce((s, x) => s + (x.rating || 0), 0) / r.length) * 10) / 10 : 0);
+  }, [myId]);
 
-  const fetchProfileStats = useCallback(async () => {
-    if (!user?.id) return;
-    try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const loadBookings = useCallback(async () => {
+    if (!myId) { setBookingsLoading(false); return; }
+    const { data } = await supabase
+      .from('user_grabs')
+      .select('id, title, price, pickup_time, status, booked_at')
+      .eq('user_id', myId)
+      .order('booked_at', { ascending: false })
+      .limit(30);
+    setBookings(((data || []) as any[]).map((g) => ({
+      id: g.id,
+      title: g.title || 'Plan',
+      price: Number(g.price || 0),
+      pickupTime: g.pickup_time || null,
+      status: g.status || 'pending',
+      bookedAt: g.booked_at || '',
+    })));
+    setBookingsLoading(false);
+  }, [myId]);
 
-      // Fire all 4 queries in parallel — no data dependency between them
-      const [jobsResult, postsResult, reviewsResult, followersResult, followingResult] = await Promise.all([
-        supabase.from('user_grabs').select('price, status').eq('provider_id', user.id),
-        supabase.from('posts').select('created_at').eq('user_id', user.id).gte('created_at', sevenDaysAgo.toISOString()),
-        supabase.from('user_reviews').select('rating').eq('target_user_id', user.id),
-        // count queries: more reliable than .or() with UUIDs, excludes self-follow
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', user.id).neq('follower_id', user.id),
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', user.id).neq('following_id', user.id),
-      ]);
+  useEffect(() => { loadPosts(); loadStats(); loadBookings(); loadSaved(); }, [loadPosts, loadStats, loadBookings, loadSaved]);
 
-      // Followers / Following — real counts (excludes self-follow)
-      setFollowersCount(followersResult.count ?? 0);
-      setFollowingCount(followingResult.count ?? 0);
+  // Saved items change from the feed — refresh whenever the tab regains focus.
+  useFocusEffect(useCallback(() => { loadSaved(); loadStats(); }, [loadSaved, loadStats]));
 
-      // Earnings: ONLY completed jobs count
-      const jobs = jobsResult.data;
-      if (jobs) {
-        const completed = jobs.filter((j: any) => j.status === 'completed');
-        setCompletedCount(completed.length);
-        const earnings = completed.reduce((sum: number, j: any) => sum + Number(j.price || 0), 0);
-        setTotalEarnings(earnings);
-      }
-
-      // Streak: consecutive days ending at today, not just unique days
-      const recentPosts = postsResult.data;
-      if (recentPosts && recentPosts.length > 0) {
-        // Compare calendar days in the user's own time zone (UTC dates made
-        // evening posts count toward the next day and broke streaks).
-        const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-        const activeDays = new Set(recentPosts.filter((p: any) => p.created_at).map((p: any) => localDay(new Date(p.created_at))));
-        let streakCount = 0;
-        const today = new Date();
-        for (let i = 0; i < 7; i++) {
-          const check = new Date(today);
-          check.setDate(check.getDate() - i);
-          const day = localDay(check);
-          if (activeDays.has(day)) {
-            streakCount++;
-          } else if (i > 0) {
-            break; // streak broken — stop counting
-          }
-          // Day 0 (today): if no post today, skip to yesterday and try again
-        }
-        setStreak(streakCount);
-      }
-
-      // Reviews
-      const reviews = reviewsResult.data;
-      if (reviews && reviews.length > 0) {
-        const avg = reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length;
-        setAvgRating(Math.round(avg * 10) / 10);
-      }
-    } catch (err) {
-      console.log('[Profile] Error fetching stats:', err);
-    }
-  }, [user?.id]);
-
-  const fetchGrabbedBundles = useCallback(async () => {
-    if (!user?.id) {
-      setLoadingBundles(false);
-      return;
-    }
-    try {
-      setLoadingBundles(true);
-      const { data, error } = await supabase
-        .from('user_grabs')
-        .select('id, title, price, pickup_time, status, booked_at, item_type')
-        .eq('user_id', user.id)
-        .order('booked_at', { ascending: false });
-      if (error) {
-        console.log('[Profile] Error fetching grabbed bundles:', error.message);
-      } else {
-        setGrabbedBundles((data || []).map((g: any) => ({
-          id: g.id,
-          title: g.title || 'Plan',
-          proposed_budget: Number(g.price || 0),
-          pickup_time: g.pickup_time || null,
-          status: g.status || 'pending',
-          booked_at: g.booked_at || '',
-          plan_details: null,
-        })));
-      }
-    } catch (err) {
-      console.log('[Profile] Exception fetching grabbed bundles:', err);
-    } finally {
-      setLoadingBundles(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => { fetchProfileStats(); }, [fetchProfileStats, refreshKey]);
-  useEffect(() => { fetchGrabbedBundles(); }, [fetchGrabbedBundles]);
-
+  // Keep the grid live when posts are created/edited/deleted elsewhere.
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [fadeAnim, scaleAnim]);
-
-  const handleViewPlanDetails = useCallback((plan: GrabbedBundle) => {
-    setDetailItem({
-      title: plan.title || 'Plan',
-      description: plan.plan_details?.description || 'No description',
-      price: Number(plan.proposed_budget || 0),
-      category: plan.status || 'Other',
-      grabCount: 0,
-      created_at: plan.booked_at,
-      creatorName: 'User',
-    });
-    setDetailModalVisible(true);
-  }, []);
-
-  const handleViewBundleDetails = useCallback((bundle: any) => {
-    setDetailItem({
-      title: bundle.title || 'Bundle',
-      description: bundle.description || 'No description',
-      price: typeof bundle.price === 'number' ? bundle.price : parseInt(bundle.price || '0', 10) || 0,
-      category: bundle.category || 'Other',
-      imageUrl: bundle.imageUrl || bundle.image_url,
-      icon: bundle.icon,
-      grabCount: bundle.grabCount || bundle.grab_count || 0,
-      created_at: bundle.created_at || bundle.createdAt,
-      creatorName: bundle.creatorName || bundle.creator_name || 'User',
-    });
-    setDetailModalVisible(true);
-  }, []);
-
-  const handleViewSkillDetails = useCallback((skill: any) => {
-    setDetailItem({
-      title: skill.title || 'Skill',
-      description: skill.description || 'No description',
-      price: typeof skill.price === 'number' ? skill.price : parseInt(skill.price || '0', 10) || 0,
-      category: skill.category || 'Other',
-      imageUrl: skill.imageUrl || skill.image_url,
-      icon: skill.icon,
-      grabCount: skill.grabCount || skill.grab_count || 0,
-      created_at: skill.created_at || skill.createdAt,
-      creatorName: skill.creatorName || skill.creator_name || 'User',
-    });
-    setDetailModalVisible(true);
-  }, []);
-
-  const handleChatPlanner = useCallback((bundle: GrabbedBundle) => {
-    console.log('Chat planner for bundle:', bundle.id);
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    router.push('/inbox' as any);
-  }, [router]);
-
-  const formatBundleDate = (dateString: string | null | undefined) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    } catch {
-      return 'N/A';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed': return ACCENT_COLORS.neonGreen;
-      case 'in_progress': return ACCENT_COLORS.gold;
-      case 'pending': return colors.textTertiary;
-      case 'cancelled': return ACCENT_COLORS.coral;
-      default: return colors.textSecondary;
-    }
-  };
+    if (!myId) return;
+    const channel = supabase
+      .channel(`profile-posts-${myId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `user_id=eq.${myId}` }, () => loadPosts())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [myId, loadPosts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchProfileStats(), fetchGrabbedBundles()]);
-    setRefreshKey(k => k + 1);
+    await Promise.all([loadPosts(), loadSaved(), loadStats(), loadBookings()]);
     setRefreshing(false);
-  }, [fetchProfileStats, fetchGrabbedBundles]);
+  }, [loadPosts, loadSaved, loadStats, loadBookings]);
 
-  const userName = user?.fullName || 'User';
-  const userUsername = user?.username || '';
-  const userAvatar = user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
-  const userBio = user?.bio || '';
+  const openFollowList = async (type: 'followers' | 'following') => {
+    if (!myId) return;
+    setFollowList({ title: type === 'followers' ? 'Followers' : 'Following', users: [], loading: true });
+    const filterCol = type === 'followers' ? 'following_id' : 'follower_id';
+    const joinCol = type === 'followers' ? 'follower_id' : 'following_id';
+    const { data: rows } = await supabase.from('follows').select(joinCol).eq(filterCol, myId).neq(joinCol, myId);
+    const ids = ((rows || []) as any[]).map((r) => r[joinCol]);
+    let users: any[] = [];
+    if (ids.length) {
+      const { data } = await supabase.from('profiles').select('id, full_name, username, avatar').in('id', ids);
+      users = data || [];
+    }
+    setFollowList({ title: type === 'followers' ? 'Followers' : 'Following', users, loading: false });
+  };
+
+  const shareProfile = () => {
+    tap();
+    const handle = user?.username ? `@${user.username}` : (user?.fullName || 'me');
+    Share.share({ message: `Find ${handle} on Apparently` }).catch(() => {});
+  };
+
+  const openProfile = (id: string) => {
+    if (!id || id === myId) return;
+    router.push(`/user/${id}` as any);
+  };
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const name = user?.fullName || user?.username || 'Your name';
+  const username = user?.username || '';
+  const bio = (user?.bio || '').trim();
+  const avatar = user?.avatar || '';
+  const offers = useMemo(() => [
+    ...mySkills.map((s) => ({ kind: 'Skill' as const, ...s })),
+    ...myBundles.map((b) => ({ kind: 'Bundle' as const, ...b })),
+  ], [mySkills, myBundles]);
+
+  const highlights = [
+    { key: 'earn', label: 'Earned', value: money(earnings), icon: <DollarSign size={16} color={ACCENT.green} />, tint: ACCENT.green },
+    { key: 'streak', label: 'Day streak', value: String(streak), icon: <Flame size={16} color={ACCENT.gold} />, tint: ACCENT.gold },
+    { key: 'rating', label: reviewCount ? `${reviewCount} review${reviewCount === 1 ? '' : 's'}` : 'Rating', value: rating ? rating.toFixed(1) : '—', icon: <Star size={16} color={ACCENT.coral} />, tint: ACCENT.coral },
+    { key: 'done', label: 'Completed', value: String(completed), icon: <Briefcase size={16} color={ACCENT.blue} />, tint: ACCENT.blue },
+  ];
+
+  // ── Render helpers ─────────────────────────────────────────────────────────
+  const renderTabContent = () => {
+    if (tab === 'posts') {
+      if (postsLoading) return <Loading colors={colors} />;
+      if (postsError && posts.length === 0) {
+        return <Empty colors={colors} icon={<Camera size={26} color={colors.text} />} title="Couldn't load posts" text="Pull down to try again." />;
+      }
+      if (posts.length === 0) {
+        return (
+          <Empty
+            colors={colors}
+            icon={<Camera size={26} color={colors.text} />}
+            title="Share your first post"
+            text="Photos, videos and thoughts you post will show up here."
+            cta="Create a post"
+            onCta={() => router.push('/(tabs)/create' as any)}
+          />
+        );
+      }
+      return <PostGrid posts={posts} onPostPress={(i) => setViewer({ list: posts, index: i, title: 'Posts' })} />;
+    }
+
+    if (tab === 'saved') {
+      if (savedLoading) return <Loading colors={colors} />;
+      if (saved.length === 0) {
+        return <Empty colors={colors} icon={<Bookmark size={26} color={colors.text} />} title="Save posts for later" text="Tap the bookmark on any post. Only you can see what you've saved." />;
+      }
+      return <PostGrid posts={saved} onPostPress={(i) => setViewer({ list: saved, index: i, title: 'Saved' })} />;
+    }
+
+    // Activity: what you offer + what you've booked
+    return (
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 24 }}>
+        <View>
+          <View style={styles.sectionHead}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Your offers</Text>
+            <TouchableOpacity onPress={() => router.push('/skill-builder' as any)} style={styles.sectionLink}>
+              <Plus size={15} color={colors.accent} />
+              <Text style={[styles.sectionLinkText, { color: colors.accent }]}>New</Text>
+            </TouchableOpacity>
+          </View>
+          {offers.length === 0 ? (
+            <View style={[styles.card, styles.cardEmpty, { borderColor: colors.border }]}>
+              <Sparkles size={20} color={colors.textTertiary} />
+              <Text style={[styles.cardEmptyText, { color: colors.textSecondary }]}>List a skill or bundle so people can book you.</Text>
+            </View>
+          ) : offers.map((o) => (
+            <TouchableOpacity
+              key={`${o.kind}-${o.id}`}
+              style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setDetail({ title: o.title, description: o.description, price: Number(o.price || 0), category: o.category, imageUrl: o.imageUrl, icon: 'icon' in o ? (o as any).icon : undefined, grabCount: o.grabCount, createdAt: (o as any).createdAt, status: o.status })}
+            >
+              {o.imageUrl ? (
+                <Image source={{ uri: o.imageUrl }} style={styles.cardThumb} />
+              ) : (
+                <View style={[styles.cardThumb, styles.center, { backgroundColor: ACCENT.purple + '1F' }]}>
+                  {'icon' in o && (o as any).icon ? <Text style={{ fontSize: 22 }}>{(o as any).icon}</Text> : <Package size={20} color={ACCENT.purple} />}
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{o.title}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textTertiary }]} numberOfLines={1}>
+                  {o.kind} · {o.category}{o.grabCount ? ` · ${o.grabCount} booked` : ''}
+                </Text>
+              </View>
+              <Text style={[styles.cardPrice, { color: ACCENT.green }]}>${Number(o.price || 0)}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View>
+          <View style={styles.sectionHead}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Booked</Text>
+          </View>
+          {bookingsLoading ? <Loading colors={colors} /> : bookings.length === 0 ? (
+            <View style={[styles.card, styles.cardEmpty, { borderColor: colors.border }]}>
+              <CalendarDays size={20} color={colors.textTertiary} />
+              <Text style={[styles.cardEmptyText, { color: colors.textSecondary }]}>Things you book will show up here.</Text>
+            </View>
+          ) : bookings.map((b) => {
+            const sc = statusColor(b.status, colors.textTertiary);
+            return (
+              <TouchableOpacity
+                key={b.id}
+                style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                onPress={() => setDetail({ title: b.title, description: b.pickupTime ? `Pickup: ${new Date(b.pickupTime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : '', price: b.price, category: 'Booking', createdAt: b.bookedAt, status: b.status })}
+              >
+                <View style={[styles.cardThumb, styles.center, { backgroundColor: sc + '1F' }]}>
+                  <CalendarDays size={20} color={sc} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{b.title}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                    <View style={[styles.chip, { backgroundColor: sc + '1F' }]}>
+                      <Text style={[styles.chipText, { color: sc }]}>{b.status.replace('_', ' ')}</Text>
+                    </View>
+                    {b.bookedAt ? <Text style={[styles.cardMeta, { color: colors.textTertiary }]}>{new Date(b.bookedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text> : null}
+                  </View>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                  <Text style={[styles.cardPrice, { color: colors.text }]}>${b.price}</Text>
+                  <TouchableOpacity onPress={() => router.push('/inbox' as any)} hitSlop={8} accessibilityLabel="Message about this booking">
+                    <MessageCircle size={18} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+  // ── Screen ─────────────────────────────────────────────────────────────────
+  const coverHeight = insets.top + 96;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={ACCENT_COLORS.gold}
-          />
-        }
+        stickyHeaderIndices={[1]}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textTertiary} />}
       >
-        <Animated.View
-          style={{
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
-          }}
-        >
-          {/* Profile Header */}
-          <View style={styles.profileHeader}>
-            <LinearGradient
-              colors={isDark ? ['#1a1a2e', '#16213e'] : ['#667eea', '#764ba2']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.headerGradient, { paddingTop: insets.top + 16 }]}
-            >
-              <TouchableOpacity 
-                style={styles.plannerButton}
-                onPress={() => router.push('/(tabs)/planner' as any)}
-              >
-                <CalendarDays size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={styles.settingsButton}
-                onPress={() => router.push('/profile/settings' as any)}
-              >
-                <Settings size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-
-              <View style={styles.avatarSection}>
-                <View style={styles.avatarContainer}>
-                  <Image source={{ uri: userAvatar }} style={styles.avatar} />
-                  <TouchableOpacity style={styles.editAvatarButton} onPress={() => router.push('/profile/settings' as any)}>
-                    <Edit3 size={14} color="#FFFFFF" />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.userName}>{userName}</Text>
-                {userUsername ? <Text style={[styles.userBio, { fontWeight: '500' }]}>@{userUsername}</Text> : null}
-                <Text style={styles.userBio}>{userBio}</Text>
+        {/* ── Header ── */}
+        <View>
+          <LinearGradient
+            colors={isDark ? ['#1a1a2e', '#16213e'] : ['#667eea', '#764ba2']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ height: coverHeight }}
+          >
+            <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+              <Text style={styles.topHandle} numberOfLines={1}>{username ? `@${username}` : ''}</Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/(tabs)/planner' as any)} accessibilityLabel="Planner">
+                  <CalendarDays size={20} color="#FFF" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/profile/settings' as any)} accessibilityLabel="Settings">
+                  <Settings size={20} color="#FFF" />
+                </TouchableOpacity>
               </View>
-
-              {/* Streak Badge */}
-              <View style={styles.streakContainer}>
-                <View style={styles.streakBadge}>
-                  <Flame size={16} color={ACCENT_COLORS.gold} />
-                  <Text style={styles.streakText}>{streak} day streak</Text>
-                  <Text style={styles.streakBonus}>🔥</Text>
-                </View>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {/* Instagram-Style Stats Row */}
-          <View style={{ paddingHorizontal: 32, paddingTop: 28, paddingBottom: 16, flexDirection: 'row', justifyContent: 'space-around' }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{userPostsCount ?? 0}</Text>
-              <Text style={{ fontSize: 13, color: colors.textTertiary }}>posts</Text>
             </View>
-            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7} onPress={() => fetchFollowUsers('followers')}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followersCount}</Text>
-              <Text style={{ fontSize: 13, color: colors.textTertiary }}>followers</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={{ alignItems: 'center' }} activeOpacity={0.7} onPress={() => fetchFollowUsers('following')}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text }}>{followingCount}</Text>
-              <Text style={{ fontSize: 13, color: colors.textTertiary }}>following</Text>
-            </TouchableOpacity>
-          </View>
+          </LinearGradient>
 
-          {/* Tab Bar */}
-          <View style={{ flexDirection: 'row', borderTopWidth: 0.5, borderBottomWidth: 0.5, borderColor: colors.border }}>
-            {(['posts', 'saved'] as const).map((tab) => (
-              <TouchableOpacity
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: activeTab === tab ? colors.text : 'transparent' }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: activeTab === tab ? '700' : '500', color: activeTab === tab ? colors.text : colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  {tab}
-                </Text>
+          <View style={styles.identity}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push('/profile/settings' as any)}
+              style={[styles.avatarRing, { backgroundColor: colors.background }]}
+              accessibilityLabel="Change profile photo"
+            >
+              {avatar ? (
+                <Image source={{ uri: avatar }} style={styles.avatar} />
+              ) : (
+                <LinearGradient colors={['#667eea', '#764ba2']} style={[styles.avatar, styles.center]}>
+                  <Text style={styles.avatarInitial}>{name.charAt(0).toUpperCase()}</Text>
+                </LinearGradient>
+              )}
+              <View style={[styles.avatarEdit, { borderColor: colors.background, backgroundColor: colors.accent }]}>
+                <Camera size={12} color="#FFF" />
+              </View>
+            </TouchableOpacity>
+
+            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+            {bio ? (
+              <Text style={[styles.bio, { color: colors.textSecondary }]}>{bio}</Text>
+            ) : (
+              <TouchableOpacity onPress={() => router.push('/profile/settings' as any)}>
+                <Text style={[styles.bio, { color: colors.accent, fontWeight: '600' }]}>+ Add a bio</Text>
               </TouchableOpacity>
+            )}
+
+            <View style={styles.counts}>
+              <View style={styles.count}>
+                <Text style={[styles.countValue, { color: colors.text }]}>{posts.length}</Text>
+                <Text style={[styles.countLabel, { color: colors.textTertiary }]}>Posts</Text>
+              </View>
+              <View style={[styles.countDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity style={styles.count} onPress={() => openFollowList('followers')}>
+                <Text style={[styles.countValue, { color: colors.text }]}>{followersCount}</Text>
+                <Text style={[styles.countLabel, { color: colors.textTertiary }]}>Followers</Text>
+              </TouchableOpacity>
+              <View style={[styles.countDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity style={styles.count} onPress={() => openFollowList('following')}>
+                <Text style={[styles.countValue, { color: colors.text }]}>{followingCount}</Text>
+                <Text style={[styles.countLabel, { color: colors.textTertiary }]}>Following</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.buttons}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: colors.surfaceHighlight }]} onPress={() => router.push('/profile/settings' as any)}>
+                <Edit3 size={15} color={colors.text} />
+                <Text style={[styles.btnText, { color: colors.text }]}>Edit profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: colors.surfaceHighlight }]} onPress={shareProfile}>
+                <Share2 size={15} color={colors.text} />
+                <Text style={[styles.btnText, { color: colors.text }]}>Share profile</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlights}>
+            {highlights.map((h) => (
+              <View key={h.key} style={[styles.highlight, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={[styles.highlightIcon, { backgroundColor: h.tint + '1F' }]}>{h.icon}</View>
+                <View>
+                  <Text style={[styles.highlightValue, { color: colors.text }]}>{h.value}</Text>
+                  <Text style={[styles.highlightLabel, { color: colors.textTertiary }]}>{h.label}</Text>
+                </View>
+              </View>
             ))}
-          </View>
+          </ScrollView>
+        </View>
 
-          {/* Tab Content */}
-          <View style={{ paddingBottom: 100 }}>
-            {activeTab === 'posts' && <UserPostsGrid colors={colors} refreshKey={refreshKey} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
+        {/* ── Sticky tab bar ── */}
+        <View style={[styles.tabs, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+          {([
+            { key: 'posts', icon: Grid3x3, label: 'Posts' },
+            { key: 'saved', icon: Bookmark, label: 'Saved' },
+            { key: 'activity', icon: Briefcase, label: 'Activity' },
+          ] as const).map(({ key, icon: Icon, label }) => {
+            const active = tab === key;
+            return (
+              <TouchableOpacity key={key} style={styles.tab} onPress={() => { tap(); setTab(key); }} accessibilityLabel={label} accessibilityState={{ selected: active }}>
+                <Icon size={22} color={active ? colors.text : colors.textTertiary} />
+                <View style={[styles.tabIndicator, { backgroundColor: active ? colors.text : 'transparent' }]} />
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-            {activeTab === 'saved' && <SavedPostsGrid colors={colors} onPostPress={(post: any, posts: any[]) => { setSelectedPost(post); setViewerPosts(posts); }} />}
-          </View>
-        </Animated.View>
+        {/* ── Tab content ── */}
+        <View style={{ minHeight: 320 }}>{renderTabContent()}</View>
       </ScrollView>
 
-      {/* Post Viewer Modal — Instagram-style fullscreen */}
-      <InstagramPostViewer
-        visible={!!selectedPost}
-        post={selectedPost}
-        allPosts={viewerPosts}
-        onClose={() => { setSelectedPost(null); setViewerPosts([]); }}
-        onNavigate={(p: any) => setSelectedPost(p)}
-        onDelete={() => {
-          if (!selectedPost?.id) return;
-          supabase.from('posts').delete().eq('id', selectedPost.id).then(({ error }) => {
-            if (error) {
-              console.log('[Profile] Delete post failed:', error.message);
-              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Alert.alert('Could not delete', 'Something went wrong removing this post. Please try again.');
-              return;
-            }
-            socialDeletePost(selectedPost.id);
-            setUserPostsCount(prev => prev !== null ? prev - 1 : null);
-            setRefreshKey(k => k + 1); // re-query the grid so the deleted image disappears
-            setSelectedPost(null);
-            setViewerPosts([]);
-            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          });
-        }}
-        onReshare={() => {
-          if (!selectedPost?.id || !user?.id) return;
-          const p = selectedPost;
-          const reshareData = {
-            user_id: user.id,
-            content: JSON.stringify({ type: 'reshare', originalPostId: p.id, originalCaption: p.caption || p.content || '', originalAuthor: p.user?.name || p.author_name || '' }),
-            image_url: p.imageUrl || p.image_url || '',
-            post_kind: 'reshare',
-            likes: 0, comments: 0, shares: 0,
-          };
-          supabase.from('posts').insert(reshareData).then(({ error }) => {
-            if (!error) {
-              supabase.from('posts').select('shares').eq('id', p.id).single().then(({ data: orig }) => {
-                const current = orig?.shares || 0;
-                supabase.from('posts').update({ shares: current + 1 }).eq('id', p.id).then(() => {});
-              });
-              setSelectedPost(null);
-              setViewerPosts([]);
-            }
-          });
-        }}
-        onEdit={(newCaption: string) => {
-          if (!selectedPost?.id) return;
-          const caption = newCaption.trim();
-          supabase.from('posts').update({ content: caption }).eq('id', selectedPost.id).then(({ error }) => {
-            if (error) {
-              console.log('[Profile] Edit post failed:', error.message);
-              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Alert.alert('Could not update', 'Something went wrong saving your changes. Please try again.');
-              return;
-            }
-            socialUpdatePost(selectedPost.id, caption);
-            setRefreshKey(k => k + 1); // re-query the grid so the edited caption reflects
-            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          });
-        }}
+      {/* ── Post viewer ── */}
+      <PostViewer
+        visible={!!viewer}
+        posts={viewer?.list || []}
+        initialIndex={viewer?.index || 0}
+        title={viewer?.title}
         colors={colors}
+        onClose={() => { setViewer(null); loadPosts(); }}
+        onOpenProfile={openProfile}
+        onDeleted={(id) => {
+          setPosts((prev) => prev.filter((p) => p.id !== id));
+          setSavedPosts((prev) => prev.filter((p) => p.id !== id));
+        }}
+        onEdited={(id, caption) => {
+          setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, caption } : p)));
+          setSavedPosts((prev) => prev.map((p) => (p.id === id ? { ...p, caption } : p)));
+        }}
+        onSavedChange={() => loadSaved()}
       />
 
-      {/* Edit Profile Modal */}
-
-      {/* Detail Modal — for bundles, skills, service requests */}
-      <Modal visible={detailModalVisible} animationType="slide" transparent onRequestClose={() => setDetailModalVisible(false)}>
-        <View style={[styles.detailOverlay]}>
-          <View style={[styles.detailSheet, { backgroundColor: colors.surface }]}>
-            {/* Handle bar */}
-            <View style={[styles.detailHandle, { backgroundColor: colors.border }]} />
-            {/* Header */}
-            <View style={styles.detailHeader}>
-              <Text style={[styles.detailTitle, { color: colors.text }]}>{detailItem?.title || ''}</Text>
-              <TouchableOpacity onPress={() => setDetailModalVisible(false)} style={styles.detailCloseBtn}>
-                <X size={24} color={colors.text} />
-              </TouchableOpacity>
+      {/* ── Offer / booking detail ── */}
+      <Modal visible={!!detail} animationType="slide" transparent onRequestClose={() => setDetail(null)}>
+        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setDetail(null)}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 20 }]}>
+            <View style={[styles.sheetGrab, { backgroundColor: colors.border }]} />
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={2}>{detail?.title}</Text>
+              <TouchableOpacity onPress={() => setDetail(null)} hitSlop={8}><X size={22} color={colors.text} /></TouchableOpacity>
             </View>
-            <ScrollView style={styles.detailBody} showsVerticalScrollIndicator={false}>
-              {detailItem?.imageUrl ? (
-                <Image source={{ uri: detailItem.imageUrl }} style={styles.detailImage} resizeMode="cover" />
-              ) : detailItem?.icon ? (
-                <View style={[styles.detailIconPlaceholder, { backgroundColor: colors.border }]}>
-                  <Text style={{ fontSize: 48 }}>{detailItem.icon}</Text>
+            <ScrollView style={{ paddingHorizontal: 20 }}>
+              {detail?.imageUrl ? <Image source={{ uri: detail.imageUrl }} style={styles.detailImage} /> : null}
+              {[
+                ['Price', `$${detail?.price ?? 0}`],
+                ['Type', detail?.category || '—'],
+                detail?.status ? ['Status', detail.status.replace('_', ' ')] : null,
+                detail?.grabCount ? ['Booked', String(detail.grabCount)] : null,
+                detail?.createdAt ? ['Date', new Date(detail.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })] : null,
+              ].filter(Boolean).map((row) => (
+                <View key={row![0]} style={[styles.detailRow, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{row![0]}</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{row![1]}</Text>
                 </View>
-              ) : null}
-              <View style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Price</Text>
-                <Text style={[styles.detailValue, { color: ACCENT_COLORS.neonGreen }]}>${detailItem?.price ?? 0}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Category</Text>
-                <Text style={[styles.detailValue, { color: colors.text }]}>{detailItem?.category || '-'}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Grabs</Text>
-                <Text style={[styles.detailValue, { color: colors.text }]}>{detailItem?.grabCount ?? 0}</Text>
-              </View>
-              {detailItem?.created_at && (
-                <View style={styles.detailRow}>
-                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Posted</Text>
-                  <Text style={[styles.detailValue, { color: colors.text }]}>{new Date(detailItem.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-                </View>
-              )}
-              {detailItem?.description ? (
-                <View style={styles.detailSection}>
-                  <Text style={[styles.detailLabel, { color: colors.textSecondary, marginBottom: 6 }]}>Description</Text>
-                  <Text style={[styles.detailDesc, { color: colors.text }]}>{detailItem.description}</Text>
-                </View>
-              ) : null}
+              ))}
+              {detail?.description ? <Text style={[styles.detailDesc, { color: colors.text }]}>{detail.description}</Text> : null}
             </ScrollView>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
-      {/* Follow List Modal — followers / following user list */}
-      <Modal visible={followListVisible} animationType="slide" transparent onRequestClose={() => setFollowListVisible(false)}>
-        <View style={[styles.detailOverlay]}>
-          <View style={[styles.detailSheet, { backgroundColor: colors.surface }]}>
-            <View style={[styles.detailHandle, { backgroundColor: colors.border }]} />
-            <View style={styles.detailHeader}>
-              <Text style={[styles.detailTitle, { color: colors.text }]}>{followListTitle}</Text>
-              <TouchableOpacity onPress={() => setFollowListVisible(false)} style={styles.detailCloseBtn}>
-                <X size={24} color={colors.text} />
-              </TouchableOpacity>
+      {/* ── Followers / following ── */}
+      <Modal visible={!!followList} animationType="slide" transparent onRequestClose={() => setFollowList(null)}>
+        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setFollowList(null)}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheet, { backgroundColor: colors.surface, height: '70%' }]}>
+            <View style={[styles.sheetGrab, { backgroundColor: colors.border }]} />
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>{followList?.title}</Text>
+              <TouchableOpacity onPress={() => setFollowList(null)} hitSlop={8}><X size={22} color={colors.text} /></TouchableOpacity>
             </View>
-            {loadingFollowList ? (
-              <View style={{ padding: 40, alignItems: 'center' }}>
-                <ActivityIndicator size="large" color={ACCENT_COLORS.neonGreen} />
-              </View>
-            ) : followListUsers.length === 0 ? (
-              <View style={{ padding: 40, alignItems: 'center' }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 15 }}>No users yet</Text>
-              </View>
+            {followList?.loading ? (
+              <Loading colors={colors} />
             ) : (
               <FlatList
-                data={followListUsers}
-                keyExtractor={(item: any) => item.id}
-                showsVerticalScrollIndicator={false}
-                style={{ flex: 1 }}
+                data={followList?.users || []}
+                keyExtractor={(u: any) => u.id}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+                ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'center', paddingTop: 40 }]}>No one here yet</Text>}
                 renderItem={({ item }: any) => (
-                  <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 12 }}
-                    onPress={() => {
-                      setFollowListVisible(false);
-                      router.push(`/user/${item.id}`);
-                    }}
-                  >
+                  <TouchableOpacity style={styles.personRow} onPress={() => { setFollowList(null); router.push(`/user/${item.id}` as any); }}>
                     {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                      <Image source={{ uri: item.avatar }} style={styles.personAvatar} />
                     ) : (
-                      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ fontSize: 20, color: colors.textSecondary }}>{item.full_name?.charAt(0) || '?'}</Text>
+                      <View style={[styles.personAvatar, styles.center, { backgroundColor: colors.surfaceHighlight }]}>
+                        <Text style={{ color: colors.textSecondary, fontWeight: '700' }}>{(item.full_name || item.username || '?').charAt(0).toUpperCase()}</Text>
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text }} numberOfLines={1}>{item.full_name || 'Unknown'}</Text>
-                      <Text style={{ fontSize: 13, color: colors.textSecondary }}>@{item.username || 'user'}</Text>
+                      <Text style={[styles.personName, { color: colors.text }]} numberOfLines={1}>{item.username || item.full_name || 'User'}</Text>
+                      {item.full_name ? <Text style={[styles.personSub, { color: colors.textTertiary }]} numberOfLines={1}>{item.full_name}</Text> : null}
                     </View>
-                    <ChevronRight size={20} color={colors.textSecondary} />
+                    <ChevronRight size={18} color={colors.textTertiary} />
                   </TouchableOpacity>
                 )}
               />
             )}
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Instagram-Style Fullscreen Post Viewer
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Instagram-Style Fullscreen Post Viewer (profile)
-// ═══════════════════════════════════════════════════════════════════════════
-function InstagramPostViewer({ visible, post, allPosts, onClose, onNavigate, onDelete, onReshare, onEdit, colors }: {
-  visible: boolean;
-  post: any;
-  allPosts?: any[];
-  onClose: () => void;
-  onNavigate?: (post: any) => void;
-  onDelete?: () => void;
-  onReshare?: () => void;
-  onEdit?: (newCaption: string) => void;
-  colors: any;
-}) {
-  const translateY = useRef(new Animated.Value(0)).current;
-  const bgOpacity = useRef(new Animated.Value(1)).current;
-  const { toggleLike: socialLike, addComment: socialComment } = useSocial();
-  const { user: authUser } = useAuth();
-  const flatListRef = useRef<FlatList>(null);
-
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
-  const [comments, setComments] = useState<any[]>([]);
-  const [commentText, setCommentText] = useState('');
-  const [commenting, setCommenting] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [showComments, setShowComments] = useState(true);
-  const [showOptions, setShowOptions] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
-  const [editText, setEditText] = useState('');
-
-  const postsList = allPosts && allPosts.length > 0 ? allPosts : (post ? [post] : []);
-  const currentPost = postsList[activeIndex] || post;
-  const postId = currentPost?.id || '';
-  const imageUrl = currentPost?.imageUrl || currentPost?.image_url || currentPost?.mediaUri || '';
-  const authorName = currentPost?.user?.username || currentPost?.user?.name || currentPost?.author_name || currentPost?.author?.name || currentPost?.author?.username || (currentPost?.isOwnPost ? (authUser?.username || authUser?.fullName || 'You') : 'User');
-  const caption = currentPost?.caption || currentPost?.content || '';
-  const timestamp = currentPost?.timestamp || currentPost?.created_at || '';
-
-  const screenHeight = Dimensions.get('window').height;
-  const screenWidth = Dimensions.get('window').width;
-
-  // Scroll to selected post on open
-  useEffect(() => {
-    if (visible && post && postsList.length > 1) {
-      const idx = postsList.findIndex(p => p.id === post.id);
-      if (idx >= 0 && flatListRef.current) {
-        setActiveIndex(idx);
-        setTimeout(() => flatListRef.current?.scrollToIndex({ index: idx, animated: false }), 50);
-      }
-    }
-  }, [visible, post?.id]);
-
-  // Load comments when post changes
-  useEffect(() => {
-    if (!visible || !postId) return;
-    setLiked(false);
-    setLikeCount(currentPost?.likes ?? 0);
-    setCommentText('');
-    supabase
-      .from('post_comments')
-      .select('id, content:text, created_at, author_id, profiles:profiles(full_name, username, avatar)')
-      .eq('post_id', postId)
-      .order('created_at', { ascending: true })
-      .limit(50)
-      .then(({ data, error }) => {
-        if (!error && data) setComments(data || []);
-      });
-  }, [visible, postId]);
-
-  useEffect(() => {
-    if (!visible) {
-      translateY.setValue(0);
-      bgOpacity.setValue(1);
-    }
-  }, [visible]);
-
-  // Always render Modal shell — visible prop handles show/hide
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(translateY, { toValue: 300, duration: 250, useNativeDriver: false }),
-      Animated.timing(bgOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-    ]).start(() => {
-      translateY.setValue(0);
-      bgOpacity.setValue(1);
-      onClose();
-    });
-  };
-
-  const toggleLikeLocal = async () => {
-    if (!postId || liked) return; // Don't unlike your own post in this view
-    setLiked(true);
-    setLikeCount(prev => prev + 1);
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    // Persist to DB and context
-    try {
-      await socialLike(postId);
-    } catch (e) {
-      console.log('[Viewer] Like error:', e);
-    }
-  };
-
-  const handleAddComment = async () => {
-    const text = commentText.trim();
-    if (!text || !postId || commenting) return;
-    setCommenting(true);
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    try {
-      await socialComment(postId, text);
-      // Optimistic add
-      setComments(prev => [...prev, {
-        id: `temp-${Date.now()}`,
-        content: text,
-        created_at: new Date().toISOString(),
-        author_id: 'me',
-      }]);
-      setCommentText('');
-    } catch (e) {
-      console.log('[Viewer] Comment error:', e);
-    } finally {
-      setCommenting(false);
-    }
-  };
-
-  // ── Swipeable image pager ──
-  const renderSwipeItem = ({ item }: { item: any }) => {
-    const imgUrl = item?.imageUrl || item?.image_url || item?.mediaUri || '';
-    return (
-      <View style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => setShowComments(prev => !prev)}
-          style={{ width: screenWidth, height: screenHeight, backgroundColor: '#000' }}
-        >
-          <Image
-            source={{ uri: imgUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800' }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
-        {/* Per-image three-dot: rendered after (on top of) this image so taps always land */}
-        <TouchableOpacity
-          style={viewerStyles.topThreeDot}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          onPress={() => setShowOptions(true)}
-        >
-          <MoreHorizontal size={24} color="#FFF" />
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const handleMomentumScrollEnd = useCallback((e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
-    if (idx !== activeIndex) {
-      setActiveIndex(idx);
-      if (onNavigate && postsList[idx]) {
-        onNavigate(postsList[idx]);
-      }
-    }
-  }, [activeIndex, postsList, onNavigate, screenWidth]);
-
-  return (
-    <>
-    <Modal visible={visible} animationType="none" transparent statusBarTranslucent>
-      <Animated.View style={[viewerStyles.backdrop, { opacity: bgOpacity }]}>
-        {/* Tap-to-dismiss background */}
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
-
-        {/* Dot indicators */}
-        {postsList.length > 1 && (
-          <View style={viewerStyles.dotRow}>
-            {postsList.map((_, i) => (
-              <View key={i} style={[viewerStyles.dot, { backgroundColor: i === activeIndex ? '#FFF' : 'rgba(255,255,255,0.4)' }]} />
-            ))}
-          </View>
-        )}
-
-        {/* Swipeable image pager */}
-        <Animated.View style={{ transform: [{ translateY }] }}>
-          <FlatList
-            ref={flatListRef}
-            data={postsList}
-            renderItem={renderSwipeItem}
-            keyExtractor={(item: any, index: number) => item.id || `post-${index}`}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={handleMomentumScrollEnd}
-            initialNumToRender={3}
-            getItemLayout={(_, index) => ({
-              length: screenWidth,
-              offset: screenWidth * index,
-              index,
-            })}
-          />
-        </Animated.View>
-
-          {/* Engagement + comments sheet — toggled by tapping image */}
-        {showComments && (
-        <Animated.View style={[viewerStyles.igSheet, { transform: [{ translateY }] }]}>
-          {/* Drag handle */}
-          <View style={viewerStyles.sheetHandle} />
-
-          {/* Author + close row */}
-          <View style={viewerStyles.sheetHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={viewerStyles.authorLabel}>{authorName}</Text>
-              <Text style={viewerStyles.metaLabel}>
-                {typeof timestamp === 'string' ? timestamp : new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </Text>
-            </View>
-            <TouchableOpacity style={viewerStyles.xBtn} onPress={() => setShowOptions(true)}>
-              <MoreHorizontal size={22} color="#CCC" />
-            </TouchableOpacity>
-            <TouchableOpacity style={viewerStyles.xBtn} onPress={handleClose}>
-              <X size={22} color="#CCC" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Caption */}
-          {caption ? (
-            <Text style={viewerStyles.captionText} numberOfLines={5}>
-              {caption}
-            </Text>
-          ) : null}
-
-          {/* Like button */}
-          <View style={viewerStyles.engagementRow}>
-            <TouchableOpacity onPress={toggleLikeLocal} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Heart size={22} color={liked ? '#EF4444' : '#999'} fill={liked ? '#EF4444' : 'none'} />
-              <Text style={viewerStyles.likesText}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
-            </TouchableOpacity>
-            {onReshare && (
-              <TouchableOpacity onPress={onReshare} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 24 }}>
-                <Forward size={20} color="#22C55E" />
-                <Text style={[viewerStyles.likesText, { color: '#22C55E' }]}>Reshare</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Comments list */}
-          <ScrollView style={{ maxHeight: 140 }} showsVerticalScrollIndicator={false}>
-            {comments.length === 0 ? (
-              <Text style={viewerStyles.noComments}>No comments yet. Be the first!</Text>
-            ) : (
-              comments.map((c, i) => {
-                const authorName = c.author_id === 'me' ? 'you' : (c.profiles?.username || c.profiles?.full_name || 'user');
-                return (
-                <View key={c.id || i} style={viewerStyles.commentRow}>
-                  <Text style={viewerStyles.commentUser}>@{authorName}</Text>
-                  <Text style={viewerStyles.commentBody}>{c.content}</Text>
-                </View>
-                );
-              })
-            )}
-          </ScrollView>
-
-          {/* Comment input */}
-          <View style={viewerStyles.commentInputRow}>
-            <TextInput
-              style={viewerStyles.commentInput}
-              placeholder="Add a comment..."
-              placeholderTextColor="#666"
-              value={commentText}
-              onChangeText={setCommentText}
-              onSubmitEditing={handleAddComment}
-              returnKeyType="send"
-            />
-            <TouchableOpacity onPress={handleAddComment} disabled={!commentText.trim() || commenting}>
-              <Send size={18} color={commentText.trim() ? colors.accent : '#555'} />
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-        )}
-    {/* Options action sheet (overlay inside the viewer modal) */}
-    {showOptions && (
-      <TouchableOpacity
-        style={viewerStyles.optionOverlay}
-        activeOpacity={1}
-        onPress={() => setShowOptions(false)}
-      >
-        <View style={[viewerStyles.optionSheet, { backgroundColor: '#1C1C1E' }]}>
-          {onEdit && (
-            <TouchableOpacity
-              style={viewerStyles.optionItem}
-              onPress={() => {
-                setShowOptions(false);
-                setTimeout(() => {
-                  setEditText(caption || '');
-                  setShowEdit(true);
-                }, 350);
-              }}
-            >
-              <Edit3 size={20} color="#FFFFFF" />
-              <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Edit Post</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
-            onPress={() => {
-              setShowOptions(false);
-              Share.share({ message: caption ? `Check out this post: ${caption}` : 'Check out this post on Apparently' }).catch(() => {});
-            }}
-          >
-            <Forward size={20} color="#FFFFFF" />
-            <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Share Post</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
-            onPress={() => {
-              setShowOptions(false);
-              if (!postId) return;
-              supabase.from('reports').insert({ post_id: postId, reported_by: authUser?.id || null, reason: 'Reported post' }).then(({ error }) => {
-                if (error) { Alert.alert('Could not report', error.message); }
-                else { Alert.alert('Reported', 'Thanks — we will review this post.'); }
-              });
-            }}
-          >
-            <BellRing size={20} color="#FFFFFF" />
-            <Text style={[viewerStyles.optionText, { color: '#FFFFFF' }]}>Report Post</Text>
-          </TouchableOpacity>
-          {onDelete && (
-            <TouchableOpacity
-              style={viewerStyles.optionItem}
-              onPress={() => {
-                setShowOptions(false);
-                setTimeout(() => {
-                  Alert.alert(
-                    'Delete Post',
-                    'This action cannot be undone. Are you sure?',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => onDelete?.() },
-                    ]
-                  );
-                }, 350);
-              }}
-            >
-              <Trash2 size={20} color="#EF4444" />
-              <Text style={[viewerStyles.optionText, { color: '#EF4444' }]}>Delete Post</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[viewerStyles.optionItem, { borderTopWidth: 0 }]}
-            onPress={() => setShowOptions(false)}
-          >
-            <X size={20} color="#999" />
-            <Text style={[viewerStyles.optionText, { color: '#999' }]}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    )}
-
-    {/* Edit caption (overlay inside the viewer modal) */}
-    {showEdit && (
-      <TouchableOpacity style={viewerStyles.editOverlay} activeOpacity={1} onPress={() => setShowEdit(false)}>
-        <View style={[viewerStyles.editSheet, { backgroundColor: '#1C1C1E' }]}>
-          <Text style={[viewerStyles.optionText, { color: '#FFFFFF', marginBottom: 12, fontWeight: '700' }]}>Edit caption</Text>
-          <TextInput
-            style={viewerStyles.editInput}
-            multiline
-            value={editText}
-            onChangeText={setEditText}
-            placeholder="Write a caption..."
-            placeholderTextColor="#777"
-            maxLength={2000}
-          />
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 16 }}>
-            <TouchableOpacity onPress={() => setShowEdit(false)}>
-              <Text style={[viewerStyles.optionText, { color: '#999' }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => {
-              const next = editText.trim();
-              setShowEdit(false);
-              if (onEdit) onEdit(next);
-            }}>
-              <Text style={[viewerStyles.optionText, { color: '#22C55E', fontWeight: '700' }]}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    )}
-      </Animated.View>
-    </Modal>
-  </>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  profileHeader: {
-    marginBottom: -20,
-  },
-  headerGradient: {
-    paddingBottom: 40,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-  },
-  plannerButton: {
-    position: 'absolute',
-    top: 60,
-    right: 74,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsButton: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarSection: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  avatarContainer: {
-    position: 'relative',
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  editAvatarButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: ACCENT_COLORS.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-  },
-  userName: {
-    fontSize: 26,
-    fontWeight: '700' as const,
-    color: '#FFFFFF',
-    marginTop: 16,
-  },
-  userBio: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 4,
-  },
-  streakContainer: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  streakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  streakText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#FFFFFF',
-  },
-  streakBonus: {
-    fontSize: 14,
-  },
-  statsSection: {
-    paddingHorizontal: 16,
-    paddingTop: 36,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  statCard: {
-    width: '47%',
-    padding: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  statIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '800' as const,
-  },
-  statLabel: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  quickActionsSection: {
-    paddingHorizontal: 16,
-    marginTop: 24,
-    gap: 12,
-  },
-  quickActionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  quickActionGradient: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickActionText: {
-    flex: 1,
-    marginLeft: 14,
-  },
-  quickActionTitle: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-  },
-  quickActionSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  section: {
-    paddingHorizontal: 16,
-    marginTop: 28,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700' as const,
-  },
-  bundleLoadingContainer: {
-    padding: 24,
-    alignItems: 'center',
-    borderRadius: 16,
-  },
-  bundleLoadingText: {
-    fontSize: 14,
-  },
-  bundleEmptyState: {
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  emptyIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  bundleEmptyTitle: {
-    fontSize: 18,
-    fontWeight: '600' as const,
-    marginBottom: 6,
-  },
-  bundleEmptyText: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  emptyStateButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  emptyStateButtonText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-  },
-  bundlesList: {
-    gap: 10,
-  },
-  bundleCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  bundleCardLeft: {
-    marginRight: 12,
-  },
-  bundleIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bundleCardContent: {
-    flex: 1,
-  },
-  bundleTitle: {
-    fontSize: 15,
-    fontWeight: '600' as const,
-    marginBottom: 6,
-  },
-  bundleMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  bundleStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  bundleStatusText: {
-    fontSize: 11,
-    fontWeight: '600' as const,
-    textTransform: 'capitalize' as const,
-  },
-  bundleDate: {
-    fontSize: 12,
-  },
-  bundleCardRight: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  bundleBudget: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-  },
-  viewAllButton: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  viewAllText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-  },
-  activityCard: {
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  activityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 12,
-  },
-  activityText: {
-    flex: 1,
-    fontSize: 14,
-  },
-  activityTime: {
-    fontSize: 12,
-  },
-  // ── Edit Profile Modal ──
+  container: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  // ── Detail Modal ──
-  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  detailSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%', paddingBottom: 40 },
-  detailHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 10 },
-  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
-  detailTitle: { fontSize: 20, fontWeight: '700', flex: 1 },
-  detailCloseBtn: { padding: 4 },
-  detailBody: { paddingHorizontal: 20 },
-  detailImage: { width: '100%', height: 200, borderRadius: 12, marginTop: 8 },
-  detailIconPlaceholder: { width: '100%', height: 120, borderRadius: 12, marginTop: 8, alignItems: 'center', justifyContent: 'center' },
-  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
+  topHandle: { color: '#FFF', fontSize: 16, fontWeight: '700', flex: 1, marginRight: 12 },
+  glassBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+
+  identity: { alignItems: 'center', paddingHorizontal: 24, marginTop: -52 },
+  avatarRing: { padding: 4, borderRadius: 60 },
+  avatar: { width: 100, height: 100, borderRadius: 50 },
+  avatarInitial: { color: '#FFF', fontSize: 40, fontWeight: '800' },
+  avatarEdit: { position: 'absolute', right: 4, bottom: 4, width: 28, height: 28, borderRadius: 14, borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 22, fontWeight: '800', marginTop: 10, letterSpacing: -0.3 },
+  bio: { fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 6, maxWidth: 320 },
+
+  counts: { flexDirection: 'row', alignItems: 'center', marginTop: 18 },
+  count: { alignItems: 'center', minWidth: 84 },
+  countValue: { fontSize: 18, fontWeight: '800' },
+  countLabel: { fontSize: 12, marginTop: 2 },
+  countDivider: { width: StyleSheet.hairlineWidth * 2, height: 26 },
+
+  buttons: { flexDirection: 'row', gap: 8, marginTop: 18, alignSelf: 'stretch' },
+  btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 38, borderRadius: 10 },
+  btnText: { fontSize: 14, fontWeight: '700' },
+
+  highlights: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 16, gap: 10 },
+  highlight: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingLeft: 10, paddingRight: 16, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
+  highlightIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  highlightValue: { fontSize: 15, fontWeight: '800' },
+  highlightLabel: { fontSize: 11, marginTop: 1 },
+
+  tabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderTopWidth: 0 },
+  tab: { flex: 1, alignItems: 'center', paddingTop: 12 },
+  tabIndicator: { height: 2, width: '60%', marginTop: 10, borderRadius: 1 },
+
+  empty: { alignItems: 'center', paddingTop: 48, paddingHorizontal: 40 },
+  emptyIcon: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', marginBottom: 6 },
+  emptyText: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  emptyBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
+  emptyBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionTitle: { fontSize: 17, fontWeight: '800' },
+  sectionLink: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  sectionLinkText: { fontSize: 14, fontWeight: '700' },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, marginBottom: 8 },
+  cardEmpty: { borderStyle: 'dashed', borderWidth: 1, paddingVertical: 18 },
+  cardEmptyText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  cardThumb: { width: 44, height: 44, borderRadius: 10 },
+  cardTitle: { fontSize: 15, fontWeight: '700' },
+  cardMeta: { fontSize: 12, marginTop: 2 },
+  cardPrice: { fontSize: 15, fontWeight: '800' },
+  chip: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  chipText: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
+
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%' },
+  sheetGrab: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 8 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8 },
+  sheetTitle: { fontSize: 19, fontWeight: '800', flex: 1 },
+  detailImage: { width: '100%', height: 190, borderRadius: 12, marginBottom: 8 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   detailLabel: { fontSize: 14, fontWeight: '600' },
-  detailValue: { fontSize: 15, fontWeight: '500' },
-  detailSection: { paddingVertical: 12 },
-  detailDesc: { fontSize: 15, lineHeight: 22 },
-});
-
-// ── Instagram Post Styles ──
-const igStyles = StyleSheet.create({
-  postsContainer: { gap: 16 },
-  postCard: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
-  postHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10 },
-  postHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  postAvatar: { width: 36, height: 36, borderRadius: 18 },
-  postHeaderText: { gap: 1 },
-  postUsername: { fontSize: 13, fontWeight: '700' },
-  postLocation: { fontSize: 11 },
-  postMenuBtn: { padding: 4 },
-  postMenuDots: { fontSize: 18, fontWeight: '700', letterSpacing: 1 },
-  postImage: { width: '100%', height: 340 },
-  actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 10 },
-  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  actionBtn: { padding: 4 },
-  likesRow: { paddingHorizontal: 12, paddingTop: 6 },
-  likesText: { fontSize: 13, lineHeight: 18 },
-  boldText: { fontWeight: '700' },
-  captionRow: { paddingHorizontal: 12, paddingTop: 4 },
-  captionText: { fontSize: 13, lineHeight: 18 },
-  commentsLink: { paddingHorizontal: 12, paddingTop: 4 },
-  commentsLinkText: { fontSize: 13 },
-  postTimestamp: { fontSize: 11, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 12, textTransform: 'uppercase', letterSpacing: 0.3 },
-});
-
-// ── Instagram Grid Styles ──
-const profileStyles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 0 },
-  gridEmpty: { paddingVertical: 48, alignItems: 'center', paddingHorizontal: 24 },
-  gridEmptyIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  gridEmptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  gridEmptyText: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
-  gridOverlay: { position: 'absolute', bottom: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
-  gridOverlayText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
-});
-
-// ── Instagram Post Viewer Styles ──
-const viewerStyles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
-  // Always-visible more-options (three-dot) pinned top-right of open photo
-  topThreeDot: {
-    position: 'absolute',
-    top: 56,
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  // Image post
-  igImage: { backgroundColor: '#111' },
-  igSheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#1a1a1a',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    paddingTop: 12, paddingBottom: 40, paddingHorizontal: 16,
-  },
-  sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  authorLabel: { fontSize: 16, fontWeight: '700', color: '#FFF' },
-  metaLabel: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
-  xBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
-  captionText: { fontSize: 14, color: '#DDD', lineHeight: 20, marginTop: 4 },
-  engagementRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 },
-  likesText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
-  // Text-only post
-  textCard: {
-    marginHorizontal: 24, marginTop: 'auto', marginBottom: 'auto',
-    backgroundColor: '#1a1a1a', borderRadius: 20, padding: 24, alignItems: 'center',
-  },
-  optionOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
-    paddingBottom: 40,
-    paddingHorizontal: 16,
-    zIndex: 30,
-  },
-  editOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    zIndex: 40,
-  },
-  optionSheet: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  editSheet: {
-    width: '88%',
-    maxWidth: 420,
-    borderRadius: 16,
-    backgroundColor: '#1C1C1E',
-    padding: 20,
-  },
-  editInput: {
-    minHeight: 90,
-    maxHeight: 200,
-    borderRadius: 10,
-    backgroundColor: '#2A2A2E',
-    color: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    textAlignVertical: 'top',
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    gap: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#333',
-  },
-  optionText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-
-  textCardHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 },
-  dismissBtn: { marginTop: 16, paddingHorizontal: 32, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)' },
-  dismissBtnText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
-  // Keep backward compat
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  dismissArea: { ...StyleSheet.absoluteFill, zIndex: 0 },
-  container: { width: '100%', alignItems: 'center', zIndex: 1 },
-  closeButton: { position: 'absolute', top: 56, right: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
-  image: { width: Dimensions.get('window').width, height: Dimensions.get('window').width, backgroundColor: '#0a0a0a' },
-  // Dot indicators for swipe
-  dotRow: { position: 'absolute', top: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6, zIndex: 5 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  infoSheet: { width: '100%', paddingTop: 12 },
-  authorRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 10 },
-  authorAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#333' },
-  authorName: { fontSize: 15, fontWeight: '700', color: '#FFF' },
-  caption: { fontSize: 14, color: '#FFF', paddingHorizontal: 16, paddingTop: 8, lineHeight: 20 },
-  timestamp: { fontSize: 11, color: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingTop: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
-  // Comments
-  noComments: { fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'center', paddingVertical: 16 },
-  commentRow: { flexDirection: 'row', gap: 6, paddingVertical: 6 },
-  commentUser: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
-  commentBody: { fontSize: 13, color: '#DDD', flex: 1 },
-  commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
-  commentInput: { flex: 1, fontSize: 14, color: '#FFF', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20 },
-  commentAuthor: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
-  commentText: { fontSize: 13, color: '#DDD' },
+  detailValue: { fontSize: 15, fontWeight: '600', textTransform: 'capitalize' },
+  detailDesc: { fontSize: 15, lineHeight: 22, paddingVertical: 14 },
+  personRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 10 },
+  personAvatar: { width: 44, height: 44, borderRadius: 22 },
+  personName: { fontSize: 15, fontWeight: '700' },
+  personSub: { fontSize: 13, marginTop: 1 },
 });

@@ -101,6 +101,13 @@ export interface SocialComment {
   parentId?: string;
 }
 
+export interface AddCommentOptions {
+  /** Queue the comment for a later retry when the network call fails (default true). */
+  queueOnFail?: boolean;
+  /** Author of the comment being replied to — they get a "replied" notification. */
+  replyToAuthorId?: string;
+}
+
 export interface StoryInteraction {
   storyId: string;
   likes: number;
@@ -138,7 +145,9 @@ interface SocialState {
   /** Re-fetch posts, like/comment counts and the viewer's likes. */
   refreshPosts: () => Promise<void>;
   toggleLike: (postId: string, initialLikeCount?: number) => void;
-  addComment: (postId: string, text: string, parentId?: string) => Promise<boolean>;
+  addComment: (postId: string, text: string, parentId?: string, options?: AddCommentOptions) => Promise<boolean>;
+  /** Shift a post's cached comment count (e.g. after a comment is deleted). */
+  adjustCommentCount: (postId: string, delta: number) => void;
   toggleCommentLike: (postId: string, commentId: string) => void;
   sharePost: (post: Post) => Promise<void>;
   getComments: (postId: string) => SocialComment[];
@@ -553,7 +562,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }
   }, [ensureInteraction, interactions, persistState, authUserId, currentUserProfile]);
 
-  const addComment = useCallback(async (postId: string, text: string, parentId?: string): Promise<boolean> => {
+  const addComment = useCallback(async (postId: string, text: string, parentId?: string, options?: AddCommentOptions): Promise<boolean> => {
+    const queueOnFail = options?.queueOnFail ?? true;
     if (!text.trim()) {
       return false;
     }
@@ -600,9 +610,32 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         await localApi.addComment(postId, authUserId, text, parentId);
         saved = true;
       } catch (e: any) {
-        logger.warn('SocialContext', 'addComment API failed — queuing for retry', { error: e?.message, postId });
-        queueAction({ id: `comment_${postId}_${newComment.id}`, type: 'comment', payload: { postId, userId: authUserId, text, parentId }, createdAt: Date.now() });
+        if (queueOnFail) {
+          logger.warn('SocialContext', 'addComment API failed — queuing for retry', { error: e?.message, postId });
+          queueAction({ id: `comment_${postId}_${newComment.id}`, type: 'comment', payload: { postId, userId: authUserId, text, parentId }, createdAt: Date.now() });
+        } else {
+          // Caller handles the failure itself — undo the optimistic count bump.
+          logger.warn('SocialContext', 'addComment API failed', { error: e?.message, postId });
+          persistState({ ...interactions, [postId]: current });
+          return false;
+        }
       }
+    }
+    // Let the person being replied to know (the post author is notified below).
+    const replyTo = options?.replyToAuthorId;
+    if (saved && replyTo && replyTo !== authUserId) {
+      supabase.from('posts').select('user_id, image_url').eq('id', postId).single().then(({ data: post }: any) => {
+        if (!post || post.user_id === replyTo) return;
+        const actorName = currentUserProfile?.fullName || currentUserProfile?.username || 'Someone';
+        supabase.from('notifications').insert({
+          user_id: replyTo, actor_id: authUserId, type: 'comment',
+          actor_name: actorName, actor_avatar: currentUserProfile?.avatar || '',
+          title: `${actorName} replied to your comment`,
+          body: 'replied: "' + text.slice(0, 60) + '"',
+          data: { post_id: postId, post_image_url: post.image_url || '', post_user_id: post.user_id },
+          read: false, created_at: new Date().toISOString(),
+        }).then(() => {});
+      });
     }
     // Send notification to post author (DB columns: user_id, actor_id, actor_name, data)
     if (authUserId && authUserId !== 'u-dev') {
@@ -627,6 +660,12 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }
     return saved;
   }, [ensureInteraction, interactions, persistState, authUserId, currentUserProfile]);
+
+  const adjustCommentCount = useCallback((postId: string, delta: number) => {
+    const current = interactions[postId];
+    if (!current) return;
+    persistState({ ...interactions, [postId]: { ...current, commentCount: Math.max(0, current.commentCount + delta) } });
+  }, [interactions, persistState]);
 
   const toggleCommentLike = useCallback((postId: string, commentId: string) => {
     const current = ensureInteraction(postId);
@@ -1077,6 +1116,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     refreshPosts,
     toggleLike,
     addComment,
+    adjustCommentCount,
     toggleCommentLike,
     sharePost,
     getComments,

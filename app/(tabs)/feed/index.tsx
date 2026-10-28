@@ -53,7 +53,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import AppVideo from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
-import { getComments } from '@/lib/api';
+import CommentsPanel from '@/components/comments/CommentsPanel';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -144,15 +144,6 @@ function Avatar({ uri, name, size, colors }: { uri?: string; name?: string; size
   );
 }
 
-function mapApiComment(c: any): Comment {
-  return {
-    id: String(c.id),
-    user: { name: c.author_name || 'User', avatar: c.author_avatar || '', userId: c.author_id },
-    text: c.text,
-    timestamp: c.created_at || '',
-  };
-}
-
 function PostDetailModal({
   post,
   visible,
@@ -173,65 +164,57 @@ function PostDetailModal({
   onOpenProfile: (userId?: string) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [commentText, setCommentText] = useState('');
-  const [sending, setSending] = useState(false);
-  const { interactions, toggleLike, addComment } = useSocial();
+  const { interactions, toggleLike } = useSocial();
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? post.likes ?? 0;
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(true);
-  const { user: currentUser } = useAuth();
-  const myName = currentUser?.fullName || currentUser?.username || 'You';
-
-  // Comments live in post_comments — load them every time the sheet opens
-  // (they used to come only from this phone's cache, so nobody saw anyone
-  // else's comments).
-  const loadComments = useCallback(async () => {
-    try {
-      const rows = await getComments(post.id);
-      const flat: Comment[] = [];
-      for (const c of rows || []) {
-        flat.push(mapApiComment(c));
-        for (const r of (c as any).replies || []) flat.push(mapApiComment(r));
-      }
-      setComments(flat);
-    } catch {
-      // keep whatever is on screen
-    } finally {
-      setLoadingComments(false);
-    }
-  }, [post.id]);
-
-  useEffect(() => {
-    if (visible) { setLoadingComments(true); loadComments(); }
-  }, [visible, loadComments]);
-
-  const handleSendComment = async () => {
-    const trimmed = commentText.trim();
-    if (!trimmed || sending) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const temp: Comment = {
-      id: `pending-${Date.now()}`,
-      user: { name: myName, avatar: currentUser?.avatar || '', userId: currentUser?.id },
-      text: trimmed,
-      timestamp: new Date().toISOString(),
-    };
-    setComments((prev) => [...prev, temp]);
-    setCommentText('');
-    setSending(true);
-    const ok = await addComment(post.id, trimmed);
-    setSending(false);
-    if (ok) {
-      loadComments();
-    } else {
-      setComments((prev) => prev.filter((c) => c.id !== temp.id));
-      setCommentText(trimmed);
-      Alert.alert('Comment not posted', 'Check your connection and try again.');
-    }
-  };
-
   const isVideo = post.type === 'video' && !!post.videoUrl;
+  const ownerId = post.authorId || post.author.userId || null;
+
+  const postHeader = (
+    <View style={styles.modalContent}>
+      <TouchableOpacity style={styles.modalAuthorRow} onPress={() => onOpenProfile(post.author.userId)}>
+        <Avatar uri={post.author.avatar} name={post.author.name} size={40} colors={colors} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
+          <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
+            {timeAgo(post.timestamp)}{post.location ? ` · ${post.location}` : ''}
+          </Text>
+        </View>
+      </TouchableOpacity>
+
+      {post.media ? (
+        <View style={[styles.mediaWrap, { marginTop: 12, backgroundColor: '#000' }]}>
+          {isVideo ? (
+            <AppVideo source={{ uri: post.videoUrl }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="contain" shouldPlay isLooping useNativeControls />
+          ) : (
+            <TouchableOpacity activeOpacity={0.95} onPress={() => onPlayVideo?.(post.media!)}>
+              <RNImage source={{ uri: post.media }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="cover" />
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
+
+      {post.caption ? (
+        <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
+      ) : null}
+
+      <View style={[styles.detailActions, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          style={styles.detailActionBtn}
+          onPress={() => { toggleLike(post.id, post.likes ?? 0); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+          accessibilityLabel={liked ? 'Unlike' : 'Like'}
+        >
+          <Heart size={24} color={liked ? '#FF3040' : colors.text} fill={liked ? '#FF3040' : 'none'} />
+        </TouchableOpacity>
+        <Text style={[styles.detailCount, { color: colors.text }]}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)} accessibilityLabel={isSaved ? 'Unsave' : 'Save'}>
+          <Bookmark size={24} color={colors.text} fill={isSaved ? colors.text : 'none'} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -247,100 +230,15 @@ function PostDetailModal({
           <View style={{ width: 40 }} />
         </View>
 
-        <FlatList
-          data={comments}
-          keyExtractor={(c) => c.id}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 24 }}
-          ListHeaderComponent={
-            <View style={styles.modalContent}>
-              <TouchableOpacity style={styles.modalAuthorRow} onPress={() => onOpenProfile(post.author.userId)}>
-                <Avatar uri={post.author.avatar} name={post.author.name} size={40} colors={colors} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
-                  <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
-                    {timeAgo(post.timestamp)}{post.location ? ` · ${post.location}` : ''}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {post.media ? (
-                <View style={[styles.mediaWrap, { marginTop: 12, backgroundColor: '#000' }]}>
-                  {isVideo ? (
-                    <AppVideo source={{ uri: post.videoUrl }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="contain" shouldPlay isLooping useNativeControls />
-                  ) : (
-                    <TouchableOpacity activeOpacity={0.95} onPress={() => onPlayVideo?.(post.media!)}>
-                      <RNImage source={{ uri: post.media }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="cover" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ) : null}
-
-              {post.caption ? (
-                <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
-              ) : null}
-
-              <View style={[styles.detailActions, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
-                <TouchableOpacity
-                  style={styles.detailActionBtn}
-                  onPress={() => { toggleLike(post.id, post.likes ?? 0); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                  accessibilityLabel={liked ? 'Unlike' : 'Like'}
-                >
-                  <Heart size={24} color={liked ? '#FF3040' : colors.text} fill={liked ? '#FF3040' : 'none'} />
-                </TouchableOpacity>
-                <Text style={[styles.detailCount, { color: colors.text }]}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
-                <View style={{ flex: 1 }} />
-                <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)} accessibilityLabel={isSaved ? 'Unsave' : 'Save'}>
-                  <Bookmark size={24} color={colors.text} fill={isSaved ? colors.text : 'none'} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={[styles.commentsHeader, { color: colors.text }]}>
-                {loadingComments ? 'Comments' : `Comments (${comments.length})`}
-              </Text>
-              {!loadingComments && comments.length === 0 ? (
-                <Text style={{ color: colors.textTertiary, fontSize: 14, paddingVertical: 12 }}>No comments yet. Start the conversation.</Text>
-              ) : null}
-            </View>
-          }
-          renderItem={({ item: comment }) => (
-            <View style={[styles.commentItem, comment.id.startsWith('pending-') && { opacity: 0.55 }]}>
-              <TouchableOpacity onPress={() => onOpenProfile(comment.user.userId)}>
-                <Avatar uri={comment.user.avatar} name={comment.user.name} size={32} colors={colors} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.commentText, { color: colors.text }]}>
-                  <Text style={styles.commentName}>{comment.user.name}</Text>{'  '}{comment.text}
-                </Text>
-                <Text style={[styles.commentTime, { color: colors.textTertiary }]}>
-                  {comment.id.startsWith('pending-') ? 'Posting…' : timeAgo(comment.timestamp)}
-                </Text>
-              </View>
-            </View>
-          )}
+        <CommentsPanel
+          postId={post.id}
+          postOwnerId={ownerId}
+          colors={colors}
+          enabled={visible}
+          header={postHeader}
+          showCountLabel
+          onOpenProfile={onOpenProfile}
         />
-
-        <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 8) + 4 }]}>
-          <Avatar uri={currentUser?.avatar} name={myName} size={32} colors={colors} />
-          <TextInput
-            style={[styles.commentInputField, { backgroundColor: colors.surface, color: colors.text }]}
-            placeholder={`Add a comment as ${myName}…`}
-            placeholderTextColor={colors.textTertiary}
-            value={commentText}
-            onChangeText={setCommentText}
-            onSubmitEditing={handleSendComment}
-            returnKeyType="send"
-            maxLength={1000}
-          />
-          <TouchableOpacity
-            disabled={!commentText.trim() || sending}
-            onPress={handleSendComment}
-            accessibilityLabel="Post comment"
-          >
-            <Text style={{ color: commentText.trim() && !sending ? colors.accent : colors.textTertiary, fontWeight: '700', fontSize: 15 }}>Post</Text>
-          </TouchableOpacity>
-        </View>
       </KeyboardAvoidingView>
     </Modal>
   );

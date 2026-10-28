@@ -14,6 +14,7 @@ import {
   Modal,
   Dimensions,
   Alert,
+  Share,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,6 +45,9 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSocial } from '@/contexts/SocialContext';
+import { fetchUserPosts, type ProfilePost } from '@/lib/profilePosts';
+import PostGrid from '@/components/profile/PostGrid';
+import PostViewer from '@/components/profile/PostViewer';
 
 const ACCENT_COLORS = {
   gold: '#FFB800',
@@ -87,11 +91,10 @@ export default function UserProfileScreen() {
   const [followLoading, setFollowLoading] = useState(false);
 
   // Posts
-  const [allPosts, setAllPosts] = useState<any[]>([]);
+  const [allPosts, setAllPosts] = useState<ProfilePost[]>([]);
 
   // Viewer
-  const [selectedPost, setSelectedPost] = useState<any>(null);
-  const [viewerPosts, setViewerPosts] = useState<any[]>([]);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   // Follow modal
   const [detailModal, setDetailModal] = useState(false);
@@ -104,7 +107,7 @@ export default function UserProfileScreen() {
 
   const displayName = profileUser?.full_name || 'User';
   const displayUsername = profileUser?.username || '';
-  const displayAvatar = profileUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop';
+  const displayAvatar = profileUser?.avatar || '';
   const displayBio = profileUser?.bio || '';
   const isOwnProfile = authUser?.id === userId;
 
@@ -162,23 +165,12 @@ export default function UserProfileScreen() {
 
   const fetchPosts = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase
-      .from('posts')
-      .select('id, content, image_url, created_at, likes, post_kind')
-      .eq('user_id', userId)
-      .or('post_kind.is.null,post_kind.neq.reshare')
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (data) {
-      setAllPosts(data.map((p: any) => ({
-        id: p.id,
-        imageUrl: p.image_url,
-        caption: p.content,
-        likes: p.likes || 0,
-        timestamp: p.created_at,
-        type: 'photo',
-        isOwnPost: false,
-      })));
+    try {
+      const list = await fetchUserPosts(userId);
+      setAllPosts(list);
+      setPostsCount(list.length);
+    } catch {
+      // keep what's on screen
     }
   }, [userId]);
 
@@ -295,28 +287,9 @@ export default function UserProfileScreen() {
     }
   };
 
-  const handlePostPress = (post: any, posts: any[]) => {
-    setSelectedPost(post);
-    setViewerPosts(posts);
-  };
-
-  const handleDeletePost = async (postId: string) => {
-    Alert.alert('Delete Post', 'Are you sure you want to delete this post? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.from('posts').delete().eq('id', postId);
-          setAllPosts((prev) => prev.filter((p) => p.id !== postId));
-          setPostsCount((c) => Math.max(0, c - 1));
-          setSelectedPost(null);
-          setViewerPosts([]);
-          clearSocialCache(postId);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        },
-      },
-    ]);
+  const shareProfile = () => {
+    const handle = displayUsername ? `@${displayUsername}` : displayName;
+    Share.share({ message: `Check out ${handle} on Apparently` }).catch(() => {});
   };
 
   const onRefresh = useCallback(async () => {
@@ -328,9 +301,6 @@ export default function UserProfileScreen() {
   // ═══════════════════════════════════════
   // Grid helpers
   // ═══════════════════════════════════════
-  const COL_COUNT = 3;
-  const GAP = 2;
-  const IMG_SIZE = (SCREEN_WIDTH - GAP * (COL_COUNT - 1)) / COL_COUNT;
 
   // ═══════════════════════════════════════
   // Render
@@ -355,6 +325,11 @@ export default function UserProfileScreen() {
           headerStyle: { backgroundColor: isDark ? '#1a1a2e' : '#667eea' },
           headerTintColor: '#FFFFFF',
           headerShadowVisible: false,
+          headerRight: () => (
+            <TouchableOpacity onPress={() => setShowOptions(true)} hitSlop={10} accessibilityLabel="Profile options" style={{ paddingHorizontal: 4 }}>
+              <MoreHorizontal size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          ),
         }}
       />
       <ScrollView
@@ -404,11 +379,17 @@ export default function UserProfileScreen() {
 
               <View style={styles.avatarSection}>
                 <View style={styles.avatarContainer}>
-                  <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+                  {displayAvatar ? (
+                    <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                      <Text style={{ color: '#FFF', fontSize: 40, fontWeight: '800' }}>{displayName.charAt(0).toUpperCase()}</Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.userName}>{displayName}</Text>
                 {displayUsername ? <Text style={[styles.userBio, { fontWeight: '500' }]}>@{displayUsername}</Text> : null}
-                <Text style={styles.userBio}>{displayBio}</Text>
+                {displayBio ? <Text style={styles.userBio}>{displayBio}</Text> : null}
               </View>
             </LinearGradient>
           </View>
@@ -439,93 +420,36 @@ export default function UserProfileScreen() {
                 <Text style={[styles.gridEmptyTitle, { color: colors.text }]}>No posts yet</Text>
               </View>
             ) : (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {allPosts.map((post, idx) => (
-                  <TouchableOpacity
-                    key={post.id || idx}
-                    activeOpacity={0.8}
-                    style={{ width: IMG_SIZE, height: IMG_SIZE, marginRight: (idx % COL_COUNT) < COL_COUNT - 1 ? GAP : 0, marginBottom: GAP }}
-                    onPress={() => handlePostPress({ ...post, index: idx }, allPosts)}
-                  >
-                    <Image
-                      source={{ uri: post.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400' }}
-                      style={styles.gridImage}
-                      resizeMode="cover"
-                    />
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <PostGrid posts={allPosts} onPostPress={(i) => setViewerIndex(i)} />
             )}
           </View>
         </Animated.View>
       </ScrollView>
 
-      {/* ═══════════════════════════════════════
-          Post Viewer — EXACT same as profile tab
-          ═══════════════════════════════════════ */}
-      <Modal visible={!!selectedPost} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => { setSelectedPost(null); setShowOptions(false); }}>
-        <View style={[styles.viewerContainer, { backgroundColor: '#000' }]}>
-          {/* Viewer header */}
-          <View style={[styles.viewerHeader, { paddingTop: insets.top + 8 }]}>
-            <TouchableOpacity onPress={() => { setSelectedPost(null); setShowOptions(false); }} style={styles.viewerCloseBtn}>
-              <ArrowLeft size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowOptions(true)} style={styles.viewerOptionsBtn}>
-              <MoreHorizontal size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            {isOwnProfile && (
-              <TouchableOpacity
-                onPress={() => selectedPost && handleDeletePost(selectedPost.id)}
-                style={styles.viewerDeleteBtn}
-              >
-                <Trash2 size={22} color="#FF6B6B" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Full-screen image */}
-          <View style={styles.viewerImageContainer}>
-            {selectedPost?.imageUrl ? (
-              <Image
-                source={{ uri: selectedPost.imageUrl }}
-                style={styles.viewerImage}
-                resizeMode="contain"
-              />
-            ) : (
-              <View style={styles.viewerPlaceholder}>
-                <Text style={styles.viewerPlaceholderText}>{selectedPost?.caption || 'No image'}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Engagement row */}
-          <View style={[styles.viewerEngagement, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.engagementLeft}>
-              <Heart size={26} color="#FFFFFF" />
-              <Text style={styles.engagementCount}>{selectedPost?.likes || 0}</Text>
-            </View>
-            <Forward size={24} color="#FFFFFF" />
-          </View>
-        </View>
-      </Modal>
+      <PostViewer
+        visible={viewerIndex !== null}
+        posts={allPosts}
+        initialIndex={viewerIndex ?? 0}
+        title={displayUsername ? `@${displayUsername}` : 'Posts'}
+        colors={colors}
+        onClose={() => { setViewerIndex(null); fetchPosts(); }}
+        onOpenProfile={(id) => {
+          if (id === userId) return;
+          router.push((id === authUser?.id ? '/(tabs)/profile' : `/user/${id}`) as any);
+        }}
+        onDeleted={(id) => {
+          clearSocialCache(id);
+          setAllPosts((prev) => prev.filter((p) => p.id !== id));
+          setPostsCount((c) => Math.max(0, c - 1));
+        }}
+        onEdited={(id, caption) => setAllPosts((prev) => prev.map((p) => (p.id === id ? { ...p, caption } : p)))}
+      />
 
       {/* Options Modal */}
       <Modal visible={showOptions} animationType="fade" transparent onRequestClose={() => setShowOptions(false)}>
         <TouchableOpacity style={styles.optionsOverlay} activeOpacity={1} onPress={() => setShowOptions(false)}>
           <View style={[styles.optionsSheet, { backgroundColor: colors.surface }]}>
             <Text style={[styles.optionsTitle, { color: colors.text }]}>Options</Text>
-            {isOwnProfile && (
-              <TouchableOpacity
-                style={styles.optionRow}
-                onPress={() => {
-                  setShowOptions(false);
-                  if (selectedPost) handleDeletePost(selectedPost.id);
-                }}
-              >
-                <Trash2 size={20} color={ACCENT_COLORS.coral} />
-                <Text style={[styles.optionText, { color: ACCENT_COLORS.coral }]}>Delete Post</Text>
-              </TouchableOpacity>
-            )}
             {!isOwnProfile && (
               <>
                 <TouchableOpacity style={styles.optionRow} onPress={() => {
@@ -565,9 +489,9 @@ export default function UserProfileScreen() {
                 </TouchableOpacity>
               </>
             )}
-            <TouchableOpacity style={styles.optionRow} onPress={() => { setShowOptions(false); }}>
+            <TouchableOpacity style={styles.optionRow} onPress={() => { setShowOptions(false); shareProfile(); }}>
               <Share2 size={20} color={colors.textSecondary} />
-              <Text style={[styles.optionText, { color: colors.text }]}>Share</Text>
+              <Text style={[styles.optionText, { color: colors.text }]}>Share profile</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.cancelRow, { borderTopColor: colors.border }]} onPress={() => setShowOptions(false)}>
               <Text style={[styles.cancelText, { color: colors.text }]}>Cancel</Text>
