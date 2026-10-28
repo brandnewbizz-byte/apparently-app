@@ -23,7 +23,6 @@ import DoodleLayer from '@/components/spot/DoodleLayer';
 import BurstLayer from '@/components/spot/BurstLayer';
 import SpotItemView from '@/components/spot/SpotItemView';
 import { AddSheet, ItemMenu } from '@/components/spot/SpotSheets';
-import RoomScene from '@/components/spot/RoomScene';
 import { MyCameraBubble, RemoteCameraBubbles, type RemoteCam } from '@/components/spot/CameraBubbles';
 import CutoutSheet, { type PhotoStyle, type PickedPhoto } from '@/components/spot/CutoutSheet';
 import InviteSheet from '@/components/spot/InviteSheet';
@@ -61,6 +60,7 @@ export default function SpotRoomScreen() {
   const [myStroke, setMyStroke] = useState<SpotPoint[]>([]);
   const [showInvite, setShowInvite] = useState(false);
   const [picked, setPicked] = useState<PickedPhoto | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [cams, setCams] = useState<Record<string, RemoteCam>>({});
   const [, requestCamera] = useCameraPermissions();
@@ -208,25 +208,44 @@ export default function SpotRoomScreen() {
       Alert.alert(source === 'camera' ? 'Camera access needed' : 'Photos access needed', 'Allow access in Settings to add photos to the room.');
       return;
     }
+    // Let the add sheet finish closing before the camera / picker opens —
+    // presenting over a closing sheet can freeze iOS.
+    setShowAdd(false);
+    await new Promise((r) => setTimeout(r, 450));
     // No built-in crop: it would flatten transparent (already cut-out) PNGs.
     const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.85 };
-    const r = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
+    let r: ImagePicker.ImagePickerResult;
+    try {
+      r = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
+    } catch {
+      Alert.alert('Camera not available', 'Try choosing a photo from your library instead.');
+      return;
+    }
     if (r.canceled || !r.assets?.[0]) return;
     const a = r.assets[0];
-    setShowAdd(false);
-    setPicked({ uri: a.uri, width: a.width || 1, height: a.height || 1, mimeType: a.mimeType });
+    setPreparing(true);
+    try {
+      // Camera photos are huge (12MP+). Shrink once, up front, so tracing and
+      // uploading stay fast.
+      const png = a.mimeType === 'image/png' || /\.png($|\?)/i.test(a.uri);
+      const w = a.width || 0;
+      const small = w > 1280 || !w
+        ? await manipulateAsync(a.uri, [{ resize: { width: Math.min(1280, w || 1280) } }], { compress: 0.8, format: png ? SaveFormat.PNG : SaveFormat.JPEG })
+        : { uri: a.uri, width: w, height: a.height || w };
+      setPicked({ uri: small.uri, width: small.width || 1, height: small.height || 1, mimeType: png ? 'image/png' : 'image/jpeg' });
+    } catch {
+      Alert.alert('Photo not added', 'That photo could not be opened. Try another one.');
+    } finally {
+      setPreparing(false);
+    }
   };
 
   const placePhoto = async (style: PhotoStyle, outline?: SpotPoint[]) => {
     if (!picked) return;
     setUploading(true);
     try {
-      const png = style === 'bare' && (picked.mimeType === 'image/png' || /\.png($|\?)/i.test(picked.uri));
-      // Shrink big camera photos before upload.
-      const small = picked.width > 1280
-        ? await manipulateAsync(picked.uri, [{ resize: { width: 1280 } }], { compress: 0.8, format: png ? SaveFormat.PNG : SaveFormat.JPEG })
-        : { uri: picked.uri };
-      const url = await uploadImageToStorage(small.uri, 'room-files', `spot/${roomId}`, 3, png ? 'image/png' : 'image/jpeg');
+      const png = picked.mimeType === 'image/png';
+      const url = await uploadImageToStorage(picked.uri, 'room-files', `spot/${roomId}`, 3, png ? 'image/png' : 'image/jpeg');
       if (!url || url.startsWith('file:')) throw new Error('upload failed');
       setMode('move');
       const it = await room.add({
@@ -287,7 +306,6 @@ export default function SpotRoomScreen() {
     <View style={{ flex: 1, backgroundColor: theme.colors[0] }}>
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-      <RoomScene width={size.w} height={size.h} theme={theme} />
 
       {/* ── Canvas ── */}
       <View
@@ -296,7 +314,7 @@ export default function SpotRoomScreen() {
         {...canvasPan.panHandlers}
       >
         <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setSelectedId(null)} disabled={mode === 'draw'} />
-        <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} grid={false} />
+        <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} />
         {size.w > 0 ? things.map((it) => (
           <SpotItemView
             key={it.id}
@@ -481,6 +499,12 @@ export default function SpotRoomScreen() {
         onPhoto={addPhoto}
         uploading={uploading}
       />
+      {preparing ? (
+        <View style={[StyleSheet.absoluteFill, styles.preparing]}>
+          <ActivityIndicator color="#FFF" size="large" />
+          <Text style={styles.preparingText}>Getting your photo ready…</Text>
+        </View>
+      ) : null}
       <CutoutSheet photo={picked} busy={uploading} onCancel={() => !uploading && setPicked(null)} onDone={placePhoto} />
       <InviteSheet
         visible={showInvite}
@@ -553,6 +577,8 @@ const styles = StyleSheet.create({
   penWidthOn: { backgroundColor: '#E0F2FE' },
   sep: { width: 1, height: 22, backgroundColor: '#E5E7EB', marginHorizontal: 2 },
 
+  preparing: { zIndex: 4000, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  preparingText: { color: '#FFF', fontWeight: '700' },
   talkPill: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.92)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, maxWidth: '80%' },
   talkText: { color: '#FFF', fontWeight: '800', fontSize: 12 },
   sideCol: { position: 'absolute', right: 14, alignItems: 'center', gap: 10 },

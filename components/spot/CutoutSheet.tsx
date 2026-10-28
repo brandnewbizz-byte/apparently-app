@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Image, Modal, PanResponder, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,
+  ActivityIndicator, Image, PanResponder, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Polygon, Polyline } from 'react-native-svg';
@@ -109,7 +109,9 @@ export default function CutoutSheet({ photo, busy, onCancel, onDone }: Props) {
   );
 
   return (
-    <Modal visible={!!photo} animationType="slide" onRequestClose={onCancel} presentationStyle="fullScreen">
+    // A plain full-screen layer, not a Modal: stacking a Modal right after the
+    // camera / photo picker closes froze the app on iOS.
+    !photo ? null : (
       <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onCancel} style={styles.round} accessibilityLabel="Cancel photo"><X size={20} color="#FFF" /></TouchableOpacity>
@@ -164,12 +166,12 @@ export default function CutoutSheet({ photo, busy, onCancel, onDone }: Props) {
           </TouchableOpacity>
         </View>
       </View>
-    </Modal>
+    )
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0B0B10', paddingHorizontal: 16 },
+  root: { ...StyleSheet.absoluteFill, zIndex: 5000, elevation: 50, backgroundColor: '#0B0B10', paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   round: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   title: { color: '#FFF', fontSize: 17, fontWeight: '800' },

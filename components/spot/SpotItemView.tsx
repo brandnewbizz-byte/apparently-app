@@ -2,7 +2,6 @@ import React, { memo, useMemo, useRef } from 'react';
 import { Image, PanResponder, StyleSheet, Text, View } from 'react-native';
 import Svg, { ClipPath, Defs, Image as SvgImage, Polygon } from 'react-native-svg';
 import type { SpotItem, SpotPoint } from '@/lib/spot';
-import { depthScale } from '@/components/spot/RoomScene';
 
 /** Bounding box (0–1, image space) of a cut-out outline. */
 export function cutoutBox(pts: SpotPoint[]) {
@@ -73,11 +72,9 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
   const y = live?.y ?? item.y;
   const z = live?.z ?? item.z;
   const { w, h } = baseSize(item);
-  // Things further back in the room look smaller.
-  const depth = depthScale(y);
-  const sw = w * item.scale * depth;
-  const sh = h * item.scale * depth;
-  const k = item.scale * depth;
+  const sw = w * item.scale;
+  const sh = h * item.scale;
+  const k = item.scale;
 
   // Latest values for the gesture handlers (created once).
   const ref = useRef({ item, x, y, canvasW, canvasH, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress });
@@ -109,9 +106,8 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
       g.current.moved = true;
       // Keep the whole item inside the room.
       const { w: bw, h: bh } = baseSize(s.item);
-      const d = depthScale(s.y);
-      const hx = (bw * s.item.scale * d) / 2 / Math.max(s.canvasW, 1);
-      const hy = (bh * s.item.scale * d) / 2 / Math.max(s.canvasH, 1);
+      const hx = (bw * s.item.scale) / 2 / Math.max(s.canvasW, 1);
+      const hy = (bh * s.item.scale) / 2 / Math.max(s.canvasH, 1);
       const nx = Math.min(1 - hx, Math.max(hx, g.current.startX + gs.dx / Math.max(s.canvasW, 1)));
       const ny = Math.min(1 - hy, Math.max(hy, g.current.startY + gs.dy / Math.max(s.canvasH, 1)));
       g.current.last = { x: nx, y: ny };
@@ -155,10 +151,6 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
       pointerEvents={enabled ? 'auto' : 'none'}
       accessibilityLabel={item.kind === 'note' ? `Note: ${item.text}` : item.kind === 'sticker' ? `${item.emoji} sticker` : item.cutout ? 'Cut-out photo' : 'Photo'}
     >
-      {/* Contact shadow on the floor */}
-      {item.kind !== 'note' ? (
-        <View pointerEvents="none" style={[styles.floorShadow, { width: sw * 0.8, height: Math.max(6, sh * 0.12), borderRadius: sw, bottom: -Math.max(3, sh * 0.05), opacity: beingMoved || selected ? 0.12 : 0.22 }]} />
-      ) : null}
       {item.kind === 'sticker' ? (
         <Text style={{ fontSize: 46 * k, lineHeight: 56 * k, textAlign: 'center' }}>{item.emoji}</Text>
       ) : item.kind === 'note' ? (
@@ -206,9 +198,8 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 5,
   },
   photo: { flex: 1, borderRadius: 2 },
-  bare: { shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 4 } },
-  cutShadow: { shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 6, shadowOffset: { width: 0, height: 5 } },
-  floorShadow: { position: 'absolute', alignSelf: 'center', backgroundColor: '#000' },
+  bare: {},
+  cutShadow: {},
   ring: { ...StyleSheet.absoluteFill, borderRadius: 10, borderWidth: 2, borderColor: '#38BDF8', margin: -6 },
   ringRemote: { borderColor: '#F472B6', borderStyle: 'dashed' },
   reactions: { position: 'absolute', bottom: -14, flexDirection: 'row', gap: 3, alignSelf: 'center' },
