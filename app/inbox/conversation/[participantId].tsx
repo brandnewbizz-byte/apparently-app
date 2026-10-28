@@ -35,6 +35,7 @@ import {
 } from 'expo-audio';
 import type { AudioPlayer, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
+import { ensureUploadSpace } from '@/lib/uploadQuota';
 import { generateUsername } from '@/lib/sanitize';
 
 // Voice notes are recorded as AAC/M4A so they decode natively on both iOS and
@@ -249,6 +250,7 @@ export default function ConversationScreen() {
       // recipient's id is the 2nd folder, which the bucket policy uses to let
       // them read it.
       const bytes = await readLocalFileBytes(uri);
+      await ensureUploadSpace(bytes.length);
       const filePath = `voice/${participantId}/${Date.now()}.m4a`;
       const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: 'audio/m4a' });
       if (uploadErr) {
@@ -260,6 +262,7 @@ export default function ConversationScreen() {
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
     } catch (e: any) {
+      if (e?.name === 'StorageFullError') return;
       console.warn('[Conversation] voice send failed:', e);
       Alert.alert('Voice note not sent', e?.message || 'Please try again.');
     } finally {
@@ -308,6 +311,7 @@ export default function ConversationScreen() {
       // `fetch(asset.uri).blob()` does not work on device file:// paths — use
       // expo-file-system's File class to read raw bytes instead.
       const bytes = await readLocalFileBytes(asset.uri);
+      await ensureUploadSpace(bytes.length);
       const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: mime });
       if (uploadErr) {
         Alert.alert('Error', 'Failed to upload image. Please try again.');
@@ -318,6 +322,7 @@ export default function ConversationScreen() {
       });
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
     } catch (e: any) {
+      if (e?.name === 'StorageFullError') return;
       Alert.alert('Error', e.message || 'Failed to send image');
     } finally {
       setImageUploading(false);

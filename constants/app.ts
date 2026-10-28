@@ -20,3 +20,11 @@ export function usernameProblem(raw: string): string | null {
   if (!USERNAME_PATTERN.test(u)) return 'Only letters, numbers, dots and underscores.';
   return null;
 }
+
+/**
+ * RevenueCat public SDK keys (Project settings → API keys in RevenueCat).
+ * These are public keys and safe to ship in the app. Leave empty to hide
+ * purchases (the app then shows plans but can't sell them yet).
+ */
+export const REVENUECAT_IOS_KEY = '';
+export const REVENUECAT_ANDROID_KEY = '';

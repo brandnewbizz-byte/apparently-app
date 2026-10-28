@@ -31,6 +31,7 @@ import { ServiceRequestProvider } from '@/contexts/ServiceRequestContext';
 import { BookingsProvider } from '@/contexts/BookingsContext';
 import { PlannerProvider } from '@/contexts/PlannerContext';
 import { OrdersProvider } from '@/contexts/OrdersContext';
+import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
@@ -171,6 +172,7 @@ function RootLayoutNav() {
       options={{ headerShown: false }}
     />
     <Stack.Screen name="notifications" options={{ headerShown: false }} />
+    <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     </Stack>
   );
 }
@@ -255,6 +257,7 @@ export default function RootLayout() {
               <SafeAreaProvider>
                 <ThemeProvider>
                   <AuthProvider>
+                    <SubscriptionProvider>
                     <OnboardingProvider>
                         <UserPostsProvider>
                         <SocialProvider>
@@ -286,6 +289,7 @@ export default function RootLayout() {
                         </SocialProvider>
                         </UserPostsProvider>
                     </OnboardingProvider>
+                    </SubscriptionProvider>
                   </AuthProvider>
                 </ThemeProvider>
               </SafeAreaProvider>

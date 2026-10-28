@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { ChevronLeft, Plus, Lock, Globe, X, Sparkles, Check } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import {
   answerInvite, createRoom, deleteRoom, getRooms, listInvites, listRooms, themeFor, SPOT_THEMES,
   type SpotInvite, type SpotRoom,
@@ -54,6 +55,7 @@ export default function SpotLobby() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user } = useAuth();
+  const { requireSpot } = useSubscription();
 
   const [rooms, setRooms] = useState<SpotRoom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,13 @@ export default function SpotLobby() {
   const joinedIds = new Set(joined.map((r) => r.id));
   const open = rooms.filter((r) => r.creatorId !== user?.id && !joinedIds.has(r.id));
 
-  const openRoom = (id: string) => { tap(); router.push(`/(tabs)/live/room/${id}` as any); };
+  const openRoom = async (id: string, invited = false) => {
+    tap();
+    // Members can open any room; free accounts can join rooms they're invited to.
+    const mine = rooms.some((r) => r.id === id && r.creatorId === user?.id);
+    if (!(await requireSpot({ invited: invited || mine || invites.some((i) => i.roomId === id) }))) return;
+    router.push(`/(tabs)/live/room/${id}` as any);
+  };
 
   const make = async () => {
     if (!user?.id || creating) return;
@@ -152,7 +160,7 @@ export default function SpotLobby() {
           </TouchableOpacity>
           <Text style={styles.heroTitle}>Spot</Text>
           <Text style={styles.heroSub}>Virtual rooms to hang out and plan with friends — live.{'\n'}Drop things in, doodle, move stuff around, react.</Text>
-          <TouchableOpacity style={styles.newBtn} onPress={() => { tap(); setShowNew(true); }} accessibilityLabel="New room">
+          <TouchableOpacity style={styles.newBtn} onPress={async () => { tap(); if (await requireSpot({ create: true })) setShowNew(true); }} accessibilityLabel="New room">
             <Plus size={20} color="#5B2A86" strokeWidth={2.6} />
             <Text style={styles.newText}>New room</Text>
           </TouchableOpacity>
@@ -188,7 +196,7 @@ export default function SpotLobby() {
 
             <Text style={[styles.section, { color: colors.text }]}>Your rooms</Text>
             {mine.length === 0 ? (
-              <TouchableOpacity style={[styles.empty, { borderColor: colors.border }]} onPress={() => setShowNew(true)}>
+              <TouchableOpacity style={[styles.empty, { borderColor: colors.border }]} onPress={async () => { if (await requireSpot({ create: true })) setShowNew(true); }}>
                 <Sparkles size={22} color={colors.textTertiary} />
                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Make your first room and invite friends in.</Text>
               </TouchableOpacity>

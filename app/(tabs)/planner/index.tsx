@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import type { ScrollViewInstance } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import {
@@ -513,6 +514,7 @@ function RequestSheet({ visible, date, onClose, onCreate, colors }: {
 // ═════════════════════════════════════════════════════════════════════════════
 export default function PlannerScreen() {
   const router = useRouter();
+  const { requireListing } = useSubscription();
   const { colors } = useTheme();
   const { user } = useAuth();
   const { plans, isLoading, deletePlan, setPlanStatus, updatePlan, refetch } = usePlanner();
@@ -603,7 +605,7 @@ export default function PlannerScreen() {
                 <Radio size={17} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => { haptic(); if (tab === 'requests') setShowRequest(true); else setShowAdd(true); }}
+                onPress={async () => { haptic(); if (tab === 'requests') { if (await requireListing()) setShowRequest(true); } else setShowAdd(true); }}
                 style={[styles.headerBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
                 accessibilityLabel={tab === 'requests' ? 'Post a request' : 'Add a plan'}
               >
@@ -715,7 +717,7 @@ export default function PlannerScreen() {
               </TouchableOpacity>
             ) : null}
 
-            <TouchableOpacity style={[styles.postBtn, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={() => setShowRequest(true)}>
+            <TouchableOpacity style={[styles.postBtn, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={async () => { if (await requireListing()) setShowRequest(true); }}>
               <View style={styles.postIcon}><Search size={18} color="#D97706" /></View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.postTitle, { color: colors.text }]}>Need a hand?</Text>
@@ -788,7 +790,8 @@ export default function PlannerScreen() {
         date={selected}
         onClose={() => setShowRequest(false)}
         colors={colors}
-        onCreate={(r) => {
+        onCreate={async (r) => {
+          if (!(await requireListing())) return;
           const cat = SERVICE_CATEGORIES.find((c) => c.key === r.category);
           createRequest({
             ...r,

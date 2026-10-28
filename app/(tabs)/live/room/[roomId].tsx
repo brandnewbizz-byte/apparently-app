@@ -11,11 +11,12 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette, Mic, Video, VideoOff } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSpotRoom } from '@/hooks/useSpotRoom';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
 import { useCameraPermissions } from '@/lib/safe-camera';
 import {
-  getRoom, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
+  getRoom, listInvites, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
   type SpotPoint, type SpotRoom,
 } from '@/lib/spot';
 import { uploadImageToStorage } from '@/lib/storage';
@@ -40,6 +41,7 @@ export default function SpotRoomScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { requireSpot, checkUpload } = useSubscription();
   const { hideTabBar, showTabBar } = useTabBar();
 
   const me = useMemo(() => (user?.id ? { id: user.id, name: user.fullName || user.username || 'You', avatar: user.avatar || '' } : null), [user?.id, user?.fullName, user?.username, user?.avatar]);
@@ -117,9 +119,14 @@ export default function SpotRoomScreen() {
 
   useEffect(() => {
     if (!roomId) return;
-    getRoom(roomId).then((r) => {
+    getRoom(roomId).then(async (r) => {
       setInfo(r);
-      if (r && me) touchRoom(r, me.id);
+      if (r && me) {
+        // Spot needs a plan — unless it's your room or you were invited.
+        const invited = r.creatorId === me.id || (await listInvites(me.id).catch(() => [])).some((i) => i.roomId === r.id);
+        if (!(await requireSpot({ invited }))) { router.back(); return; }
+        touchRoom(r, me.id);
+      }
     }).finally(() => setInfoLoading(false));
   }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 

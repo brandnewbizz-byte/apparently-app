@@ -44,6 +44,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isDealLive } from '@/lib/dealStatus';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -186,6 +187,7 @@ interface SwipeableBundlesProps {
   onGrab: (bundle: BundlePlan) => void;
   onSkip: (bundle: BundlePlan) => void;
   onSave: (bundle: BundlePlan) => void;
+  beforeAction?: (action: 'skip' | 'save' | 'grab', item: BundlePlan) => Promise<boolean>;
   colors: any;
 }
 
@@ -195,7 +197,7 @@ const COOLDOWN_SECONDS = 60;
 const SKILL_LIMIT = 10;
 const SKILL_COOLDOWN_SECONDS = 3 * 60;
 
-function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: SwipeableBundlesProps) {
+function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, colors }: SwipeableBundlesProps) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(COOLDOWN_SECONDS);
@@ -272,8 +274,12 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
     setDismissedIds((prev) => (prev.includes(bundleId) ? prev : [...prev, bundleId]));
   }, []);
 
-  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+  const completeAction = useCallback(async (action: 'skip' | 'save' | 'grab') => {
     if (!currentBundle) return;
+    // Plan limits (daily moves, saving needs a plan). Out of moves → the card
+    // springs back and the upgrade screen opens.
+    const gateItem = currentBundle;
+    if (beforeAction && !(await beforeAction(action, gateItem))) { resetCard(); return; }
 
     // Track analytics
     // Grabs are counted by the grab itself (grab_bundle) — counting here too doubled them.
@@ -289,7 +295,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
 
     dismissBundle(currentBundle.id);
     resetCard();
-  }, [currentBundle, dismissBundle, onGrab, onSave, onSkip, resetCard]);
+  }, [currentBundle, dismissBundle, onGrab, onSave, onSkip, resetCard, beforeAction]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
@@ -671,6 +677,7 @@ interface SwipeableSkillsProps {
   onGrab: (skill: SkillDeal) => void;
   onSkip: (skill: SkillDeal) => void;
   onSave: (skill: SkillDeal) => void;
+  beforeAction?: (action: 'skip' | 'save' | 'grab', item: SkillDeal) => Promise<boolean>;
   colors: any;
 }
 
@@ -681,7 +688,7 @@ function formatCountdown(seconds: number): string {
   return `${mins}m`;
 }
 
-function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSkillsProps) {
+function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors }: SwipeableSkillsProps) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(SKILL_COOLDOWN_SECONDS);
@@ -755,8 +762,12 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
     setDismissedIds((prev) => (prev.includes(skillId) ? prev : [...prev, skillId]));
   }, []);
 
-  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+  const completeAction = useCallback(async (action: 'skip' | 'save' | 'grab') => {
     if (!currentSkill) return;
+    // Plan limits (daily moves, saving needs a plan). Out of moves → the card
+    // springs back and the upgrade screen opens.
+    const gateItem = currentSkill;
+    if (beforeAction && !(await beforeAction(action, gateItem))) { resetCard(); return; }
 
     // Grabs are counted by grabSkill — counting here too doubled them.
     if (action === 'skip') localApi.trackDealStat('skill', currentSkill.id, 'skip');
@@ -771,7 +782,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
 
     dismissSkill(currentSkill.id);
     resetCard();
-  }, [currentSkill, dismissSkill, onGrab, onSave, onSkip, resetCard]);
+  }, [currentSkill, dismissSkill, onGrab, onSave, onSkip, resetCard, beforeAction]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
@@ -986,10 +997,11 @@ interface SwipeableServiceRequestsProps {
   onGrab: (request: ServiceRequest) => void;
   onSkip: (request: ServiceRequest) => void;
   onSave: (request: ServiceRequest) => void;
+  beforeAction?: (action: 'skip' | 'save' | 'grab', item: ServiceRequest) => Promise<boolean>;
   colors: any;
 }
 
-function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: SwipeableServiceRequestsProps) {
+function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, beforeAction, colors }: SwipeableServiceRequestsProps) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
@@ -1021,8 +1033,12 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
     setDismissedIds((prev) => (prev.includes(requestId) ? prev : [...prev, requestId]));
   }, []);
 
-  const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
+  const completeAction = useCallback(async (action: 'skip' | 'save' | 'grab') => {
     if (!currentRequest) return;
+    // Plan limits (daily moves, saving needs a plan). Out of moves → the card
+    // springs back and the upgrade screen opens.
+    const gateItem = currentRequest;
+    if (beforeAction && !(await beforeAction(action, gateItem))) { resetCard(); return; }
 
     if (action === 'save') {
       onSave(currentRequest);
@@ -1034,7 +1050,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, colors }: 
 
     dismissRequest(currentRequest.id);
     resetCard();
-  }, [currentRequest, dismissRequest, onGrab, onSave, onSkip, resetCard]);
+  }, [currentRequest, dismissRequest, onGrab, onSave, onSkip, resetCard, beforeAction]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
@@ -1480,6 +1496,13 @@ export default function HomeScreen() {
 
   const money = (n?: number) => (n ? `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '');
 
+  // Every grab / skip / save spends one of the day's moves (see lib/plans.ts).
+  const { spendAction, plan } = useSubscription();
+  const gateAction = useCallback(
+    (action: 'skip' | 'save' | 'grab', itemType: string, itemId: string) => spendAction(action, itemType, itemId),
+    [spendAction],
+  );
+
   const handleGrabBundle = useCallback(async (bundle: BundlePlan) => {
     if (grabbing) return;
     const creatorId = bundle.creatorId || (bundle as any).creator_id || '';
@@ -1905,6 +1928,18 @@ export default function HomeScreen() {
 
         {MARKETPLACE_ENABLED && (
         <>
+        {plan.enforced && plan.limits.actions != null && !plan.isAdmin ? (
+          <TouchableOpacity
+            style={[styles.movesPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => router.push({ pathname: '/paywall' as any, params: { reason: 'upgrade' } })}
+            accessibilityLabel="Daily moves left. Tap to see plans"
+          >
+            <Text style={[styles.movesText, { color: colors.text }]}>
+              {Math.max(0, plan.limits.actions - plan.actionsUsed)} of {plan.limits.actions} moves left today
+            </Text>
+            <Text style={[styles.movesCta, { color: colors.accent }]}>{plan.tier === 'free' ? 'Get more' : 'Upgrade'}</Text>
+          </TouchableOpacity>
+        ) : null}
         <View style={styles.bundleSection}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleRow}>
@@ -1924,6 +1959,7 @@ export default function HomeScreen() {
             onGrab={handleGrabBundle}
             onSkip={handleSkipBundle}
             onSave={handleSaveBundle}
+            beforeAction={(a, b) => gateAction(a, 'bundle', b.id)}
             colors={colors}
           />
         </View>
@@ -1946,6 +1982,7 @@ export default function HomeScreen() {
             onGrab={handleGrabSkill}
             onSkip={handleSkipSkill}
             onSave={handleSaveSkill}
+            beforeAction={(a, k) => gateAction(a, 'skill', k.id)}
             colors={colors}
           />
         </View>
@@ -1968,6 +2005,7 @@ export default function HomeScreen() {
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}
+            beforeAction={(a, r) => gateAction(a, r.source === 'job' ? 'job' : 'request', r.id)}
             colors={colors}
           />
         </View>
@@ -2145,6 +2183,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logoImage: { width: 40, height: 40 },
+  movesPill: { marginHorizontal: 16, marginTop: 12, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  movesText: { fontSize: 13, fontWeight: '700' },
+  movesCta: { fontSize: 13, fontWeight: '800' },
   logoIcon: {
     width: 36,
     height: 36,

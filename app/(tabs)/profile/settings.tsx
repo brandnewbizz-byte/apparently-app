@@ -22,6 +22,10 @@ import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL, USERNAME_MAX } from '@/co
 import { useTheme, type ThemeMode } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSocial } from '@/contexts/SocialContext';
+import { useSubscription } from '@/contexts/SubscriptionContext';
+import { formatGB, planFor } from '@/lib/plans';
+import { manageSubscriptionsUrl, restore as restorePurchases } from '@/lib/purchases';
+import { Crown, RotateCcw, CreditCard } from 'lucide-react-native';
 
 const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
@@ -82,6 +86,8 @@ export default function SettingsScreen() {
   const { colors, isDark, themeMode, setTheme } = useTheme();
   const { user, refreshProfile, signOut } = useAuth();
   const { blockedUserIds, unblockUser } = useSocial();
+  const { plan: sub, syncWithStore, openPaywall } = useSubscription();
+  const [restoring, setRestoring] = useState(false);
 
   // ── Profile ──────────────────────────────────────────────────────────────
   const [editingName, setEditingName] = useState(user?.fullName || '');
@@ -408,6 +414,70 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* ── Plan ── */}
+          {sub.enforced ? (() => {
+            const info = planFor(sub.tier);
+            const lim = sub.limits;
+            const storageCap = lim.storage_gb * 1024 ** 3;
+            const storagePct = Math.min(1, sub.storageUsed / Math.max(storageCap, 1));
+            const until = sub.periodEnd ? new Date(sub.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+            const statusLine = sub.tier === 'free' ? 'Free plan'
+              : sub.isTrial ? `Free trial · ends ${until ?? 'soon'}`
+              : sub.willRenew === false ? `Ends ${until ?? 'soon'} — won't renew`
+              : until ? `Renews ${until}` : 'Active';
+            const usage = [
+              { label: 'Moves today', value: lim.actions == null ? `${sub.actionsUsed} · unlimited` : `${sub.actionsUsed} of ${lim.actions}` },
+              { label: 'Live listings', value: lim.listings == null ? `${sub.listingsActive} · unlimited` : `${sub.listingsActive} of ${lim.listings}` },
+              { label: 'Spot rooms', value: lim.spot_rooms == null ? `${sub.roomsOwned} · unlimited` : `${sub.roomsOwned} of ${lim.spot_rooms}` },
+            ];
+            return (
+              <Section colors={colors} title="PLAN">
+                <View style={[styles.row, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
+                  <View style={[styles.planIcon, { backgroundColor: info.accent[0] }]}><Crown size={18} color="#FFF" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.rowLabel, { color: colors.text }]}>{info.name}</Text>
+                    <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{statusLine}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => { tap(); openPaywall('upgrade'); }} style={[styles.pill, { backgroundColor: colors.accent, borderColor: colors.accent }]} accessibilityLabel={sub.tier === 'free' ? 'See plans' : 'Change plan'}>
+                    <Text style={[styles.pillText, { color: '#FFF' }]}>{sub.tier === 'free' ? 'Try free' : 'Change'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {usage.map((u) => (
+                  <View key={u.label} style={[styles.usageRow, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{u.label}</Text>
+                    <Text style={[styles.usageValue, { color: colors.text }]}>{u.value}</Text>
+                  </View>
+                ))}
+                <View style={[styles.usageRow, { borderBottomColor: colors.border, flexDirection: 'column', alignItems: 'stretch', gap: 6 }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={[styles.rowValue, { color: colors.textSecondary }]}>Space</Text>
+                    <Text style={[styles.usageValue, { color: colors.text }]}>{formatGB(sub.storageUsed)} of {lim.storage_gb} GB</Text>
+                  </View>
+                  <View style={[styles.bar, { backgroundColor: colors.border }]}>
+                    <View style={[styles.barFill, { width: `${Math.max(2, storagePct * 100)}%`, backgroundColor: storagePct > 0.9 ? '#EF4444' : info.accent[0] }]} />
+                  </View>
+                </View>
+                {sub.tier !== 'free' ? (
+                  <Row colors={colors} icon={<CreditCard size={18} color={colors.accent} />} label="Manage or cancel subscription" value={sub.store === 'play_store' ? 'Google Play' : 'App Store'} onPress={() => openUrl(manageSubscriptionsUrl())} />
+                ) : null}
+                <Row
+                  colors={colors}
+                  icon={<RotateCcw size={18} color={colors.accent} />}
+                  label={restoring ? 'Restoring…' : 'Restore purchases'}
+                  last
+                  onPress={async () => {
+                    if (restoring) return;
+                    setRestoring(true);
+                    const r = await restorePurchases();
+                    if (r.ok) await syncWithStore();
+                    setRestoring(false);
+                    Alert.alert(r.ok ? 'Purchases restored' : 'Nothing restored', r.ok ? 'Your plan is up to date.' : r.message || 'No previous purchases were found.');
+                  }}
+                />
+              </Section>
+            );
+          })() : null}
+
           {/* ── Appearance ── */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>APPEARANCE</Text>
@@ -570,6 +640,11 @@ const styles = StyleSheet.create({
   smallAvatar: { width: 36, height: 36, borderRadius: 18 },
   pill: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
   pillText: { fontSize: 13, fontWeight: '700' },
+  planIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  usageRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  usageValue: { fontSize: 14, fontWeight: '700' },
+  bar: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  barFill: { height: 6, borderRadius: 3 },
   emptyText: { fontSize: 14, padding: 16, textAlign: 'center' },
   about: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 28 },
   aboutText: { fontSize: 12 },

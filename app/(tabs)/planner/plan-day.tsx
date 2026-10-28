@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { localDateKey } from '@/lib/dates';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -156,6 +157,7 @@ const formatTime = (time: string): string => {
 };
 
 export default function PlanDayScreen() {
+  const { requireListing } = useSubscription();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
@@ -449,6 +451,9 @@ export default function PlanDayScreen() {
   const handlePostGig = useCallback(async () => {
     if (isSaving) return;
     haptic();
+    // Asking for help (chauffeur, chef, delivery…) posts jobs for others to
+    // grab — that needs a plan. Plans with no help needed stay free.
+    if (form.assistance.length > 0 && !(await requireListing())) return;
     setIsSaving(true);
 
     console.log('[PlanDay] Starting Post Gig...');
@@ -669,7 +674,7 @@ export default function PlanDayScreen() {
         setIsSaving(false);
       }
     }
-  }, [form, isSaving, haptic, router, showToast, refetchPlans]);
+  }, [form, isSaving, haptic, router, showToast, refetchPlans, requireListing]);
 
   const renderBasicsStep = () => {
     const isToday = form.date === formatDate(new Date());

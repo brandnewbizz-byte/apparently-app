@@ -8,6 +8,7 @@
  */
 import { supabase } from './supabase';
 import { isLocalFileUri, safeImageUrl } from './media';
+import { ensureUploadSpace, StorageFullError } from './uploadQuota';
 
 /** Maps a lowercase file extension to a video MIME type for Supabase uploads. */
 const VIDEO_EXT_TO_MIME: Record<string, string> = {
@@ -49,6 +50,8 @@ export async function uploadImageToStorage(
 
   // Dynamic import to avoid requiring expo-file-system at bundle evaluation
   const { File } = await import('expo-file-system');
+
+  try { await ensureUploadSpace(new File(localUri).size || 0); } catch (e) { if (e instanceof StorageFullError) throw e; }
 
   let lastError: unknown = null;
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${contentType === 'image/png' ? 'png' : 'jpg'}`;
@@ -107,6 +110,8 @@ export async function uploadVideoToStorage(
   const contentType = VIDEO_EXT_TO_MIME[ext] || 'video/mp4';
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
   const path = `${folder}/${fileName}`;
+
+  try { await ensureUploadSpace(new File(localUri).size || 0); } catch (e) { if (e instanceof StorageFullError) throw e; }
 
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= retries; attempt++) {

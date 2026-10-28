@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -59,6 +60,9 @@ const EMOJI_GRID = [
 
 export default function SkillBuilderScreen() {
   const router = useRouter();
+  // Posting needs a plan (Basic or higher) with a free listing slot.
+  const { requireListing, plan } = useSubscription();
+  React.useEffect(() => { if (plan.loaded) requireListing(); }, [plan.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { createSkill } = useSkills();
@@ -110,6 +114,7 @@ export default function SkillBuilderScreen() {
       Alert.alert('Missing Info', 'Add a title and price to publish your skill.');
       return;
     }
+    if (!(await requireListing())) return;
 
     const result = await createSkill({
       title: title.trim(),
