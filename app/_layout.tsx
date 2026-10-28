@@ -23,8 +23,6 @@ import { TabBarProvider } from '@/contexts/TabBarContext';
 import { CreatePostProvider } from '@/contexts/CreatePostContext';
 import { MessagingProvider } from '@/contexts/MessagingContext';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
-import { RoomProvider } from '@/contexts/RoomContext';
-import { PlanProvider } from '@/contexts/PlanContext';
 import { UserPostsProvider } from '@/contexts/UserPostsContext';
 
 import { BundleProvider } from '@/contexts/BundleContext';
@@ -264,8 +262,6 @@ export default function RootLayout() {
                         <BundleProvider>
                           <SkillProvider>
                           <ServiceRequestProvider>
-                                <RoomProvider>
-                                <PlanProvider>
                                 <MessagingProvider>
                                 <NotificationsProvider>
                                   <BookingsProvider>
@@ -283,8 +279,6 @@ export default function RootLayout() {
                                   </BookingsProvider>
                                 </NotificationsProvider>
                                 </MessagingProvider>
-                                </PlanProvider>
-                                </RoomProvider>
                           </ServiceRequestProvider>
                           </SkillProvider>
                         </BundleProvider>

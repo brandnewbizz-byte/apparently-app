@@ -1,626 +1,209 @@
+import React, { useCallback, useState } from 'react';
 import {
-  Radio, Plus, Users, Circle, Zap, Sparkles, X, Hash, Camera, Image as ImageIcon,
-} from 'lucide-react-native';
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Animated, RefreshControl, Modal, TextInput, Alert,
-  KeyboardAvoidingView, Platform, Dimensions, Image,
+  ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl,
+  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Image,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
-import { supabase } from '@/lib/supabase';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import { ChevronLeft, Plus, Lock, Globe, X, Sparkles } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRoom, LiveRoom } from '@/contexts/RoomContext';
-import { ENVIRONMENT_OPTIONS } from '@/types/virtual-room';
+import { createRoom, deleteRoom, listRooms, themeFor, SPOT_THEMES, type SpotRoom } from '@/lib/spot';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
-export default function LiveScreen() {
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { colors } = useTheme();
-  const { user } = useAuth();
-  const { handleScroll: handleTabBarScroll } = useTabBar();
-  const { rooms, createRoom, fetchRooms, deleteRoom } = useRoom();
+function ago(iso: string) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
-  // Only show user's own rooms
-  const myRooms = useMemo(() => rooms.filter(r => r.creatorId === user?.id), [rooms, user?.id]);
-
-  const [refreshing, setRefreshing] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [roomName, setRoomName] = useState('');
-  const [roomTopic, setRoomTopic] = useState('');
-  const [roomEnvironment, setRoomEnvironment] = useState('generic');
-  const [isCreating, setIsCreating] = useState(false);
-  const [coverImageUri, setCoverImageUri] = useState<string | null>(null);
-  const [isUploadingCover, setIsUploadingCover] = useState(false);
-
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  const SUGGESTED_TOPICS = [
-    'Build Plans', 'Design Sprint', 'Ideas', 'Resources', 'Feedback', 'Chill',
-  ];
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-  }, []);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchRooms().finally(() => setRefreshing(false));
-  }, [fetchRooms]);
-
-  // ── Pick Cover Image ──
-  const pickCoverImage = useCallback(async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow access to your photo library to set a room cover.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setCoverImageUri(result.assets[0].uri);
-    }
-  }, []);
-
-  // ── Upload cover to Supabase Storage ──
-  const uploadCoverImage = useCallback(async (roomId: string): Promise<string | null> => {
-    if (!coverImageUri) return null;
-    try {
-      const ext = coverImageUri.split('.').pop()?.split('?')[0] || 'jpg';
-      const path = `covers/${roomId}/cover.${ext}`;
-      const blob: any = await fetch(coverImageUri).then(r => r.blob());
-      const { error } = await supabase.storage
-        .from('room-files')
-        .upload(path, blob, { upsert: true, contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}` });
-      if (error) throw error;
-      const { data: { publicUrl } } = supabase.storage.from('room-files').getPublicUrl(path);
-      return publicUrl;
-    } catch (e: any) {
-      console.log('[Cover Upload] failed:', e?.message || e);
-      return null;
-    }
-  }, [coverImageUri]);
-
-  // ── Create Room ──
-  const handleCreateRoom = useCallback(async () => {
-    if (!roomName.trim()) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsCreating(true);
-    try {
-      // Step 1: Create room in DB (cover image uploaded after)
-      const room = await createRoom(roomName.trim(), roomTopic.trim(), {
-        environment: roomEnvironment,
-      });
-      if (!room) { setIsCreating(false); return; }
-
-      // Step 2: Upload cover image to Supabase Storage if selected
-      let publicUrl: string | null = null;
-      if (coverImageUri) {
-        setIsUploadingCover(true);
-        publicUrl = await uploadCoverImage(room.id);
-        setIsUploadingCover(false);
-      }
-
-      // Step 3: If cover was uploaded, persist the public URL to the DB
-      if (publicUrl) {
-        const { data, error } = await supabase
-          .from('rooms')
-          .update({ cover_image: publicUrl })
-          .eq('id', room.id)
-          .select('cover_image')
-          .single();
-        if (!error && data) {
-          room.coverImage = (data as any).cover_image || publicUrl;
-        } else {
-          room.coverImage = publicUrl;
-          console.log('[Cover Save] DB update failed, using local:', error?.message);
-        }
-      }
-
-      // Cleanup & navigate
-      setRoomName('');
-      setRoomTopic('');
-      setRoomEnvironment('generic');
-      setCoverImageUri(null);
-      setShowCreateModal(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.push(`/(tabs)/live/room/${room.id}` as any);
-    } catch (e: any) {
-      console.log('[Create Room] failed:', e?.message || e);
-    }
-    setIsCreating(false);
-    setIsUploadingCover(false);
-  }, [roomName, roomTopic, coverImageUri, createRoom, uploadCoverImage, router]);
-
-  // ── Join Room ──
-  const handleJoinRoom = useCallback((room: LiveRoom) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.push(`/(tabs)/live/room/${room.id}` as any);
-  }, [router]);
-
-  // ── Delete Room (channel) from list + DB ──
-  const handleDeleteRoom = useCallback((room: LiveRoom) => {
-    if (!room) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      'Delete Channel',
-      `Permanently delete "${room.name}" and its content? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteRoom(room.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-        },
-      ],
-      { cancelable: true },
-    );
-  }, [deleteRoom]);
-
+function RoomCard({ room, mine, onOpen, onLongPress, colors }: { room: SpotRoom; mine: boolean; onOpen: () => void; onLongPress?: () => void; colors: any }) {
+  const t = themeFor(room.theme);
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[
-        styles.header,
-        {
-          paddingTop: insets.top + 8,
-          backgroundColor: colors.background,
-          borderBottomColor: colors.border,
-        },
-      ]}>
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <LinearGradient
-              colors={['#8B5CF6', '#6366F1']}
-              style={styles.headerIcon}
-            >
-              <Radio size={20} color="#FFF" />
-            </LinearGradient>
-            <View>
-              <Text style={[styles.headerTitle, { color: colors.text }]}>Spot</Text>
-              <Text style={[styles.headerSub, { color: colors.textTertiary }]}>
-                {myRooms.length > 0
-                  ? `${myRooms.length} room${myRooms.length > 1 ? 's' : ''}`
-                  : 'Live collaboration space'}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={styles.createBtn}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowCreateModal(true);
-            }}
-          >
-            <Plus size={16} color="#FFF" />
-            <Text style={styles.createBtnText}>Create Room</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tagline */}
-        <View style={[styles.tagline, { backgroundColor: colors.accent + '0C' }]}>
-          <Sparkles size={13} color={colors.accent} />
-          <Text style={[styles.taglineText, { color: colors.textSecondary }]}>
-            Go live · Build together · Share resources
+    <TouchableOpacity activeOpacity={0.85} onPress={onOpen} onLongPress={onLongPress} style={styles.card} accessibilityLabel={`Open ${room.name}`}>
+      <LinearGradient colors={t.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardArt}>
+        <Text style={styles.cardEmoji}>{t.emoji}</Text>
+        {room.visibility !== 'public' ? (
+          <View style={styles.lock}><Lock size={11} color="#FFF" /></View>
+        ) : null}
+      </LinearGradient>
+      <View style={styles.cardBody}>
+        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{room.name}</Text>
+        <View style={styles.cardMeta}>
+          {room.creatorAvatar ? <Image source={{ uri: room.creatorAvatar }} style={styles.metaAvatar} /> : null}
+          <Text style={[styles.cardSub, { color: colors.textSecondary }]} numberOfLines={1}>
+            {mine ? 'Your room' : room.creatorName} · {ago(room.updatedAt)}
           </Text>
         </View>
       </View>
+    </TouchableOpacity>
+  );
+}
 
-      {/* Content */}
+export default function SpotLobby() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const { user } = useAuth();
+
+  const [rooms, setRooms] = useState<SpotRoom[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [name, setName] = useState('');
+  const [theme, setTheme] = useState(SPOT_THEMES[0].id);
+  const [privateRoom, setPrivateRoom] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setRooms(await listRooms(user?.id)); } catch { /* keep list */ } finally { setLoading(false); }
+  }, [user?.id]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const mine = rooms.filter((r) => r.creatorId === user?.id);
+  const open = rooms.filter((r) => r.creatorId !== user?.id);
+
+  const openRoom = (id: string) => { tap(); router.push(`/(tabs)/live/room/${id}` as any); };
+
+  const make = async () => {
+    if (!user?.id || creating) return;
+    setCreating(true);
+    try {
+      const room = await createRoom({
+        name: name.trim() || 'Hangout',
+        theme,
+        visibility: privateRoom ? 'invite_only' : 'public',
+        me: { id: user.id, name: user.fullName || user.username || 'Someone', avatar: user.avatar || null },
+      });
+      setShowNew(false);
+      setName('');
+      setRooms((prev) => [room, ...prev]);
+      openRoom(room.id);
+    } catch {
+      Alert.alert('Room not created', 'Check your connection and try again.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const manage = (room: SpotRoom) => {
+    tap();
+    Alert.alert(room.name, undefined, [
+      {
+        text: 'Delete room', style: 'destructive',
+        onPress: async () => {
+          const prev = rooms;
+          setRooms((r) => r.filter((x) => x.id !== room.id));
+          try { await deleteRoom(room.id); } catch { setRooms(prev); Alert.alert('Not deleted', 'Please try again.'); }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <ScrollView
-        style={styles.scroll}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.textTertiary} />}
         showsVerticalScrollIndicator={false}
-        onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.accent}
-          />
-        }
       >
-        <Animated.View style={{ opacity: fadeAnim }}>
+        <LinearGradient colors={['#5B2A86', '#8B5CF6', '#EC4899']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, { paddingTop: insets.top + 8 }]}>
+          <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.navigate('/(tabs)/planner' as any))} style={styles.back} accessibilityLabel="Back">
+            <ChevronLeft size={26} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.heroTitle}>Spot</Text>
+          <Text style={styles.heroSub}>Virtual rooms to hang out and plan with friends — live.{'\n'}Drop things in, doodle, move stuff around, react.</Text>
+          <TouchableOpacity style={styles.newBtn} onPress={() => { tap(); setShowNew(true); }} accessibilityLabel="New room">
+            <Plus size={20} color="#5B2A86" strokeWidth={2.6} />
+            <Text style={styles.newText}>New room</Text>
+          </TouchableOpacity>
+        </LinearGradient>
 
-          {/* ── Live Now ── */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionLabel}>
-                <View style={styles.pulsingDot} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Live Now</Text>
-              </View>
-            </View>
-
-            {myRooms.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Circle size={48} color={colors.accent + '30'} />
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  No rooms yet
-                </Text>
-                <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-                  Create the first room and invite your network
-                </Text>
-                <TouchableOpacity
-                  style={styles.emptyCreateBtn}
-                  onPress={() => setShowCreateModal(true)}
-                >
-                  <Zap size={16} color="#FFF" />
-                  <Text style={styles.emptyCreateText}>Start a Room</Text>
-                </TouchableOpacity>
-              </View>
+        {loading ? (
+          <ActivityIndicator style={{ marginTop: 40 }} color={colors.textTertiary} />
+        ) : (
+          <View style={{ paddingHorizontal: 16 }}>
+            <Text style={[styles.section, { color: colors.text }]}>Your rooms</Text>
+            {mine.length === 0 ? (
+              <TouchableOpacity style={[styles.empty, { borderColor: colors.border }]} onPress={() => setShowNew(true)}>
+                <Sparkles size={22} color={colors.textTertiary} />
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Make your first room and invite friends in.</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={styles.roomGrid}>
-                {myRooms.map((room) => (
-                  <TouchableOpacity
-                    key={room.id}
-                    style={[
-                      styles.roomCard,
-                      { backgroundColor: colors.surface, borderColor: colors.border },
-                    ]}
-                    activeOpacity={0.9}
-                    onPress={() => handleJoinRoom(room)}
-                    onLongPress={() => handleDeleteRoom(room)}
-                  >
-                    {/* ⋮ menu top-right — Delete channel (separate, always tappable) */}
-                    <View style={styles.roomMenuBtn}>
-                      <TouchableOpacity
-                        style={styles.roomMenuHit}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        onPress={() => handleDeleteRoom(room)}
-                      >
-                        <Text style={[styles.roomMenuDots, { color: '#FFF' }]}>⋯</Text>
-                      </TouchableOpacity>
-                    </View>
-                    {/* Room cover image or status gradient */}
-                    {room.coverImage ? (
-                      <View style={styles.roomGradient}>
-                        <Image
-                          source={{ uri: room.coverImage }}
-                          style={styles.roomCoverImg}
-                        />
-                        <View style={styles.roomLiveIndicator}>
-                          <View style={[
-                            styles.roomLiveDot,
-                            room.status === 'draft' && { backgroundColor: '#FBBF24' },
-                            room.status === 'ended' && { backgroundColor: '#9CA3AF' },
-                          ]} />
-                          <Text style={[
-                            styles.roomLiveText,
-                            room.status === 'draft' && { color: '#FBBF24' },
-                            room.status === 'ended' && { color: '#D1D5DB' },
-                          ]}>
-                            {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
-                          </Text>
-                        </View>
-                      </View>
-                    ) : (
-                      <LinearGradient
-                        colors={
-                          room.status === 'ended' ? ['#6B7280', '#4B5563'] :
-                          room.status === 'draft' ? ['#F59E0B', '#D97706'] :
-                          ['#8B5CF6', '#6366F1']
-                        }
-                        style={styles.roomGradient}
-                      >
-                        <View style={styles.roomLiveIndicator}>
-                          <View style={[
-                            styles.roomLiveDot,
-                            room.status === 'draft' && { backgroundColor: '#FBBF24' },
-                            room.status === 'ended' && { backgroundColor: '#9CA3AF' },
-                          ]} />
-                          <Text style={[
-                            styles.roomLiveText,
-                            room.status === 'draft' && { color: '#FBBF24' },
-                            room.status === 'ended' && { color: '#D1D5DB' },
-                          ]}>
-                            {room.status === 'draft' ? 'SETUP' : room.status === 'ended' ? 'ENDED' : 'LIVE'}
-                          </Text>
-                        </View>
-                      </LinearGradient>
-                    )}
-
-                    <View style={styles.roomCardBody}>
-                      <Text
-                        style={[styles.roomCardName, { color: colors.text }]}
-                        numberOfLines={1}
-                      >
-                        {room.name}
-                      </Text>
-
-                      {room.topic ? (
-                        <View style={styles.roomTopicRow}>
-                          <Hash size={12} color={colors.accent} />
-                          <Text
-                            style={[styles.roomTopicText, { color: colors.accent }]}
-                            numberOfLines={1}
-                          >
-                            {room.topic}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      <View style={styles.roomCardFooter}>
-                        <View style={styles.roomCreator}>
-                          <Image
-                            source={{
-                              uri: room.creatorAvatar
-                                || `https://ui-avatars.com/api/?name=${encodeURIComponent(room.creatorName)}&background=8B5CF6&color=fff&size=40`,
-                            }}
-                            style={styles.roomCreatorAvatar}
-                          />
-                          <Text
-                            style={[styles.roomCreatorName, { color: colors.textSecondary }]}
-                            numberOfLines={1}
-                          >
-                            {room.creatorName}
-                          </Text>
-                        </View>
-                        <View style={styles.roomParticipants}>
-                          <Users size={13} color={colors.textTertiary} />
-                          <Text style={[styles.roomParticipantCount, { color: colors.textTertiary }]}>
-                            {room.participants?.length || 1}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.grid}>
+                {mine.map((r) => <RoomCard key={r.id} room={r} mine colors={colors} onOpen={() => openRoom(r.id)} onLongPress={() => manage(r)} />)}
               </View>
             )}
-          </View>
 
-          {/* ── Info Card ── */}
-          <View style={[
-            styles.infoCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}>
-            <View style={styles.infoRow}>
-              <View style={[styles.infoBullet, { backgroundColor: colors.accent + '20' }]}>
-                <Sparkles size={14} color={colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.infoTitle, { color: colors.text }]}>How rooms work</Text>
-                <Text style={[styles.infoDesc, { color: colors.textTertiary }]}>
-                  Press-hold mic to talk · Tap camera for video · Build plans & share resources together
-                </Text>
-              </View>
-            </View>
+            {open.length ? (
+              <>
+                <Text style={[styles.section, { color: colors.text }]}>Open rooms</Text>
+                <View style={styles.grid}>
+                  {open.map((r) => <RoomCard key={r.id} room={r} mine={false} colors={colors} onOpen={() => openRoom(r.id)} />)}
+                </View>
+              </>
+            ) : null}
           </View>
-
-          <View style={{ height: 120 }} />
-        </Animated.View>
+        )}
       </ScrollView>
 
-      {/* ── Create Room Modal ── */}
-      <Modal
-        visible={showCreateModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowCreateModal(false)}
-      >
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={[styles.modalRoot, { backgroundColor: colors.background }]}>
-            {/* Modal Header */}
-            <View style={[
-              styles.modalHeader,
-              { paddingTop: insets.top + 8, borderBottomColor: colors.border },
-            ]}>
-              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-                <X size={22} color={colors.text} />
-              </TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Create Room</Text>
-              <TouchableOpacity
-                style={[
-                  styles.modalCreateBtn,
-                  {
-                    backgroundColor: roomName.trim() ? colors.accent : colors.surface,
-                    opacity: roomName.trim() ? 1 : 0.5,
-                  },
-                ]}
-                onPress={handleCreateRoom}
-                disabled={!roomName.trim() || isCreating}
-              >
-                <Zap size={12} color="#FFF" />
-                <Text style={styles.modalCreateText}>
-                  {isCreating ? 'Creating...' : 'Create Room'}
-                </Text>
-              </TouchableOpacity>
+      {/* New room */}
+      <Modal visible={showNew} transparent animationType="slide" onRequestClose={() => setShowNew(false)} statusBarTranslucent>
+        <Pressable style={styles.backdrop} onPress={() => setShowNew(false)} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.anchor} pointerEvents="box-none">
+          <View style={[styles.sheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.sheetHead}>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>New room</Text>
+              <TouchableOpacity onPress={() => setShowNew(false)} hitSlop={10}><X size={22} color={colors.text} /></TouchableOpacity>
             </View>
-
-            {/* Modal Body */}
-            <ScrollView contentContainerStyle={styles.modalBody}>
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Room Name
-                </Text>
-                <TextInput
-                  style={[styles.fieldInput, {
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                    borderColor: colors.border,
-                  }]}
-                  placeholder="Give your room a name"
-                  placeholderTextColor={colors.textTertiary}
-                  value={roomName}
-                  onChangeText={setRoomName}
-                  maxLength={60}
-                  returnKeyType="next"
-                  autoFocus
-                />
-              </View>
-
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Topic
-                </Text>
-                <TextInput
-                  style={[styles.fieldInput, {
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                    borderColor: colors.border,
-                  }]}
-                  placeholder="What are you working on?"
-                  placeholderTextColor={colors.textTertiary}
-                  value={roomTopic}
-                  onChangeText={setRoomTopic}
-                  maxLength={80}
-                  returnKeyType="done"
-                />
-              </View>
-
-              {/* ── Cover Image ── */}
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Room Cover
-                </Text>
-                <TouchableOpacity
-                  style={[styles.coverPicker, {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  }]}
-                  onPress={pickCoverImage}
-                  disabled={isUploadingCover}
-                >
-                  {coverImageUri ? (
-                    <Image source={{ uri: coverImageUri }} style={styles.coverPreview} />
-                  ) : (
-                    <View style={styles.coverPlaceholder}>
-                      <Camera size={28} color={colors.textTertiary} />
-                      <Text style={[styles.coverPlaceholderText, { color: colors.textTertiary }]}>
-                        Add cover image
-                      </Text>
-                      <Text style={[styles.coverHint, { color: colors.textTertiary }]}>
-                        16:9 ratio recommended
-                      </Text>
-                    </View>
-                  )}
-                  {coverImageUri && (
-                    <View style={styles.coverChangeOverlay}>
-                      <ImageIcon size={16} color="#FFF" />
-                      <Text style={styles.coverChangeText}>Change</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Virtual Room</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  {ENVIRONMENT_OPTIONS.map((env) => {
-                    const active = roomEnvironment === env.key;
-                    return (
-                      <TouchableOpacity
-                        key={env.key}
-                        style={[
-                          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, marginBottom: 4 },
-                          { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border },
-                        ]}
-                        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setRoomEnvironment(env.key); }}
-                      >
-                        <Text style={{ fontSize: 16 }}>{env.emoji} </Text>
-                        <Text style={[{ fontSize: 13, fontWeight: active ? '600' : '400' }, { color: active ? '#FFF' : colors.textSecondary }]}>{env.label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Suggestions</Text>
-                <View style={styles.topicRow}>
-                  {SUGGESTED_TOPICS.map((topic) => {
-                    const active = roomTopic === topic;
-                    return (
-                      <TouchableOpacity
-                        key={topic}
-                        style={[
-                          styles.topicChip,
-                          {
-                            backgroundColor: active ? colors.accent : colors.surface,
-                            borderColor: active ? colors.accent : colors.border,
-                          },
-                        ]}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          setRoomTopic(active ? '' : topic);
-                        }}
-                      >
-                        <Text style={[
-                          styles.topicChipText,
-                          { color: active ? '#FFF' : colors.textSecondary },
-                        ]}>
-                          {topic}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Preview card */}
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textTertiary }]}>
-                  Preview
-                </Text>
-                <View style={[
-                  styles.previewCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}>
-                  <LinearGradient
-                    colors={['#F59E0B', '#D97706']}
-                    style={styles.previewGradient}
-                  >
-                    <View style={styles.previewLive}>
-                      <View style={[styles.previewDot, { backgroundColor: '#FBBF24' }]} />
-                      <Text style={[styles.previewLiveText, { color: '#FBBF24' }]}>SETUP</Text>
-                    </View>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Name it — e.g. Miami trip, Friday plans"
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              maxLength={40}
+              autoFocus
+              returnKeyType="done"
+            />
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Vibe</Text>
+            <View style={styles.themes}>
+              {SPOT_THEMES.map((t) => (
+                <TouchableOpacity key={t.id} onPress={() => setTheme(t.id)} style={styles.themeCell} accessibilityLabel={`${t.name} theme`} accessibilityState={{ selected: theme === t.id }}>
+                  <LinearGradient colors={t.colors} style={[styles.themeSwatch, theme === t.id && { borderColor: colors.text }]}>
+                    <Text style={{ fontSize: 20 }}>{t.emoji}</Text>
                   </LinearGradient>
-                  <View style={styles.previewBody}>
-                    <Text style={[styles.previewName, { color: colors.text }]}>
-                      {roomName.trim() || 'Room Name'}
-                    </Text>
-                    <Text style={[styles.previewTopic, { color: colors.textTertiary }]}>
-                      {roomTopic.trim() || 'No topic set'}
-                    </Text>
-                    <View style={styles.previewFooter}>
-                      <View style={[
-                        styles.previewAvatar,
-                        { backgroundColor: colors.accent + '30' },
-                      ]}>
-                        <Text style={styles.previewAvatarText}>
-                          {(user?.fullName || 'Y')[0].toUpperCase()}
-                        </Text>
-                      </View>
-                      <Text style={[styles.previewCreator, { color: colors.textSecondary }]}>
-                        {user?.fullName || 'You'}
-                      </Text>
-                      <View style={styles.previewParticipants}>
-                        <Users size={11} color={colors.textTertiary} />
-                        <Text style={[styles.previewCount, { color: colors.textTertiary }]}>1</Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            </ScrollView>
+                  <Text style={[styles.themeName, { color: colors.textSecondary }]}>{t.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={[styles.toggle, { backgroundColor: colors.surfaceHighlight }]}>
+              {[
+                { v: false, label: 'Anyone', icon: Globe },
+                { v: true, label: 'Link only', icon: Lock },
+              ].map((o) => {
+                const on = privateRoom === o.v;
+                const Icon = o.icon;
+                return (
+                  <TouchableOpacity key={o.label} onPress={() => setPrivateRoom(o.v)} style={[styles.toggleBtn, on && { backgroundColor: colors.background }]}>
+                    <Icon size={15} color={on ? colors.text : colors.textSecondary} />
+                    <Text style={[styles.toggleText, { color: on ? colors.text : colors.textSecondary }]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity style={[styles.create, creating && { opacity: 0.6 }]} onPress={make} disabled={creating}>
+              {creating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.createText}>Create & open</Text>}
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -630,210 +213,40 @@ export default function LiveScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { flex: 1 },
+  hero: { paddingHorizontal: 20, paddingBottom: 24, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
+  back: { width: 40, height: 40, marginLeft: -8, alignItems: 'center', justifyContent: 'center' },
+  heroTitle: { color: '#FFF', fontSize: 34, fontWeight: '900', letterSpacing: -0.8, marginTop: 4 },
+  heroSub: { color: 'rgba(255,255,255,0.88)', fontSize: 15, lineHeight: 21, marginTop: 6 },
+  newBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, backgroundColor: '#FFF', borderRadius: 22, paddingHorizontal: 18, height: 44, marginTop: 18 },
+  newText: { color: '#5B2A86', fontSize: 15, fontWeight: '800' },
+  section: { fontSize: 18, fontWeight: '800', marginTop: 24, marginBottom: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  card: { width: '48%', flexGrow: 0 },
+  cardArt: { height: 110, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  cardEmoji: { fontSize: 40 },
+  lock: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 10, padding: 4 },
+  cardBody: { paddingTop: 8, paddingHorizontal: 2 },
+  cardTitle: { fontSize: 15, fontWeight: '800' },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  metaAvatar: { width: 16, height: 16, borderRadius: 8 },
+  cardSub: { fontSize: 12, flexShrink: 1 },
+  empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 18, padding: 20, alignItems: 'center', gap: 8 },
+  emptyText: { fontSize: 14, textAlign: 'center' },
 
-  // ── Header ──
-  header: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
-  headerRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon: {
-    width: 38, height: 38, borderRadius: 12,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  headerTitle: { fontSize: 22, fontWeight: '700' },
-  headerSub: { fontSize: 12, marginTop: 1 },
-  createBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#8B5CF6', paddingHorizontal: 16,
-    paddingVertical: 10, borderRadius: 24,
-  },
-  createBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  tagline: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginTop: 12, paddingVertical: 8, paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  taglineText: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
-
-  // ── Section ──
-  section: { paddingHorizontal: 16, paddingTop: 20 },
-  sectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 14,
-  },
-  sectionLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pulsingDot: {
-    width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981',
-  },
-  sectionTitle: { fontSize: 17, fontWeight: '700' },
-
-  // ── Empty ──
-  emptyState: {
-    alignItems: 'center', paddingVertical: 48, gap: 10,
-  },
-  emptyTitle: { fontSize: 17, fontWeight: '600' },
-  emptySub: {
-    fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 20,
-  },
-  emptyCreateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#8B5CF6', paddingHorizontal: 20,
-    paddingVertical: 12, borderRadius: 24, marginTop: 8,
-  },
-  emptyCreateText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
-
-  // ── Room Grid ──
-  roomGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 12,
-  },
-  roomCard: {
-    width: (SCREEN_W - 44) / 2,
-    borderRadius: 16, borderWidth: 1, overflow: 'hidden',
-  },
-  roomGradient: {
-    height: 80, alignItems: 'center', justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  roomCoverImg: {
-    ...StyleSheet.absoluteFill, width: '100%', height: '100%',
-  },
-  // ⋮ menu on room card — Delete channel
-  roomMenuBtn: {
-    position: 'absolute', top: 6, right: 6, zIndex: 10,
-  },
-  roomMenuHit: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  roomMenuDots: {
-    fontSize: 20, fontWeight: '700', lineHeight: 24, textAlign: 'center',
-  },
-  roomLiveIndicator: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 10,
-    paddingVertical: 4, borderRadius: 12,
-  },
-  roomLiveDot: {
-    width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF',
-  },
-  roomLiveText: {
-    color: '#FFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.5,
-  },
-  roomCardBody: { padding: 12 },
-  roomCardName: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  roomTopicRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10,
-  },
-  roomTopicText: { fontSize: 12, fontWeight: '600', flex: 1 },
-  roomCardFooter: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  roomCreator: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1,
-  },
-  roomCreatorAvatar: { width: 20, height: 20, borderRadius: 10 },
-  roomCreatorName: { fontSize: 11, fontWeight: '500', flex: 1 },
-  roomParticipants: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  roomParticipantCount: { fontSize: 12, fontWeight: '600' },
-
-  // ── Info Card ──
-  infoCard: {
-    marginHorizontal: 16, marginTop: 24, padding: 16,
-    borderRadius: 14, borderWidth: 1,
-  },
-  infoRow: { flexDirection: 'row', gap: 12 },
-  infoBullet: {
-    width: 36, height: 36, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', marginTop: 2,
-  },
-  infoTitle: { fontSize: 15, fontWeight: '600', marginBottom: 3 },
-  infoDesc: { fontSize: 13, lineHeight: 19 },
-
-  // ── Modal ──
-  modalRoot: { flex: 1 },
-  modalHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1,
-  },
-  modalTitle: { fontSize: 17, fontWeight: '700' },
-  modalCreateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24,
-  },
-  modalCreateText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  modalBody: { padding: 16, gap: 20 },
-
-  // ── Fields ──
-  fieldGroup: { gap: 8 },
-  fieldLabel: {
-    fontSize: 13, fontWeight: '600', textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  fieldInput: {
-    fontSize: 16, paddingHorizontal: 14, paddingVertical: 14,
-    borderRadius: 12, borderWidth: 1,
-  },
-  topicRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  topicChip: {
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1,
-  },
-  topicChipText: { fontSize: 13, fontWeight: '600' },
-
-  // ── Preview ──
-  previewCard: { borderRadius: 14, overflow: 'hidden', borderWidth: 1 },
-  previewGradient: {
-    height: 60, alignItems: 'center', justifyContent: 'center',
-  },
-  previewLive: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(0,0,0,0.3)', paddingHorizontal: 10,
-    paddingVertical: 3, borderRadius: 12,
-  },
-  previewDot: {
-    width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF',
-  },
-  previewLiveText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
-  previewBody: { padding: 12 },
-  previewName: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  previewTopic: { fontSize: 13, marginBottom: 10 },
-  previewFooter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  previewAvatar: {
-    width: 22, height: 22, borderRadius: 11,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  previewAvatarText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
-  previewCreator: { fontSize: 12, fontWeight: '500', flex: 1 },
-  previewParticipants: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  previewCount: { fontSize: 11, fontWeight: '600' },
-
-  // ── Cover Image ──
-  coverPicker: {
-    borderRadius: 12, borderWidth: 1, overflow: 'hidden',
-    minHeight: 140,
-  },
-  coverPreview: {
-    width: '100%', height: 160, resizeMode: 'cover',
-  },
-  coverPlaceholder: {
-    height: 140, alignItems: 'center', justifyContent: 'center', gap: 6,
-  },
-  coverPlaceholderText: {
-    fontSize: 14, fontWeight: '600',
-  },
-  coverHint: {
-    fontSize: 11,
-  },
-  coverChangeOverlay: {
-    position: 'absolute', right: 10, bottom: 10,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10,
-    paddingVertical: 5, borderRadius: 12,
-  },
-  coverChangeText: {
-    color: '#FFF', fontSize: 12, fontWeight: '600',
-  },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)' },
+  anchor: { flex: 1, justifyContent: 'flex-end' },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 16, gap: 12 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetTitle: { fontSize: 20, fontWeight: '900' },
+  input: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, height: 50, fontSize: 16 },
+  label: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  themes: { flexDirection: 'row', justifyContent: 'space-between' },
+  themeCell: { alignItems: 'center', gap: 4 },
+  themeSwatch: { width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'transparent' },
+  themeName: { fontSize: 11, fontWeight: '700' },
+  toggle: { flexDirection: 'row', borderRadius: 12, padding: 3 },
+  toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 10 },
+  toggleText: { fontSize: 14, fontWeight: '700' },
+  create: { backgroundColor: '#8B5CF6', height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  createText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
 });

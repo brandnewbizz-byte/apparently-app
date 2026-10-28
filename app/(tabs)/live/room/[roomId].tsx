@@ -1,1366 +1,427 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Animated, ScrollView, Image, FlatList, PanResponder, Alert, Modal, TextInput,
-  KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, Image, PanResponder, Platform, Share, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  PhoneOff, Mic, MicOff, Camera, CameraOff, Users, Hand,
-  MessageCircle, Sparkles, Share2, X, Monitor, Eye, Crown, Shield, UserCheck, Radio,
-  Repeat2, Trash2, Lock, UserPlus, Search, User,
-} from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
-import { supabase } from '@/lib/supabase';
-import { CameraView, useCameraPermissions } from '@/lib/safe-camera';
-import ChatTab from '@/components/live/ChatTab';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
-import { useRoom, RoomParticipant, type ActivityEntry } from '@/contexts/RoomContext';
-import { usePlan, PlanProvider } from '@/contexts/PlanContext';
+import { useSpotRoom } from '@/hooks/useSpotRoom';
+import {
+  getRoom, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
+  type SpotPoint, type SpotRoom,
+} from '@/lib/spot';
+import { uploadImageToStorage } from '@/lib/storage';
+import DoodleLayer from '@/components/spot/DoodleLayer';
+import BurstLayer from '@/components/spot/BurstLayer';
+import SpotItemView from '@/components/spot/SpotItemView';
+import { AddSheet, ItemMenu } from '@/components/spot/SpotSheets';
 
-import { useLiveAudio } from '@/hooks/useLiveAudio';
-import { useRoomHistory, type HistoryEntry, type HistoryAction } from '@/hooks/useRoomHistory';
-import { useRoomRoles, useRolePermissionsSafe } from '@/hooks/useRoomRoles';
-import { EditIndicator } from '@/components/live/EditIndicator';
-import { RoleBadge } from '@/components/live/RoleBadge';
-import { HistoryFeed } from '@/components/live/HistoryFeed';
-import { PresentationOverlay } from '@/components/live/PresentationOverlay';
-import OverviewTab from './plan/OverviewTab';
-import IdeasTab from './plan/IdeasTab';
-import TasksTab from './plan/TasksTab';
-import BudgetTab from './plan/BudgetTab';
-import TimelineTab from './plan/TimelineTab';
-import FilesTab from './plan/FilesTab';
-import VirtualRoomScreen from './virtual';
+type Mode = 'move' | 'draw';
+const PEN_WIDTHS = [3, 6, 12];
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-
-const TABS = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'ideas', label: 'Ideas' },
-  { key: 'tasks', label: 'Tasks' },
-  { key: 'budget', label: 'Budget' },
-  { key: 'timeline', label: 'Timeline' },
-  { key: 'files', label: 'Files' },
-  { key: 'history', label: 'History' },
-  { key: 'chat', label: 'Chat' },
-  { key: 'virtual', label: 'Virtual' },
-  { key: 'people', label: 'People' },
-];
-
-const TAB_CONTENT: Record<string, React.FC> = {
-  overview: OverviewTab,
-  ideas: IdeasTab,
-  tasks: TasksTab,
-  budget: BudgetTab,
-  timeline: TimelineTab,
-  files: FilesTab,
-  virtual: VirtualTab,
+const tap = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
+  if (Platform.OS !== 'web') Haptics.impactAsync(style);
 };
+const nearCenter = () => 0.35 + Math.random() * 0.3;
 
-// ── Virtual Tab Wrapper ──
-function VirtualTab() {
-  return <VirtualRoomScreen />;
-}
+export default function SpotRoomScreen() {
+  const { roomId } = useLocalSearchParams<{ roomId: string }>();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const { hideTabBar, showTabBar } = useTabBar();
 
-// ── Animated Speaking Ring ──
-function SpeakingRing({ size = 52, color = '#A78BFA', pulseSpeed = 600 }: {
-  size?: number; color?: string; pulseSpeed?: number;
-}) {
-  const anim = useRef(new Animated.Value(0.3)).current;
+  const me = useMemo(() => (user?.id ? { id: user.id, name: user.fullName || user.username || 'You', avatar: user.avatar || '' } : null), [user?.id, user?.fullName, user?.username, user?.avatar]);
+  const room = useSpotRoom(roomId, me);
+
+  const [info, setInfo] = useState<SpotRoom | null>(null);
+  const [infoLoading, setInfoLoading] = useState(true);
+  const [mode, setMode] = useState<Mode>('move');
+  const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const [penWidth, setPenWidth] = useState(PEN_WIDTHS[1]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showReact, setShowReact] = useState(false);
+  const [showThemes, setShowThemes] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [myStroke, setMyStroke] = useState<SpotPoint[]>([]);
+
+  // Full-screen room: hide the tab bar while inside.
+  useEffect(() => { hideTabBar(); return () => showTabBar(); }, [hideTabBar, showTabBar]);
+
   useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: pulseSpeed, useNativeDriver: false }),
-        Animated.timing(anim, { toValue: 0.3, duration: pulseSpeed, useNativeDriver: false }),
-      ]),
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, [pulseSpeed]);
+    if (!roomId) return;
+    getRoom(roomId).then((r) => {
+      setInfo(r);
+      if (r && me) touchRoom(r, me.id);
+    }).finally(() => setInfoLoading(false));
+  }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        borderWidth: 2,
-        borderColor: color,
-        opacity: anim,
-        transform: [{
-          scale: anim.interpolate({ inputRange: [0.3, 1], outputRange: [1, 1.25] }),
-        }],
-      }}
-    />
-  );
-}
+  const theme = themeFor(info?.theme);
+  const isHost = !!me && info?.creatorId === me.id;
+  const things = room.items.filter((i) => i.kind !== 'doodle');
+  const doodles = room.items.filter((i) => i.kind === 'doodle');
+  const myDoodles = doodles.filter((d) => d.ownerId === me?.id);
+  const menuItem = menuId ? room.items.find((i) => i.id === menuId) || null : null;
 
-// ── Draggable Camera Bubble (real CameraView for local, avatar for remote) ──
-function CameraBubble({ onClose, participant, isLocal, onPress, facing, onFlip, }: {
-  onClose: () => void;
-  participant: { fullName: string; avatar: string | null; userId?: string };
-  isLocal?: boolean;
-  onPress?: () => void;
-  facing?: 'front' | 'back';
-  onFlip?: () => void;
-}) {
-  const pan = useRef(new Animated.ValueXY({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 })).current;
-  const scale = useRef(new Animated.Value(1)).current;
-  const positionRef = useRef({ x: SCREEN_W / 2 - 55, y: SCREEN_H * 0.4 });
+  // ── Drawing ───────────────────────────────────────────────────────────────
+  const drawRef = useRef({ mode, size, penColor, penWidth, points: [] as SpotPoint[] });
+  drawRef.current.mode = mode;
+  drawRef.current.size = size;
+  drawRef.current.penColor = penColor;
+  drawRef.current.penWidth = penWidth;
+  const strokeFns = useRef({ progress: room.strokeProgress, done: room.strokeDone });
+  strokeFns.current = { progress: room.strokeProgress, done: room.strokeDone };
 
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      pan.setOffset({ x: positionRef.current.x, y: positionRef.current.y });
-      pan.setValue({ x: 0, y: 0 });
-      Animated.spring(scale, { toValue: 1.08, useNativeDriver: false }).start();
+  const canvasPan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => drawRef.current.mode === 'draw',
+    onMoveShouldSetPanResponder: () => drawRef.current.mode === 'draw',
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (e) => {
+      const { w, h } = drawRef.current.size;
+      const { locationX, locationY } = e.nativeEvent;
+      drawRef.current.points = [{ x: locationX / w, y: locationY / h }];
+      setMyStroke(drawRef.current.points);
     },
-    onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-    onPanResponderRelease: (_, gesture) => {
-      pan.flattenOffset();
-      positionRef.current = {
-        x: positionRef.current.x + gesture.dx,
-        y: positionRef.current.y + gesture.dy,
-      };
-      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
+    onPanResponderMove: (e) => {
+      const { w, h } = drawRef.current.size;
+      const { locationX, locationY } = e.nativeEvent;
+      const p = { x: Math.min(1, Math.max(0, locationX / w)), y: Math.min(1, Math.max(0, locationY / h)) };
+      const pts = drawRef.current.points;
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot((p.x - last.x) * w, (p.y - last.y) * h) < 3) return;
+      const next = [...pts, p];
+      drawRef.current.points = next;
+      setMyStroke(next);
+      strokeFns.current.progress(next, drawRef.current.penColor, drawRef.current.penWidth);
+    },
+    onPanResponderRelease: () => {
+      const pts = drawRef.current.points;
+      drawRef.current.points = [];
+      // Keep showing it until the saved version arrives.
+      strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
+    },
+    onPanResponderTerminate: () => {
+      const pts = drawRef.current.points;
+      drawRef.current.points = [];
+      strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
     },
   }), []);
 
-  return (
-    <Animated.View
-      style={[
-        styles.cameraBubble,
-        { transform: [...pan.getTranslateTransform(), { scale }] },
-      ]}
-      {...panResponder.panHandlers}
-    >
-      {/* Tap to expand (remote cameras) */}
-      <TouchableOpacity
-        style={styles.cameraPreview}
-        onPress={onPress}
-        activeOpacity={onPress ? 0.7 : 1}
-        disabled={!onPress}
-      >
-        {isLocal ? (
-          <CameraView
-            style={styles.cameraImg}
-            facing={facing || 'front'}
-            mirror={facing === 'front' || !facing}
-          />
-        ) : (
-          <Image
-            source={{
-              uri: participant.avatar
-                || `https://ui-avatars.com/api/?name=${encodeURIComponent(participant.fullName)}&background=E5E5E5&color=333&size=160`,
-            }}
-            style={styles.cameraImg}
-          />
-        )}
-        <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)']}
-          style={styles.cameraGradient}
-        >
-          <Text style={styles.cameraName} numberOfLines={1}>{participant.fullName}</Text>
-        </LinearGradient>
-      </TouchableOpacity>
-      {/* Flip camera button (local only) */}
-      {isLocal && onFlip && (
-        <TouchableOpacity style={styles.flipBtn} onPress={onFlip}>
-          <Repeat2 size={14} color="#FFF" strokeWidth={1.5} />
-        </TouchableOpacity>
-      )}
-      {/* Close button */}
-      <TouchableOpacity style={styles.cameraClose} onPress={onClose}>
-        <X size={14} color="#FFF" />
-      </TouchableOpacity>
-      {/* Drag hint */}
-      <View style={styles.dragHandle}>
-        <View style={styles.dragHandleBar} />
-      </View>
-    </Animated.View>
-  );
-}
+  const liveStrokes = useMemo(() => {
+    const list = Object.values(room.liveStrokes);
+    if (myStroke.length) list.push({ points: myStroke, color: penColor, width: penWidth });
+    return list;
+  }, [room.liveStrokes, myStroke, penColor, penWidth]);
 
-// ── Animated Participant Circle ──
-function ParticipantCircle({ p, size, showName, showRole }: {
-  p: RoomParticipant; size?: number; showName?: boolean; showRole?: boolean;
-}) {
-  const s = size || 44;
-  const roleIcon = p.role === 'host' ? '👑' : p.role === 'co_host' ? '⭐' : null;
-  return (
-    <View style={[styles.participantWrap, { width: s + 20, height: s + 50 }]}>
-      <View style={{ width: s, height: s }}>
-        <Image
-          source={{
-            uri: p.avatar
-              || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=8B5CF6&color=fff&size=${s * 2}`,
-          }}
-          style={[styles.participantImg, {
-            width: s, height: s, borderRadius: s / 2,
-            borderWidth: p.isSpeaking ? 2 : 1,
-            borderColor: p.isSpeaking ? '#A78BFA' : 'rgba(255,255,255,0.1)',
-          }]}
-        />
-        {p.isSpeaking && (
-          <SpeakingRing size={s + 10} color="#A78BFA" pulseSpeed={600} />
-        )}
-        {p.hasCamera && (
-          <View style={styles.cameraBadge}>
-            <Camera size={10} color="#FFF" fill="#FFF" />
-          </View>
-        )}
-        {showRole && roleIcon && (
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleBadgeText}>{roleIcon}</Text>
-          </View>
-        )}
-      </View>
-      {showName && (
-        <Text style={styles.participantNameText} numberOfLines={1}>
-          {p.isSpeaking ? '🔊 ' : ''}{p.fullName.split(' ')[0]}
-        </Text>
-      )}
-    </View>
-  );
-}
+  const undoDoodle = () => {
+    const last = [...myDoodles].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).pop();
+    if (last) { tap(); room.remove(last.id); }
+  };
 
-// ── Main Room Content ──
-function RoomContent() {
-  const { roomId } = useLocalSearchParams<{ roomId: string }>();
-  const [loading, setLoading] = useState(true);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [cameraOn, setCameraOn] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState(false);
-  const [cameraPermDenied, setCameraPermDenied] = useState(false);
-  const [facing, setFacing] = useState<'front' | 'back'>('front');
-  const [expandedCamera, setExpandedCamera] = useState<{ userId: string; fullName: string; isLocal: boolean } | null>(null);
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteSearch, setInviteSearch] = useState('');
-  const [inviteResults, setInviteResults] = useState<any[]>([]);
-  const [inviteLoading, setInviteLoading] = useState(false);
-  // handRaised/setHandRaised removed — using RoomContext toggleRaiseHand
-  // presenterTab/setPresenterTab from RoomContext — syncs via supabase realtime
-  const [activeTab, setActiveTab] = useState('overview');
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { colors } = useTheme();
-  const { user } = useAuth();
-
-  // ── Live Audio (push-to-talk + multi-speaker) ──
-  const audio = useLiveAudio({
-    roomId: roomId || '',
-    peerId: user?.id || '',
-    peerName: user?.fullName || 'Anonymous',
-    enabled: !!roomId,
-    onMutedByHost: () => setIsSpeaking(false),
-  });
-  const { hideTabBar, showTabBar } = useTabBar();
-  const {
-    rooms, joinRoom, leaveRoom, addParticipant,
-    startSpeaking, stopSpeaking, toggleCamera,
-    toggleRaiseHand,
-    startPresenting, stopPresenting,
-    muteParticipant, unmuteParticipant, removeParticipant, changeRole,
-    setPresenterTab, presenterTab,
-    isHost, isCoHostOrAbove, getUserRole,
-    enterFollowMode, leaveFollowMode, returnToLivePresentation,
-    viewMode, setViewMode, currentRoom, addActivity,
-    goLive, endLive, deleteRoom, generateInviteLink, isRoomLocked, toggleRoomLock,
-  } = useRoom();
-  const { plan, createPlan, loadPlan, saveNow } = usePlan();
-
-  // ── Room Roles ──
-  const { role: myRole, permissions: myPerms, isEditorOrAbove } = useRoomRoles();
-
-  // ── Room History ──
-  const history = useRoomHistory({
-    roomId: roomId || '',
-    enabled: !!roomId,
-    limit: 100,
-  });
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const micScale = useRef(new Animated.Value(1)).current;
-
-  const room = rooms.find((r) => r.id === roomId);
-
-  // Merge local activityLog + Supabase room_history (deduped by id)
-  const mergedHistoryEntries = useMemo(() => {
-    const localEntries: HistoryEntry[] = (room?.activityLog || []).map((a: ActivityEntry) => ({
-      id: a.id,
-      roomId: room?.id || '',
-      userId: a.userId,
-      userName: a.userName,
-      action: a.action as HistoryAction,
-      detail: a.detail,
-      timestamp: a.timestamp,
-    }));
-    // Dedupe: prefer Supabase entries (they may have richer data)
-    const serverIds = new Set(history.entries.map(e => e.id));
-    const uniqueLocal = localEntries.filter(e => !serverIds.has(e.id));
-    return [...history.entries, ...uniqueLocal].sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-  }, [room?.activityLog, history.entries, room?.id]);
-  const participants = room?.participants || [];
-  const speakingParticipants = participants.filter(p => p.isSpeaking);
-  const cameraParticipants = participants.filter(p => p.hasCamera);
-  const currentUserP = participants.find(p => p.userId === user?.id);
-  const isPresenting = room?.presentationState === 'presenting';
-  const isUserPresenting = room?.presenterId === user?.id;
-  const isUserFollowing = currentUserP?.followMode === true;
-  const presenterParticipant = room?.presenterId
-    ? participants.find(p => p.userId === room.presenterId)
-    : null;
-  const userRole = getUserRole();
-  const userIsHost = isHost();
-  const userIsHostOrAbove = isCoHostOrAbove();
-
-  // ── Mount / Unmount ──
-  useEffect(() => {
-    if (roomId) {
-      hideTabBar();
-      joinRoom(roomId);
-      loadPlan(roomId);
-      createPlan(roomId, { title: room?.name || 'New Plan' });
-      // Connect push-to-talk audio relay
-      audio.joinRoom();
-      const t = setTimeout(() => setLoading(false), 600);
-      return () => {
-        clearTimeout(t);
-        showTabBar();
-        leaveRoom(roomId);
-        audio.leaveRoom();
-      };
-    }
-  }, [roomId]);
-
-  // 🗂 Follow presenter tab navigation 🗂
-  useEffect(() => {
-    if (!roomId || !isUserFollowing || isUserPresenting) return;
-    const channel = supabase.channel(`room:${roomId}`);
-    channel.on(
-      'broadcast',
-      { event: 'presenter_tab_change' },
-      (payload: any) => {
-        if (payload?.payload?.tab) setActiveTab(payload.payload.tab);
-      }
-    ).subscribe();
-    return () => { supabase.removeChannel(channel).then(() => {}, () => {}); };
-  }, [roomId, isUserFollowing, isUserPresenting]);
-
-  // ── Mic glow pulse ──
-  useEffect(() => {
-    if (isSpeaking) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, { toValue: 1, duration: 400, useNativeDriver: false }),
-          Animated.timing(glowAnim, { toValue: 0.2, duration: 400, useNativeDriver: false }),
-        ]),
-      );
-      Animated.loop(
-        Animated.sequence([
-          Animated.spring(micScale, { toValue: 1.15, useNativeDriver: false, speed: 12 }),
-          Animated.spring(micScale, { toValue: 1, useNativeDriver: false, speed: 12 }),
-        ]),
-      ).start();
-      pulse.start();
-      return () => pulse.stop();
-    }
-    glowAnim.setValue(0);
-    micScale.setValue(1);
-  }, [isSpeaking]);
-
-  const handlePressIn = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setIsSpeaking(true);
-    startSpeaking(roomId || '');
-    // Push-to-talk via live audio relay
-    audio.micPressIn();
-  }, [roomId, startSpeaking, audio]);
-
-  const handlePressOut = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsSpeaking(false);
-    stopSpeaking(roomId || '');
-    // Release push-to-talk
-    audio.micPressOut();
-  }, [roomId, stopSpeaking, audio]);
-
-  // ── Camera Permissions ──
-  const [camPerm, requestCamPerm] = useCameraPermissions();
-
-  const handleCamera = useCallback(async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (!cameraOn) {
-      // Turning ON: request camera permission first
-      const perm = camPerm?.granted ? camPerm : await requestCamPerm();
-      if (!perm?.granted) {
-        setCameraPermDenied(true);
-        return;
-      }
-      setCameraPermission(true);
-      setCameraPermDenied(false);
-    } else {
-      // Turning OFF: release camera
-      setCameraPermission(false);
-    }
-    setCameraOn(prev => !prev);
-    toggleCamera(roomId || '');
-  }, [roomId, toggleCamera, cameraOn, camPerm, requestCamPerm]);
-
-  const handleLeave = useCallback(() => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    leaveRoom(roomId || '');
-    router.back();
-  }, [roomId, leaveRoom, router]);
-
-  // ── Room Invite ──
-  const participantIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const ids = new Set<string>((room?.participants || []).map((p: any) => p.userId));
-    participantIdsRef.current = ids;
-  }, [room?.participants]);
-
-  const searchUsersForInvite = useCallback(async (query: string) => {
-    if (query.length < 2) { setInviteResults([]); return; }
-    setInviteLoading(true);
+  // ── Adding things ─────────────────────────────────────────────────────────
+  const addSticker = async (emoji: string) => {
+    setShowAdd(false);
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    setMode('move');
+    const it = await room.add({ kind: 'sticker', emoji, x: nearCenter(), y: nearCenter() });
+    if (!it) Alert.alert('Not added', 'Check your connection and try again.');
+  };
+  const addNote = async (text: string, color: string) => {
+    setShowAdd(false);
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    setMode('move');
+    const it = await room.add({ kind: 'note', text, color, x: nearCenter(), y: nearCenter() });
+    if (!it) Alert.alert('Not added', 'Check your connection and try again.');
+  };
+  const addPhoto = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Photos access needed', 'Allow photo access in Settings to pin a photo.'); return; }
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+    if (r.canceled || !r.assets?.[0]) return;
+    setUploading(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, username, avatar')
-        .or(`full_name.ilike.%${query}%,username.ilike.%${query}%`)
-        .limit(10);
-      if (!error && data) {
-        const pidSet = participantIdsRef.current;
-        setInviteResults(data.filter((u: any) => u.id !== user?.id && !pidSet.has(u.id)));
-      }
-    } catch {}
-    setInviteLoading(false);
-  }, [user?.id]);
+      const url = await uploadImageToStorage(r.assets[0].uri, 'room-files', `spot/${roomId}`);
+      if (!url || url.startsWith('file:')) throw new Error('upload failed');
+      setShowAdd(false);
+      setMode('move');
+      const it = await room.add({ kind: 'photo', imageUrl: url, x: nearCenter(), y: nearCenter() });
+      if (!it) throw new Error('save failed');
+    } catch {
+      Alert.alert('Photo not added', 'Check your connection and try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
-  const sendRoomInvite = useCallback(async (target: any) => {
-    if (!user?.id || !roomId || !target?.id) return;
-    const targetUserId = target.id;
-    const targetName = target.full_name || target.username || 'User';
-    const actorName = user?.fullName || user?.username || 'Someone';
-    const actorAvatar = user?.avatar || '';
-    // Add them to the room's participant list + persist to Supabase.
-    addParticipant(roomId, { id: targetUserId, fullName: targetName, avatar: target.avatar || null });
-    await supabase.from('notifications').insert({
-      user_id: targetUserId,
-      actor_id: user.id,
-      actor_name: actorName,
-      actor_avatar: actorAvatar,
-      type: 'room_invite',
-      title: `${actorName} invited you to join "${room?.name || 'their room'}"`,
-      body: `invited you to join "${room?.name || 'their room'}"`,
-      data: {
-        room_id: roomId,
-        room_name: room?.name || 'A room',
-      },
-      read: false,
-      created_at: new Date().toISOString(),
-    });
-    Alert.alert('Invited', `${targetName} added to the room`);
-  }, [user?.id, user, roomId, room?.name, addParticipant]);
+  // ── Item gestures ─────────────────────────────────────────────────────────
+  const onTap = useCallback((id: string) => setSelectedId(id), []);
+  const onDoubleTap = useCallback((id: string) => { tap(); room.react(id, '❤️'); }, [room]);
+  const onLongPress = useCallback((id: string) => { tap(Haptics.ImpactFeedbackStyle.Medium); setSelectedId(id); setMenuId(id); }, []);
+  const onDrag = useCallback((id: string, x: number, y: number, z: number) => { setSelectedId(id); room.dragTo(id, x, y, z); }, [room]);
+  const onDrop = useCallback((id: string, x: number, y: number, z: number) => { room.dropAt(id, x, y, z); }, [room]);
 
-  // Debounced search
-  useEffect(() => {
-    const t = setTimeout(() => searchUsersForInvite(inviteSearch), 300);
-    return () => clearTimeout(t);
-  }, [inviteSearch, searchUsersForInvite]);
+  const invite = () => {
+    tap();
+    Share.share({ message: `Come hang out in my room "${info?.name || 'Spot'}" on Apparently 🎈\n${roomLink(roomId || '')}` }).catch(() => {});
+  };
 
-  if (loading) {
+  const changeTheme = async (id: string) => {
+    if (!info) return;
+    setShowThemes(false);
+    const prev = info;
+    setInfo({ ...info, theme: id });
+    try { await updateRoom(info.id, { theme: id }); } catch { setInfo(prev); }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  const fg = theme.dark ? '#FFF' : '#111827';
+  const glass = theme.dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.75)';
+
+  if (!infoLoading && !info) {
     return (
-      <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
-        <View style={styles.connecting}>
-          <Animated.View style={styles.connectingRing}>
-            <View style={styles.connectingDot} />
-          </Animated.View>
-          <Text style={styles.connectingText}>Entering room...</Text>
-        </View>
+      <View style={[styles.center, { backgroundColor: '#0B1026' }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '800' }}>This room is gone</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.7)', marginTop: 6 }}>It may have been deleted by its host.</Text>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.pill, { marginTop: 18, backgroundColor: '#FFF' }]}>
+          <Text style={{ fontWeight: '800', color: '#111' }}>Back to Spot</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  const ActiveTabContent = TAB_CONTENT[activeTab];
-
   return (
-    <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
-      <LinearGradient
-        colors={['rgba(139,92,246,0.06)', 'rgba(99,102,241,0.02)', '#FFFFFF']}
-        style={styles.ambient}
-      />
+    <View style={{ flex: 1, backgroundColor: theme.colors[0] }}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
 
-      {/* ── Tab Bar (sticky at top) ── */}
-      <View style={[styles.tabBar, { borderBottomColor: '#EFEFEF', paddingTop: insets.top + 4 }]}>
-        <FlatList
-          horizontal
-          data={TABS}
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={t => t.key}
-          contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}
-          renderItem={({ item }) => {
-            const isActive = activeTab === item.key;
-            return (
-              <TouchableOpacity
-                style={[styles.tab, isActive && styles.tabActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveTab(item.key);
-                  if (isPresenting && isUserPresenting) {
-                    setPresenterTab(item.key);
-                  }
-                }}
-              >
-                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
+      {/* ── Canvas ── */}
+      <View
+        style={StyleSheet.absoluteFill}
+        onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+        {...canvasPan.panHandlers}
+      >
+        <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setSelectedId(null)} disabled={mode === 'draw'} />
+        <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} />
+        {size.w > 0 ? things.map((it) => (
+          <SpotItemView
+            key={it.id}
+            item={it}
+            live={room.remoteDrag[it.id]}
+            canvasW={size.w}
+            canvasH={size.h}
+            enabled={mode === 'move'}
+            topZ={room.topZ}
+            myId={me?.id || ''}
+            selected={selectedId === it.id}
+            onDrag={onDrag}
+            onDrop={onDrop}
+            onTap={onTap}
+            onDoubleTap={onDoubleTap}
+            onLongPress={onLongPress}
+          />
+        )) : null}
+        <BurstLayer bursts={room.bursts} width={size.w} height={size.h} />
       </View>
 
-      {/* ── Scrollable Content (header, participants, plan content) ── */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        nestedScrollEnabled={true}
-        showsVerticalScrollIndicator={false}
-      >
-      {/* ── Cover Image ── */}
-      {room?.coverImage ? (
-        <Image
-          source={{ uri: room.coverImage }}
-          style={styles.roomCover}
-        />
+      {/* Empty-room hint */}
+      {!room.loading && room.items.length === 0 ? (
+        <View pointerEvents="none" style={styles.hintWrap}>
+          <View style={[styles.hint, { backgroundColor: glass }]}>
+            <Text style={[styles.hintTitle, { color: fg }]}>Your room is empty ✨</Text>
+            <Text style={[styles.hintText, { color: fg }]}>Tap + to drop in stickers, notes or photos.{'\n'}Tap ✏️ to doodle. Everyone here sees it live.</Text>
+          </View>
+        </View>
+      ) : null}
+      {room.loading || infoLoading ? (
+        <View pointerEvents="none" style={styles.hintWrap}><ActivityIndicator color={fg} /></View>
       ) : null}
 
-      {/* ── Header ── */}
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.roomName}>{room?.name || 'Room'}</Text>
-            <View style={styles.headerMeta}>
-              <View style={[
-                styles.headerBadge,
-                room?.status === 'draft' && { backgroundColor: 'rgba(245,158,11,0.12)' },
-                room?.status === 'ended' && { backgroundColor: 'rgba(107,114,128,0.12)' },
-              ]}>
-                <View style={[
-                  styles.liveDot,
-                  room?.status === 'draft' && { backgroundColor: '#D97706' },
-                  room?.status === 'ended' && { backgroundColor: '#6B7280' },
-                ]} />
-                <Text style={[
-                  styles.liveText,
-                  room?.status === 'draft' && { color: '#D97706' },
-                  room?.status === 'ended' && { color: '#6B7280' },
-                ]}>
-                  {room?.status === 'draft' ? 'SETUP' : room?.status === 'ended' ? 'ENDED' : 'LIVE'}
-                </Text>
-              </View>
-              {room?.creatorName && (
-                <Text style={styles.hostText}>Host: {room.creatorName}</Text>
-              )}
-              <View style={styles.pCountRow}>
-                <Users size={11} color="#737373" />
-                <Text style={styles.pCountText}>{participants.length}</Text>
-              </View>
-              {speakingParticipants.length > 0 && (
-                <Text style={styles.speakingCount}>
-                  {speakingParticipants.length} speaking
-                </Text>
-              )}
-            </View>
-          </View>
-          <View style={styles.headerActions}>
-            {room?.status === 'draft' && userIsHostOrAbove && (
-              <TouchableOpacity
-                style={[styles.manageBtn, { backgroundColor: 'rgba(16,185,129,0.12)' }]}
-                onPress={() => {
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  goLive(roomId || '');
-                }}
-              >
-                <Radio size={14} color="#10B981" />
-                <Text style={[styles.manageBtnText, { color: '#10B981' }]}>Go Live</Text>
-              </TouchableOpacity>
-            )}
-            {room?.status === 'live' && userIsHostOrAbove && (
-              <TouchableOpacity
-                style={styles.manageBtn}
-                onPress={() => setShowAdminPanel(true)}
-              >
-                <Crown size={14} color="#F59E0B" />
-                <Text style={styles.manageBtnText}>Manage</Text>
-              </TouchableOpacity>
-            )}
-            {room?.status === 'live' && userIsHostOrAbove && (
-              <>
-                <TouchableOpacity
-                  style={[styles.presentBtn, { backgroundColor: isRoomLocked ? '#22C55E' : '#F59E0B' }]}
-                  onPress={() => {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    toggleRoomLock(roomId || '');
-                  }}
-                >
-                  <Lock size={14} color="#FFF" />
-                  <Text style={styles.presentBtnText}>{isRoomLocked ? 'Unlock' : 'Lock'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.presentBtn, { backgroundColor: '#EF4444' }]}
-                  onPress={() => {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                    Alert.alert('Delete Room', 'Permanently delete this room? This cannot be undone.', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => deleteRoom(roomId || '') },
-                    ]);
-                  }}
-                >
-                  <Trash2 size={14} color="#FFF" />
-                  <Text style={styles.presentBtnText}>Delete</Text>
-                </TouchableOpacity>
-              </>
-            )}
-            {room?.status === 'live' && userIsHostOrAbove && (
-              <TouchableOpacity
-                style={[styles.presentBtn, { backgroundColor: '#3B82F6' }]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowInviteModal(true);
-                }}
-              >
-                <UserPlus size={14} color="#FFF" />
-                <Text style={styles.presentBtnText}>Invite</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.headerBtn}
-              onPress={() => {
-                const link = generateInviteLink(roomId || '');
-                const { Share } = require('react-native');
-                Share.share({ message: `Join my live room on Apparently: ${link}`, url: link }).catch(() => {});
-              }}
-            >
-              <Share2 size={16} color="#737373" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerBtn}>
-              <Sparkles size={16} color="#737373" />
-            </TouchableOpacity>
-          </View>
-        </View>
-        {room?.goal && (
-          <Text style={styles.goalText} numberOfLines={1}>
-            🎯 {room.goal}
-          </Text>
-        )}
-      </View>
-
-      {/* ── Presenter Bar ── */}
-      {isPresenting && room?.presenterName && (
-        <View style={styles.presenterBar}>
-          <View style={styles.presenterBadge}>
-            <Monitor size={13} color="#10B981" />
-            <Text style={styles.presenterText}>{room.presenterName} is presenting</Text>
-          </View>
-          {userIsHostOrAbove && !isUserPresenting && (
-            <TouchableOpacity
-              style={styles.presenterAction}
-              onPress={() => { stopPresenting(); }}
-            >
-              <Text style={styles.presenterActionText}>End</Text>
-            </TouchableOpacity>
-          )}
-          {isUserPresenting && (
-            <TouchableOpacity
-              style={[styles.presenterAction, { backgroundColor: '#EF4444' }]}
-              onPress={() => { stopPresenting(); }}
-            >
-              <Text style={styles.presenterActionText}>Stop</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* ── Participant Bar ── */}
-      <View style={styles.pBar}>
-        <FlatList
-          horizontal
-          data={participants}
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={p => p.userId}
-          contentContainerStyle={styles.pBarContent}
-          renderItem={({ item }) => (
-            <ParticipantCircle p={item} size={38} showName showRole />
-          )}
-        />
-      </View>
-
-      {/* ── Edit Indicators ── */}
-      <EditIndicator
-        indicators={(currentRoom?.editIndicators || []).map(e => ({
-          userId: e.userId,
-          userName: e.userName,
-          section: e.section,
-          tab: e.section,
-          startedAt: e.startedAt,
-        }))}
-        currentUserId={user?.id}
-      />
-
-      {/* ── Presentation Overlay ── */}
-      <PresentationOverlay
-        visible={true}
-        isPresenter={isPresenting && isUserPresenting}
-        presenterName={currentRoom?.presenterName || null}
-        isFollowing={isUserFollowing}
-        onStartPresenting={startPresenting}
-        onStopPresenting={stopPresenting}
-        onEnterFollow={enterFollowMode}
-        onLeaveFollow={leaveFollowMode}
-        onRequestControl={() => {}}
-        onTakeBackControl={() => {}}
-        pendingRequests={[]}
-        onApproveRequest={() => {}}
-        canPresent={isHost() || isCoHostOrAbove()}
-      />
-
-      {/* ── Follow Mode Banner ── */}
-      {isPresenting && isUserFollowing && !isUserPresenting && (
-        <View style={styles.followBanner}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Eye size={14} color="#A78BFA" />
-            <Text style={styles.followBannerText}>
-              Following {room?.presenterName}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.followReturnBtn}
-            onPress={() => { leaveFollowMode(); }}
-          >
-            <Text style={styles.followReturnText}>Browse freely</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      {isPresenting && !isUserFollowing && !isUserPresenting && (
-        <TouchableOpacity
-          style={styles.followBanner}
-          onPress={() => { enterFollowMode(); }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Eye size={14} color="#6B7280" />
-            <Text style={[styles.followBannerText, { color: '#737373' }]}>
-              {room?.presenterName} is presenting — tap to follow
-            </Text>
-          </View>
-          <Text style={styles.followReturnText}>Follow →</Text>
+      {/* ── Top bar ── */}
+      <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <TouchableOpacity onPress={() => router.back()} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Leave room">
+          <ChevronLeft size={24} color={fg} />
         </TouchableOpacity>
-      )}
-
-      {/* ── Plan Content ── */}
-      <View style={styles.content}>
-        {ActiveTabContent ? (
-          <ActiveTabContent />
-        ) : activeTab === 'chat' ? (
-          <ChatTab roomId={roomId || ''} roomName={room?.name || ''} />
-        ) : activeTab === 'history' ? (
-          <HistoryFeed
-            entries={mergedHistoryEntries}
-            isLoading={history.isLoading}
-            onRefresh={history.refresh}
-          />
-        ) : activeTab === 'people' ? (
-          <View style={styles.placeholder}>
-            <Users size={36} color="#4B5563" />
-            <Text style={styles.placeholderTitle}>People ({participants.length})</Text>
-            <ScrollView style={{ width: '100%', marginTop: 12 }}>
-              {participants.map(p => (
-                <View key={p.userId} style={styles.personRow}>
-                  <View style={{ width: 36, height: 36 }}>
-                    <Image
-                      source={{
-                        uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=E5E5E5&color=333&size=72`,
-                      }}
-                      style={styles.personAvatar}
-                    />
-                    {p.isSpeaking && <SpeakingRing size={44} color="#A78BFA" pulseSpeed={500} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={styles.personName}>{p.fullName}</Text>
-                      <RoleBadge role={p.role} isCreator={currentRoom?.creatorId === p.userId} size="sm" />
-                    </View>
-                    {p.isSpeaking && <Text style={styles.speakingLabel}>🔊 Speaking</Text>}
-                    {p.hasCamera && <Text style={styles.speakingLabel}>📹 Camera on</Text>}
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
+        <View style={[styles.titlePill, { backgroundColor: glass }]}>
+          <Text style={[styles.title, { color: fg }]} numberOfLines={1}>{theme.emoji} {info?.name || 'Room'}</Text>
+          <View style={styles.liveRow}>
+            <View style={styles.liveDot} />
+            <Text style={[styles.liveText, { color: fg }]}>{room.members.length} here</Text>
           </View>
+        </View>
+        <View style={styles.avatars}>
+          {room.members.slice(0, 4).map((m, i) => (
+            m.avatar ? (
+              <Image key={m.id} source={{ uri: m.avatar }} style={[styles.avatar, { marginLeft: i ? -10 : 0, borderColor: theme.colors[0] }]} />
+            ) : (
+              <View key={m.id} style={[styles.avatar, styles.avatarFallback, { marginLeft: i ? -10 : 0, borderColor: theme.colors[0] }]}>
+                <Text style={styles.avatarInitial}>{(m.name || '?').charAt(0).toUpperCase()}</Text>
+              </View>
+            )
+          ))}
+        </View>
+        {isHost ? (
+          <TouchableOpacity onPress={() => setShowThemes((v) => !v)} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Change room theme">
+            <Palette size={19} color={fg} />
+          </TouchableOpacity>
         ) : null}
-      </View>
-      </ScrollView>
-
-      {/* ── Draggable Camera Bubbles ── */}
-      {cameraParticipants.map(p => {
-        if (p.userId !== user?.id && !cameraOn) {
-          return (
-            <CameraBubble
-              key={`cam-${p.userId}`}
-              participant={p}
-              onClose={() => {}}
-              onPress={() => setExpandedCamera({ userId: p.userId, fullName: p.fullName, isLocal: false })}
-            />
-          );
-        }
-        return null;
-      })}
-      {cameraOn && currentUserP && (
-        <CameraBubble
-          participant={currentUserP}
-          onClose={handleCamera}
-          isLocal
-          facing={facing}
-          onFlip={() => setFacing(prev => prev === 'front' ? 'back' : 'front')}
-          onPress={() => setExpandedCamera({ userId: user?.id || '', fullName: currentUserP.fullName, isLocal: true })}
-        />
-      )}
-
-      {/* ── Expanded Camera Overlay ── */}
-      {expandedCamera && (
-        <View style={styles.expandedCameraOverlay}>
-          {expandedCamera.isLocal ? (
-            <CameraView style={styles.expandedCamera} facing={facing} mirror={facing === 'front'} />
-          ) : (
-            <Image
-              source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(expandedCamera.fullName)}&background=E5E5E5&color=333&size=400` }}
-              style={styles.expandedCamera}
-            />
-          )}
-          <View style={styles.expandedCameraBar}>
-            <Text style={styles.expandedCameraName}>{expandedCamera.fullName}</Text>
-            <Text style={styles.expandedCameraHint}>
-              {expandedCamera.isLocal ? 'Your camera' : 'Viewing camera'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.expandedClose}
-            onPress={() => setExpandedCamera(null)}
-          >
-            <X size={20} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* ── Admin Panel ── */}
-      {showAdminPanel && (
-        <View style={styles.adminOverlay}>
-          <View style={styles.adminPanel}>
-            <View style={styles.adminHeader}>
-              <Crown size={20} color="#F59E0B" />
-              <Text style={styles.adminTitle}>Room Management</Text>
-              <TouchableOpacity onPress={() => setShowAdminPanel(false)}>
-                <X size={20} color="#737373" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.adminList}>
-              {participants.map(p => (
-                <View key={p.userId} style={styles.adminRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                    <Image
-                      source={{ uri: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=E5E5E5&color=333&size=48` }}
-                      style={{ width: 32, height: 32, borderRadius: 16 }}
-                    />
-                    <View>
-                      <Text style={styles.adminRowName}>{p.fullName}</Text>
-                      <RoleBadge role={p.role} isCreator={currentRoom?.creatorId === p.userId} size="sm" />
-                    </View>
-                  </View>
-                  {p.userId !== user?.id && (
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <TouchableOpacity
-                        style={styles.adminActionBtn}
-                        onPress={() => {
-                          if (p.isMuted) unmuteParticipant(roomId || '', p.userId);
-                          else muteParticipant(roomId || '', p.userId);
-                        }}
-                      >
-                        {p.isMuted ? <MicOff size={14} color="#EF4444" /> : <Mic size={14} color="#10B981" />}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.adminActionBtn, styles.adminActionDanger]}
-                        onPress={() => removeParticipant(roomId || '', p.userId)}
-                      >
-                        <X size={14} color="#EF4444" />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      )}
-
-      {/* ── Camera Permission Alert ── */}
-      <View style={[styles.controls, { paddingBottom: insets.bottom + 6 }]}>
-        {/* Stop Presenting — replaces controls when user is presenting */}
-        {isUserPresenting ? (
-          <TouchableOpacity
-            style={[styles.micBtn, { maxWidth: SCREEN_W - 60 }]}
-            onPress={() => {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-              stopPresenting();
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={[
-              styles.micOuter,
-              { backgroundColor: 'rgba(239,68,68,0.3)', borderColor: 'rgba(239,68,68,0.6)' },
-            ]}>
-              <View style={[styles.micInner, { backgroundColor: '#EF4444' }]}>
-                <Monitor size={24} color="#FFF" />
-              </View>
-            </View>
-            <Text style={[styles.controlLabel, { color: '#EF4444' }]}>
-              Stop Presenting
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            {/* Raise Hand */}
-            <TouchableOpacity
-          style={[styles.smallBtn, currentUserP?.handRaised && styles.raiseActive]}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            toggleRaiseHand(roomId || '');
-          }}
-        >
-          <Hand size={18} color={currentUserP?.handRaised ? '#FFF' : '#737373'} />
+        <TouchableOpacity onPress={invite} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Invite friends">
+          <UserPlus size={19} color={fg} />
         </TouchableOpacity>
-
-        {/* Hold to Talk */}
-        <TouchableOpacity
-          style={[styles.micBtn]}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          activeOpacity={0.7}
-        >
-          <Animated.View style={[
-            styles.micOuter,
-            isSpeaking && {
-              backgroundColor: 'rgba(139,92,246,0.3)',
-              borderColor: 'rgba(139,92,246,0.6)',
-            },
-          ]}>
-            <Animated.View style={[
-              styles.micInner,
-              isSpeaking && { backgroundColor: '#8B5CF6', borderColor: '#A78BFA' },
-              { transform: [{ scale: micScale }] },
-            ]}>
-              {isSpeaking ? (
-                <Mic size={24} color="#FFF" />
-              ) : (
-                <MicOff size={24} color="#FFF" />
-              )}
-            </Animated.View>
-          </Animated.View>
-          <Text style={styles.controlLabel}>
-            {isSpeaking ? 'You\'re live' : 'Hold to Talk'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Camera */}
-        <TouchableOpacity
-          style={[styles.micBtn]}
-          onPress={handleCamera}
-          activeOpacity={0.7}
-        >
-          <View style={[
-            styles.micOuter,
-            cameraOn && {
-              backgroundColor: 'rgba(16,185,129,0.3)',
-              borderColor: 'rgba(16,185,129,0.6)',
-            },
-          ]}>
-            <View style={[
-              styles.micInner,
-              cameraOn && { backgroundColor: '#10B981' },
-            ]}>
-              {cameraOn ? (
-                <Camera size={24} color="#FFF" />
-              ) : (
-                <CameraOff size={24} color="#FFF" />
-              )}
-            </View>
-          </View>
-          <Text style={styles.controlLabel}>
-            {cameraOn ? 'On Camera' : 'Camera'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Leave */}
-        <TouchableOpacity style={styles.leaveBtn} onPress={handleLeave}>
-          <PhoneOff size={18} color="#FFF" />
-        </TouchableOpacity>
-          </>
-        )}
       </View>
 
-      {/* Speaking glow at bottom */}
-      {isSpeaking && (
-        <Animated.View style={[styles.glowBar, { opacity: glowAnim }]} pointerEvents="none">
-          <LinearGradient
-            colors={['rgba(139,92,246,0)', 'rgba(139,92,246,0.6)', '#8B5CF6', 'rgba(99,102,241,0.6)', 'rgba(139,92,246,0)']}
-            style={styles.glowGradient}
-            start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-          />
-        </Animated.View>
-      )}
-      {/* ── Invite Modal ── */}
-      <Modal visible={showInviteModal} transparent animationType="slide" onRequestClose={() => setShowInviteModal(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1 }}
-          keyboardVerticalOffset={insets.top + 10}
-        >
-        <TouchableOpacity style={styles.inviteOverlay} activeOpacity={1} onPress={() => setShowInviteModal(false)}>
-          <TouchableOpacity style={[styles.inviteSheet, { backgroundColor: '#FFFFFF' }]} activeOpacity={1} onPress={() => {}}>
-            <Text style={styles.inviteTitle}>Invite to Room</Text>
-            <View style={styles.inviteSearchInput}>
-              <Search size={16} color="#8E8E93" />
-              <TextInput
-                style={styles.inviteSearchField}
-                placeholder="Search users..."
-                placeholderTextColor="#8E8E93"
-                value={inviteSearch}
-                onChangeText={setInviteSearch}
-                autoFocus
-              />
-              {inviteSearch.length > 0 && (
-                <TouchableOpacity onPress={() => { setInviteSearch(''); setInviteResults([]); }}>
-                  <X size={16} color="#8E8E93" />
-                </TouchableOpacity>
-              )}
-            </View>
-            <FlatList
-              data={inviteResults}
-              keyExtractor={(item) => item.id}
-              style={{ flex: 1 }}
-              renderItem={({ item }) => (
-                <View style={styles.inviteUserItem}>
-                  <View style={styles.inviteAvatar}>
-                    {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} />
-                    ) : (
-                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                        <User size={20} color="#8E8E93" />
-                      </View>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inviteName}>{item.full_name || 'Unnamed'}</Text>
-                    <Text style={styles.inviteUser}>@{item.username || 'user'}{item.email ? ` · ${item.email}` : ''}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.inviteBtn}
-                    onPress={() => {
-                      sendRoomInvite(item);
-                      setShowInviteModal(false);
-                      setInviteSearch('');
-                      setInviteResults([]);
-                    }}
-                  >
-                    <Text style={styles.inviteBtnText}>Invite</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              ListEmptyComponent={
-                inviteSearch.length >= 2 && !inviteLoading ? (
-                  <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 20 }}>No users found</Text>
-                ) : undefined
-              }
-            />
-            {inviteLoading && <Text style={{ color: '#8E8E93', textAlign: 'center', marginTop: 10 }}>Searching...</Text>}
-            {/* bottom spacer so invite buttons aren't cut off */}
-            <View style={{ height: insets.bottom + 16 }} />
+      {showThemes ? (
+        <View style={[styles.themes, { top: insets.top + 60 }]}>
+          {SPOT_THEMES.map((t) => (
+            <TouchableOpacity key={t.id} onPress={() => changeTheme(t.id)} style={styles.themeCell} accessibilityLabel={`${t.name} theme`}>
+              <LinearGradient colors={t.colors} style={[styles.themeSwatch, info?.theme === t.id && styles.themeOn]}>
+                <Text style={{ fontSize: 18 }}>{t.emoji}</Text>
+              </LinearGradient>
+              <Text style={styles.themeName}>{t.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+
+      {/* ── Draw options ── */}
+      {mode === 'draw' ? (
+        <View style={[styles.penBar, { bottom: insets.bottom + 92 }]}>
+          {PEN_COLORS.map((c) => (
+            <TouchableOpacity key={c} onPress={() => setPenColor(c)} style={[styles.penColor, { backgroundColor: c }, penColor === c && styles.penColorOn]} accessibilityLabel="Pen colour" />
+          ))}
+          <View style={styles.sep} />
+          {PEN_WIDTHS.map((w) => (
+            <TouchableOpacity key={w} onPress={() => setPenWidth(w)} style={[styles.penWidth, penWidth === w && styles.penWidthOn]} accessibilityLabel={`Pen size ${w}`}>
+              <View style={{ width: w + 4, height: w + 4, borderRadius: (w + 4) / 2, backgroundColor: '#111' }} />
+            </TouchableOpacity>
+          ))}
+          <View style={styles.sep} />
+          <TouchableOpacity onPress={undoDoodle} disabled={!myDoodles.length} style={[styles.penWidth, !myDoodles.length && { opacity: 0.3 }]} accessibilityLabel="Undo my last doodle">
+            <Undo2 size={18} color="#111" />
           </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {/* ── Quick reactions ── */}
+      {showReact ? (
+        <View style={[styles.reactBar, { bottom: insets.bottom + 92 }]}>
+          {REACTIONS.map((e) => (
+            <TouchableOpacity key={e} onPress={() => { tap(); room.burst(e, 0.2 + Math.random() * 0.6); }} style={styles.reactBtn} accessibilityLabel={`Send ${e}`}>
+              <Text style={{ fontSize: 28 }}>{e}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+
+      {/* ── Toolbar ── */}
+      <View style={[styles.toolbar, { bottom: insets.bottom + 18 }]}>
+        <TouchableOpacity
+          onPress={() => { tap(); setMode('move'); setShowReact(false); }}
+          style={[styles.tool, mode === 'move' && styles.toolOn]}
+          accessibilityLabel="Move things"
+          accessibilityState={{ selected: mode === 'move' }}
+        >
+          <Hand size={22} color={mode === 'move' ? '#FFF' : '#111'} />
         </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </Modal>
+        <TouchableOpacity
+          onPress={() => { tap(); setMode('draw'); setShowReact(false); setSelectedId(null); }}
+          style={[styles.tool, mode === 'draw' && styles.toolOn]}
+          accessibilityLabel="Doodle"
+          accessibilityState={{ selected: mode === 'draw' }}
+        >
+          <PenLine size={22} color={mode === 'draw' ? '#FFF' : '#111'} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => { tap(); setShowAdd(true); setShowReact(false); }} style={styles.addBtn} accessibilityLabel="Add to the room">
+          <Plus size={28} color="#FFF" strokeWidth={2.6} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => { tap(); setShowReact((v) => !v); }}
+          style={[styles.tool, showReact && styles.toolOn]}
+          accessibilityLabel="Send a reaction"
+        >
+          <Smile size={22} color={showReact ? '#FFF' : '#111'} />
+        </TouchableOpacity>
+      </View>
+
+      <AddSheet
+        visible={showAdd}
+        onClose={() => setShowAdd(false)}
+        onSticker={addSticker}
+        onNote={addNote}
+        onPhoto={addPhoto}
+        uploading={uploading}
+      />
+      <ItemMenu
+        item={menuItem}
+        myId={me?.id || ''}
+        canRemove={!!menuItem && (menuItem.ownerId === me?.id || isHost)}
+        onClose={() => setMenuId(null)}
+        onReact={(e) => menuItem && room.react(menuItem.id, e)}
+        onResize={(d) => menuItem && room.resize(menuItem.id, menuItem.scale + d)}
+        onFront={() => { if (menuItem) room.bringToFront(menuItem.id); setMenuId(null); }}
+        onEdit={(t) => menuItem && t && room.editText(menuItem.id, t)}
+        onRemove={async () => {
+          if (!menuItem) return;
+          const id = menuItem.id;
+          setMenuId(null);
+          setSelectedId(null);
+          const ok = await room.remove(id);
+          if (!ok) Alert.alert('Not removed', 'Please try again.');
+        }}
+      />
     </View>
   );
 }
 
-// Wrapper with PlanProvider
-export default function RoomScreen() {
-  return (
-    <PlanProvider>
-      <RoomContent />
-    </PlanProvider>
-  );
-}
+const shadow = { shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  ambient: { ...StyleSheet.absoluteFill },
-  connecting: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  connectingRing: {
-    width: 60, height: 60, borderRadius: 30,
-    borderWidth: 2, borderColor: 'rgba(139,92,246,0.25)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  connectingDot: {
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: '#8B5CF6',
-  },
-  connectingText: { color: '#737373', fontSize: 15 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  pill: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
 
-  // Room Cover
-  roomCover: {
-    width: '100%', height: 160, resizeMode: 'cover',
-  },
-  // Header
-  header: { paddingHorizontal: 14, paddingBottom: 6 },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  roomName: { color: '#262626', fontSize: 20, fontWeight: '700' },
-  headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' },
-  headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.12)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
-  liveText: { color: '#10B981', fontSize: 10, fontWeight: '700' },
-  hostText: { color: '#737373', fontSize: 12, fontWeight: '500' },
-  pCountRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  pCountText: { color: '#737373', fontSize: 12, fontWeight: '600' },
-  speakingCount: { color: '#8B5CF6', fontSize: 11, fontWeight: '600' },
-  headerActions: { flexDirection: 'row', gap: 8 },
-  headerBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
-  goalText: { color: '#8B5CF6', fontSize: 13, fontWeight: '500', marginTop: 6 },
+  top: { position: 'absolute', left: 0, right: 0, top: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 },
+  round: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  titlePill: { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, minHeight: 40, justifyContent: 'center' },
+  title: { fontSize: 15, fontWeight: '800' },
+  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
+  liveText: { fontSize: 11, fontWeight: '700', opacity: 0.85 },
+  avatars: { flexDirection: 'row' },
+  avatar: { width: 30, height: 30, borderRadius: 15, borderWidth: 2 },
+  avatarFallback: { backgroundColor: '#8B5CF6', alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { color: '#FFF', fontSize: 12, fontWeight: '800' },
 
-  // Participant Bar
-  pBar: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#EFEFEF' },
-  pBarContent: { paddingHorizontal: 10, gap: 2 },
-  participantWrap: { alignItems: 'center', justifyContent: 'center' },
-  participantImg: { borderWidth: 1, borderColor: '#DBDBDB' },
-  participantNameText: { color: '#737373', fontSize: 9, fontWeight: '600', marginTop: 4, textAlign: 'center', maxWidth: 50 },
-  cameraBadge: {
-    position: 'absolute', bottom: -2, right: -2,
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center',
-  },
+  themes: { position: 'absolute', right: 12, left: 12, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#FFF', borderRadius: 18, padding: 10, ...shadow },
+  themeCell: { alignItems: 'center', gap: 4 },
+  themeSwatch: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  themeOn: { borderWidth: 3, borderColor: '#111' },
+  themeName: { fontSize: 10, fontWeight: '700', color: '#374151' },
 
-  // Tab Bar
-  tabBar: { borderBottomWidth: 1, borderBottomColor: '#EFEFEF', paddingVertical: 8 },
-  tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
-  tabActive: { backgroundColor: '#8B5CF6' },
-  tabLabel: { color: '#8E8E8E', fontSize: 13, fontWeight: '600' },
-  tabLabelActive: { color: '#FFF' },
+  hintWrap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  hint: { borderRadius: 18, paddingHorizontal: 20, paddingVertical: 16, alignItems: 'center' },
+  hintTitle: { fontSize: 17, fontWeight: '800', marginBottom: 6 },
+  hintText: { fontSize: 14, lineHeight: 20, textAlign: 'center', opacity: 0.85 },
 
-  // Content
-  content: { minHeight: SCREEN_H * 0.85 },
+  toolbar: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFF', borderRadius: 32, padding: 8, ...shadow },
+  tool: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' },
+  toolOn: { backgroundColor: '#111827' },
+  addBtn: { width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center', backgroundColor: '#8B5CF6' },
 
-  // Placeholder
-  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 8 },
-  placeholderTitle: { color: '#737373', fontSize: 16, fontWeight: '600' },
-  placeholderSub: { color: '#8E8E8E', fontSize: 14 },
-  personRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 16 },
-  personAvatar: { width: 36, height: 36, borderRadius: 18 },
-  personName: { color: '#262626', fontSize: 14, fontWeight: '500', flex: 1 },
-  speakingLabel: { fontSize: 14, color: '#262626' },
+  penBar: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF', borderRadius: 26, paddingHorizontal: 10, paddingVertical: 8, ...shadow },
+  penColor: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(0,0,0,0.12)' },
+  penColorOn: { borderColor: '#38BDF8', transform: [{ scale: 1.2 }] },
+  penWidth: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  penWidthOn: { backgroundColor: '#E0F2FE' },
+  sep: { width: 1, height: 22, backgroundColor: '#E5E7EB', marginHorizontal: 2 },
 
-  // Camera Bubble
-  cameraBubble: {
-    position: 'absolute', zIndex: 100, elevation: 10,
-    width: 110, alignItems: 'center',
-  },
-  cameraPreview: {
-    width: 110, height: 110, borderRadius: 55, overflow: 'hidden',
-    borderWidth: 2, borderColor: '#10B981',
-  },
-  cameraImg: { width: 110, height: 110, borderRadius: 55 },
-  cameraGradient: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    height: 36, justifyContent: 'flex-end', paddingHorizontal: 10, paddingBottom: 6,
-  },
-  cameraName: { color: '#FFF', fontSize: 10, fontWeight: '600' },
-  cameraClose: {
-    position: 'absolute', top: -4, right: -4,
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
-  },
-  dragHandle: {
-    marginTop: 6, width: 30, height: 4, borderRadius: 2,
-    backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'center',
-  },
-  dragHandleBar: {
-    width: 18, height: 3, borderRadius: 1.5,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-
-  // Controls
-  controls: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 16, paddingVertical: 10, paddingHorizontal: 12,
-    backgroundColor: '#FAFAFA',
-    borderTopWidth: 1, borderTopColor: '#EFEFEF',
-  },
-  smallBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
-  },
-  raiseActive: { backgroundColor: '#F59E0B' },
-  micBtn: {
-    width: 72, height: 72, borderRadius: 36,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  micOuter: {
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: '#F0F0F0',
-    borderWidth: 1, borderColor: '#DBDBDB',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  micInner: {
-    width: 50, height: 50, borderRadius: 25,
-    backgroundColor: '#E5E5E5', alignItems: 'center', justifyContent: 'center',
-  },
-  controlLabel: { color: '#8E8E8E', fontSize: 9, fontWeight: '600', position: 'absolute', bottom: -16 },
-  leaveBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center',
-  },
-  glowBar: { position: 'absolute', bottom: 80, left: 0, right: 0, height: 3 },
-  glowGradient: { flex: 1 },
-
-  // Presenter Bar
-  presenterBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: 'rgba(16,185,129,0.06)', paddingHorizontal: 12,
-    paddingVertical: 8, borderBottomWidth: 1,
-    borderBottomColor: 'rgba(16,185,129,0.1)',
-  },
-  presenterBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  presenterText: { color: '#10B981', fontSize: 12, fontWeight: '600' },
-  presenterAction: {
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    paddingHorizontal: 14, paddingVertical: 5, borderRadius: 10,
-  },
-  presenterActionText: { color: '#10B981', fontSize: 11, fontWeight: '700' },
-  presentBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#8B5CF6', paddingHorizontal: 12,
-    paddingVertical: 7, borderRadius: 17,
-  },
-  presentBtnText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
-
-  // Follow Banner
-  followBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: 'rgba(139,92,246,0.04)', paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  followBannerText: { color: '#8B5CF6', fontSize: 11, fontWeight: '600' },
-  followReturnBtn: {
-    backgroundColor: 'rgba(139,92,246,0.1)',
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
-  },
-  followReturnText: { color: '#8B5CF6', fontSize: 10, fontWeight: '600' },
-
-  // Role Badge
-  roleBadge: {
-    position: 'absolute', top: -2, right: -2,
-    width: 16, height: 16, borderRadius: 8,
-    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: '#DBDBDB',
-  },
-  roleBadgeText: { fontSize: 9 },
-
-  // ── Camera Flip ──
-  flipBtn: {
-    position: 'absolute', top: 6, right: 30,
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center',
-  },
-  flipBtnText: { fontSize: 14 },
-
-  // ── Manage Button ──
-  manageBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(245,158,11,0.12)', paddingHorizontal: 10,
-    paddingVertical: 7, borderRadius: 17, borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.25)',
-  },
-  manageBtnText: { color: '#D97706', fontSize: 11, fontWeight: '700' },
-
-  // ── Expanded Camera Overlay ──
-  expandedCameraOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: '#000', zIndex: 100, justifyContent: 'center', alignItems: 'center',
-  },
-  expandedCamera: {
-    width: SCREEN_W, height: SCREEN_H * 0.75, position: 'absolute', top: 0,
-  },
-  expandedCameraBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)', paddingHorizontal: 20, paddingVertical: 14,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  expandedCameraName: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  expandedCameraHint: { color: '#A8A8A8', fontSize: 12, marginTop: 2 },
-  expandedClose: {
-    position: 'absolute', top: 50, right: 16,
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
-  },
-
-  // ── Admin Panel ──
-  adminOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 99,
-    justifyContent: 'flex-end',
-  },
-  adminPanel: {
-    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    maxHeight: SCREEN_H * 0.6, paddingBottom: 20,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1, shadowRadius: 16, elevation: 20,
-  },
-  adminHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1,
-    borderBottomColor: '#EFEFEF',
-  },
-  adminTitle: { color: '#262626', fontSize: 16, fontWeight: '700', flex: 1 },
-  adminList: { paddingHorizontal: 20, paddingTop: 8 },
-  adminRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EFEFEF',
-  },
-  adminRowName: { color: '#262626', fontSize: 13, fontWeight: '600' },
-  adminActionBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center',
-  },
-  adminActionDanger: { backgroundColor: 'rgba(239,68,68,0.1)' },
-  // Invite modal
-  inviteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  inviteSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%' },
-  inviteTitle: { fontSize: 18, fontWeight: '700', color: '#262626', marginBottom: 12 },
-  inviteSearchInput: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
-  inviteSearchField: { flex: 1, fontSize: 16, color: '#262626' },
-  inviteUserItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  inviteAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F0F0F0', marginRight: 12 },
-  inviteName: { fontSize: 15, fontWeight: '600', color: '#262626' },
-  inviteUser: { fontSize: 13, color: '#8E8E93' },
-  inviteBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: '#3B82F6' },
-  inviteBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  reactBar: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', gap: 4, backgroundColor: '#FFF', borderRadius: 28, paddingHorizontal: 8, paddingVertical: 6, ...shadow },
+  reactBtn: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
 });
