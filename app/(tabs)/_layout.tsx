@@ -8,6 +8,15 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useCreatePost } from '@/contexts/CreatePostContext';
 
+// Screens that live inside the tabs but have no button in the bar.
+// Don't use `href: null` for this: in this Expo Router version it marks the
+// screen as hidden, and navigating to a hidden screen is cancelled and sent
+// back to Home — which is why Planner, Live and Search couldn't be opened.
+const OFF_BAR = {
+  tabBarButton: () => null,
+  tabBarItemStyle: { display: 'none' as const },
+};
+
 export default function TabLayout() {
   const { colors } = useTheme();
   const { tabBarTranslateY } = useTabBar();
@@ -58,7 +67,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="search"
           options={{
-            href: null,
+            ...OFF_BAR,
           }}
         />
         <Tabs.Screen
@@ -94,14 +103,14 @@ export default function TabLayout() {
         <Tabs.Screen
           name="live"
           options={{
-            href: null,
+            ...OFF_BAR,
           }}
         />
         {/* Planner (calendar) moved into the Create chooser — hidden from bottom nav */}
         <Tabs.Screen
           name="planner"
           options={{
-            href: null,
+            ...OFF_BAR,
           }}
         />
         {/* Manage hub — skills, bundles, plans, and orders in one place */}

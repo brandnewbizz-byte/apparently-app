@@ -13,6 +13,7 @@ import {
   Image,
   KeyboardAvoidingView,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
@@ -230,16 +231,38 @@ function PlanRow({ plan, summary, colors, onOpen, onToggleDone, onLongPress, sho
 // ═════════════════════════════════════════════════════════════════════════════
 // Quick add sheet (saves a time block on the selected day)
 // ═════════════════════════════════════════════════════════════════════════════
+/** Next half hour if planning for today (within the picker's range), else 9 AM. */
+function defaultStart(date: string) {
+  if (date !== localDateKey()) return 9 * 60;
+  const now = new Date();
+  const next = Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 30) * 30;
+  const first = TIME_OPTIONS[0];
+  const last = TIME_OPTIONS[TIME_OPTIONS.length - 1];
+  return Math.min(Math.max(next, first), last);
+}
+
+const TIME_CHIP_W = 92; // approx chip width + gap, for scrolling to the selected time
+
 function QuickAddSheet({ visible, date, onClose, colors }: { visible: boolean; date: string; onClose: () => void; colors: any }) {
   const { createPlan } = usePlanner();
   const [title, setTitle] = useState('');
-  const [start, setStart] = useState(9 * 60);
+  const [start, setStart] = useState(() => defaultStart(date));
+  const timeScroll = React.useRef<ScrollViewInstance>(null);
+
+  // Fresh default time each time the sheet opens, scrolled into view.
+  React.useEffect(() => {
+    if (!visible) return;
+    const t = defaultStart(date);
+    setStart(t);
+    const idx = Math.max(0, TIME_OPTIONS.indexOf(t) - 1);
+    setTimeout(() => timeScroll.current?.scrollTo({ x: idx * TIME_CHIP_W, animated: false }), 60);
+  }, [visible, date]);
   const [duration, setDuration] = useState(60);
   const [category, setCategory] = useState<string>('work');
   const [location, setLocation] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const reset = () => { setTitle(''); setStart(9 * 60); setDuration(60); setCategory('work'); setLocation(''); };
+  const reset = () => { setTitle(''); setDuration(60); setCategory('work'); setLocation(''); };
 
   const save = async () => {
     if (!title.trim() || saving) return;
@@ -302,7 +325,7 @@ function QuickAddSheet({ visible, date, onClose, colors }: { visible: boolean; d
           />
           <View>
             <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Starts</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <ScrollView ref={timeScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {TIME_OPTIONS.map((t) => {
                 const on = t === start;
                 return (
@@ -565,18 +588,28 @@ export default function PlannerScreen() {
         options={{
           title: 'Planner',
           headerLeft: () => (
-            <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/live' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Live rooms">
-              <Radio size={18} color={colors.text} />
+            <TouchableOpacity
+              onPress={() => { haptic(); if (router.canGoBack()) router.back(); else router.navigate('/(tabs)/(home)' as any); }}
+              style={styles.headerBack}
+              hitSlop={10}
+              accessibilityLabel="Back"
+            >
+              <ChevronLeft size={26} color={colors.text} />
             </TouchableOpacity>
           ),
           headerRight: () => (
-            <TouchableOpacity
-              onPress={() => { haptic(); if (tab === 'requests') setShowRequest(true); else setShowAdd(true); }}
-              style={[styles.headerBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
-              accessibilityLabel={tab === 'requests' ? 'Post a request' : 'Add a plan'}
-            >
-              <Plus size={20} color="#FFF" />
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/live' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Live rooms">
+                <Radio size={17} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { haptic(); if (tab === 'requests') setShowRequest(true); else setShowAdd(true); }}
+                style={[styles.headerBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+                accessibilityLabel={tab === 'requests' ? 'Post a request' : 'Add a plan'}
+              >
+                <Plus size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
@@ -782,6 +815,8 @@ function ActionChip({ icon, label, onPress, colors }: { icon: React.ReactNode; l
 const styles = StyleSheet.create({
   container: { flex: 1 },
   headerBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  headerBack: { paddingRight: 8, paddingVertical: 4 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   segment: { flexDirection: 'row', marginHorizontal: 16, marginTop: 6, marginBottom: 12, padding: 3, borderRadius: 11 },
   segBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 9 },

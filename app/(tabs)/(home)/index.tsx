@@ -50,6 +50,7 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner } from '@/contexts/PlannerContext';
+import { localDateKey } from '@/lib/dates';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -1270,6 +1271,15 @@ export default function HomeScreen() {
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
+  // Count what's actually on today's schedule (the old label counted every
+  // plan ever made, done or not).
+  const todayPlanLabel = useMemo(() => {
+    const today = localDateKey();
+    const open = plans.filter((p) => p.date === today && p.status !== 'completed' && p.status !== 'cancelled').length;
+    if (open > 0) return `${open} plan${open === 1 ? '' : 's'} today`;
+    const upcoming = plans.filter((p) => p.date > today && p.status !== 'completed' && p.status !== 'cancelled').length;
+    return upcoming > 0 ? `Nothing today · ${upcoming} coming up` : 'Nothing planned yet — tap to start';
+  }, [plans]);
   const { bundles: contextBundles, grabBundle } = useBundles();
   const { skills: contextSkills, grabSkill } = useSkills();
   const { requests: serviceRequests, grabRequest } = useServiceRequests();
@@ -1776,7 +1786,7 @@ export default function HomeScreen() {
               </View>
               <View style={styles.planDayTextContent}>
                 <Text style={styles.planDayTitle}>Plan Your Day</Text>
-                <Text style={styles.planDaySubtitle}>{plans.length} plans ready</Text>
+                <Text style={styles.planDaySubtitle}>{todayPlanLabel}</Text>
               </View>
             </View>
             <ArrowRight size={22} color="#FFF" />
