@@ -4,7 +4,7 @@ export default function LiveLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
-      <Stack.Screen name="room/[roomId]" />
+      <Stack.Screen name="room/[roomId]" options={{ gestureEnabled: false, fullScreenGestureEnabled: false }} />
     </Stack>
   );
 }

@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useRef } from 'react';
 import { Image, PanResponder, StyleSheet, Text, View } from 'react-native';
-import Svg, { ClipPath, Defs, Image as SvgImage, Polygon } from 'react-native-svg';
+import Svg, { ClipPath, Defs, G, Image as SvgImage, Polygon } from 'react-native-svg';
 import type { SpotItem, SpotPoint } from '@/lib/spot';
 
 /** Bounding box (0–1, image space) of a cut-out outline. */
@@ -36,7 +36,7 @@ function CutoutImage({ item, w, h }: { item: SpotItem; w: number; h: number }) {
   const pts = (item.cutout || []).map((p) => `${p.x * IW},${p.y * IH}`).join(' ');
   const pad = Math.max(b.w * IW, b.h * IH) * 0.05;
   const vb = `${b.x0 * IW - pad} ${b.y0 * IH - pad} ${b.w * IW + pad * 2} ${b.h * IH + pad * 2}`;
-  const clipId = `cut-${item.id}`;
+  const clipId = `cut${String(item.id).replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <Svg width={w} height={h} viewBox={vb} style={styles.cutShadow}>
       <Defs>
@@ -44,7 +44,11 @@ function CutoutImage({ item, w, h }: { item: SpotItem; w: number; h: number }) {
       </Defs>
       <Polygon points={pts} fill="#FFF" stroke="#FFF" strokeWidth={pad * 1.4} strokeLinejoin="round" />
       {item.imageUrl ? (
-        <SvgImage href={{ uri: item.imageUrl }} x={0} y={0} width={IW} height={IH} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
+        // Clip on a group, not the image itself: clipPath set directly on
+        // <Image> is ignored on some devices, which showed the whole photo.
+        <G clipPath={`url(#${clipId})`}>
+          <SvgImage href={{ uri: item.imageUrl }} x={0} y={0} width={IW} height={IH} preserveAspectRatio="none" />
+        </G>
       ) : null}
     </Svg>
   );
@@ -56,6 +60,8 @@ interface Props {
   live?: { x: number; y: number; z: number } | null;
   canvasW: number;
   canvasH: number;
+  /** Room zoom level — finger movement is divided by it. */
+  zoom?: number;
   enabled: boolean;
   topZ: number;
   myId: string;
@@ -67,7 +73,7 @@ interface Props {
   onLongPress: (id: string) => void;
 }
 
-function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selected, onDrag, onDrop, onDoubleTap, onTap, onLongPress }: Props) {
+function SpotItemView({ item, live, canvasW, canvasH, zoom = 1, enabled, topZ, myId, selected, onDrag, onDrop, onDoubleTap, onTap, onLongPress }: Props) {
   const x = live?.x ?? item.x;
   const y = live?.y ?? item.y;
   const z = live?.z ?? item.z;
@@ -77,8 +83,8 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
   const k = item.scale;
 
   // Latest values for the gesture handlers (created once).
-  const ref = useRef({ item, x, y, canvasW, canvasH, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress });
-  ref.current = { item, x, y, canvasW, canvasH, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress };
+  const ref = useRef({ item, x, y, canvasW, canvasH, zoom, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress });
+  ref.current = { item, x, y, canvasW, canvasH, zoom, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress };
   const g = useRef({ startX: 0, startY: 0, z: 0, moved: false, longFired: false, timer: null as ReturnType<typeof setTimeout> | null, lastTap: 0, last: { x: 0, y: 0 } });
 
   const pan = useMemo(() => PanResponder.create({
@@ -108,8 +114,8 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
       const { w: bw, h: bh } = baseSize(s.item);
       const hx = (bw * s.item.scale) / 2 / Math.max(s.canvasW, 1);
       const hy = (bh * s.item.scale) / 2 / Math.max(s.canvasH, 1);
-      const nx = Math.min(1 - hx, Math.max(hx, g.current.startX + gs.dx / Math.max(s.canvasW, 1)));
-      const ny = Math.min(1 - hy, Math.max(hy, g.current.startY + gs.dy / Math.max(s.canvasH, 1)));
+      const nx = Math.min(1 - hx, Math.max(hx, g.current.startX + gs.dx / Math.max(s.canvasW * s.zoom, 1)));
+      const ny = Math.min(1 - hy, Math.max(hy, g.current.startY + gs.dy / Math.max(s.canvasH * s.zoom, 1)));
       g.current.last = { x: nx, y: ny };
       s.onDrag(s.item.id, nx, ny, g.current.z);
     },

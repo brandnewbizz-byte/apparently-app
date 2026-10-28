@@ -142,7 +142,7 @@ export default function SpotRoomScreen() {
   const canvasPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => drawRef.current.mode === 'draw',
     onMoveShouldSetPanResponder: () => drawRef.current.mode === 'draw',
-    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminationRequest: () => true,
     onPanResponderGrant: (e) => {
       const { w, h } = drawRef.current.size;
       const { locationX, locationY } = e.nativeEvent;
@@ -167,12 +167,56 @@ export default function SpotRoomScreen() {
       // Keep showing it until the saved version arrives.
       strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
     },
+    // A second finger means "zoom", so drop the half-drawn stroke.
     onPanResponderTerminate: () => {
-      const pts = drawRef.current.points;
       drawRef.current.points = [];
-      strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
+      strokeFns.current.done([], drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
     },
   }), []);
+
+  // ── Pinch to zoom / two-finger pan ────────────────────────────────────────
+  const [view, setView] = useState({ s: 1, tx: 0, ty: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pinch = useRef({ d0: 1, m0: { x: 0, y: 0 }, v0: { s: 1, tx: 0, ty: 0 } });
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
+  const touchInfo = (e: any) => {
+    const t = e.nativeEvent.touches || [];
+    if (t.length < 2) return null;
+    const a = t[0]; const b = t[1];
+    return { d: Math.max(1, Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY)), m: { x: (a.pageX + b.pageX) / 2, y: (a.pageY + b.pageY) / 2 } };
+  };
+  const clampView = (v: { s: number; tx: number; ty: number }) => {
+    const { w, h } = sizeRef.current;
+    const s2 = Math.min(4, Math.max(1, v.s));
+    const mx = (w * (s2 - 1)) / 2; const my = (h * (s2 - 1)) / 2;
+    return { s: s2, tx: Math.min(mx, Math.max(-mx, v.tx)), ty: Math.min(my, Math.max(-my, v.ty)) };
+  };
+  const zoomHandlers = {
+    onStartShouldSetResponderCapture: (e: any) => (e.nativeEvent.touches?.length || 0) >= 2,
+    onMoveShouldSetResponderCapture: (e: any) => (e.nativeEvent.touches?.length || 0) >= 2,
+    onResponderTerminationRequest: () => true,
+    onResponderGrant: (e: any) => {
+      const t = touchInfo(e);
+      if (t) pinch.current = { d0: t.d, m0: t.m, v0: viewRef.current };
+    },
+    onResponderMove: (e: any) => {
+      const t = touchInfo(e);
+      if (!t) return;
+      const { d0, m0, v0 } = pinch.current;
+      const { w, h } = sizeRef.current;
+      const s2 = Math.min(4, Math.max(1, v0.s * (t.d / d0)));
+      // Keep the spot under your fingers where it is while zooming.
+      const cx = w / 2; const cy = h / 2;
+      setView(clampView({
+        s: s2,
+        tx: t.m.x - cx - (s2 * (m0.x - cx - v0.tx)) / v0.s,
+        ty: t.m.y - cy - (s2 * (m0.y - cy - v0.ty)) / v0.s,
+      }));
+    },
+  };
+  const zoomed = view.s > 1.01;
 
   const liveStrokes = useMemo(() => {
     const list = Object.values(room.liveStrokes);
@@ -244,14 +288,38 @@ export default function SpotRoomScreen() {
     if (!picked) return;
     setUploading(true);
     try {
-      const png = picked.mimeType === 'image/png';
-      const url = await uploadImageToStorage(picked.uri, 'room-files', `spot/${roomId}`, 3, png ? 'image/png' : 'image/jpeg');
+      let png = picked.mimeType === 'image/png';
+      let uri = picked.uri;
+      let aspect = picked.width / Math.max(1, picked.height);
+      let cutout = style === 'cutout' && outline && outline.length > 2 ? outline : undefined;
+      if (cutout) {
+        // Crop the file itself down to the traced area, so only the object is
+        // ever uploaded — then the outline clips it to the exact shape.
+        const W = picked.width; const H = picked.height;
+        const xs = cutout.map((p) => p.x * W); const ys = cutout.map((p) => p.y * H);
+        const pad = Math.round(Math.max(W, H) * 0.01);
+        const ox = Math.max(0, Math.floor(Math.min(...xs)) - pad);
+        const oy = Math.max(0, Math.floor(Math.min(...ys)) - pad);
+        const cw = Math.min(W - ox, Math.ceil(Math.max(...xs)) + pad - ox);
+        const ch = Math.min(H - oy, Math.ceil(Math.max(...ys)) + pad - oy);
+        if (cw > 8 && ch > 8) {
+          const cropped = await manipulateAsync(picked.uri, [{ crop: { originX: ox, originY: oy, width: cw, height: ch } }], { compress: 0.85, format: SaveFormat.JPEG });
+          uri = cropped.uri;
+          png = false;
+          aspect = cw / ch;
+          cutout = cutout.map((p) => ({
+            x: Math.min(1, Math.max(0, (p.x * W - ox) / cw)),
+            y: Math.min(1, Math.max(0, (p.y * H - oy) / ch)),
+          }));
+        }
+      }
+      const url = await uploadImageToStorage(uri, 'room-files', `spot/${roomId}`, 3, png ? 'image/png' : 'image/jpeg');
       if (!url || url.startsWith('file:')) throw new Error('upload failed');
       setMode('move');
       const it = await room.add({
         kind: 'photo', imageUrl: url, x: nearCenter(), y: 0.55 + Math.random() * 0.2,
-        aspect: picked.width / Math.max(1, picked.height),
-        cutout: style === 'cutout' ? outline : undefined,
+        aspect,
+        cutout,
         bare: style === 'bare',
       });
       if (!it) throw new Error('save failed');
@@ -292,7 +360,7 @@ export default function SpotRoomScreen() {
   if (!infoLoading && !info) {
     return (
       <View style={[styles.center, { backgroundColor: '#0B1026' }]}>
-        <Stack.Screen options={{ headerShown: false }} />
+        <Stack.Screen options={{ headerShown: false, gestureEnabled: false, fullScreenGestureEnabled: false }} />
         <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '800' }}>This room is gone</Text>
         <Text style={{ color: 'rgba(255,255,255,0.7)', marginTop: 6 }}>It may have been deleted by its host.</Text>
         <TouchableOpacity onPress={() => router.back()} style={[styles.pill, { marginTop: 18, backgroundColor: '#FFF' }]}>
@@ -304,12 +372,13 @@ export default function SpotRoomScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors[0] }}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false, fullScreenGestureEnabled: false }} />
       <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
 
-      {/* ── Canvas ── */}
+      {/* ── Canvas (pinch to zoom) ── */}
+      <View style={StyleSheet.absoluteFill} {...zoomHandlers}>
       <View
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { transform: [{ translateX: view.tx }, { translateY: view.ty }, { scale: view.s }] }]}
         onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
         {...canvasPan.panHandlers}
       >
@@ -321,6 +390,7 @@ export default function SpotRoomScreen() {
             item={it}
             live={room.remoteDrag[it.id]}
             canvasW={size.w}
+            zoom={view.s}
             canvasH={size.h}
             enabled={mode === 'move'}
             topZ={room.topZ}
@@ -333,8 +403,15 @@ export default function SpotRoomScreen() {
             onLongPress={onLongPress}
           />
         )) : null}
+      </View>
         <BurstLayer bursts={room.bursts} width={size.w} height={size.h} />
       </View>
+
+      {zoomed ? (
+        <TouchableOpacity onPress={() => setView({ s: 1, tx: 0, ty: 0 })} style={[styles.zoomPill, { top: insets.top + 56 }]} accessibilityLabel="Reset zoom">
+          <Text style={styles.zoomText}>{Math.round(view.s * 100)}% · Reset</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Empty-room hint */}
       {!room.loading && room.items.length === 0 ? (
@@ -577,6 +654,8 @@ const styles = StyleSheet.create({
   penWidthOn: { backgroundColor: '#E0F2FE' },
   sep: { width: 1, height: 22, backgroundColor: '#E5E7EB', marginHorizontal: 2 },
 
+  zoomPill: { position: 'absolute', right: 14, backgroundColor: 'rgba(17,24,39,0.85)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, zIndex: 50 },
+  zoomText: { color: '#FFF', fontWeight: '800', fontSize: 12 },
   preparing: { zIndex: 4000, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 12 },
   preparingText: { color: '#FFF', fontWeight: '700' },
   talkPill: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.92)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, maxWidth: '80%' },

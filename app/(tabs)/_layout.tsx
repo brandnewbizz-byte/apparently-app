@@ -1,12 +1,13 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, User, Plus, LayoutGrid } from 'lucide-react-native';
+import { Home, Newspaper, User, LayoutGrid } from 'lucide-react-native';
 import React from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Image } from 'react-native';
+
+const PLANNER_ICON = require('@/assets/images/planner-tab.png');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
-import { useCreatePost } from '@/contexts/CreatePostContext';
 
 // Screens that live inside the tabs but have no button in the bar.
 // Don't use `href: null` for this: in this Expo Router version it marks the
@@ -20,7 +21,6 @@ const OFF_BAR = {
 export default function TabLayout() {
   const { colors } = useTheme();
   const { tabBarTranslateY } = useTabBar();
-  const { openCreate } = useCreatePost();
   const insets = useSafeAreaInsets();
 
   const baseHeight = Platform.OS === 'ios' ? 56 : 52;
@@ -81,34 +81,24 @@ export default function TabLayout() {
             ),
           }}
         />
-        {/* Create-post — matches the other tabs, opens the compose flow */}
+        {/* Planner — the app logo is its icon. (Create moved: skills, bundles and
+            requests are made from Manage; posts from the + on the Feed.) */}
         <Tabs.Screen
-          name="create"
+          name="planner"
           options={{
-            title: 'Create',
-            tabBarIcon: ({ color, focused }) => (
+            title: 'Planner',
+            tabBarAccessibilityLabel: 'Planner',
+            tabBarIcon: ({ focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <Plus size={24} color={color} />
+                <Image source={PLANNER_ICON} style={[styles.logoIcon, !focused && { opacity: 0.8 }]} resizeMode="contain" />
               </View>
             ),
           }}
-          listeners={{
-            tabPress: (e) => {
-              e.preventDefault();
-              openCreate();
-            },
-          }}
         />
+        <Tabs.Screen name="create" options={{ ...OFF_BAR }} />
         {/* Live/Spot moved into the Planner (calendar) tab — hidden from bottom nav */}
         <Tabs.Screen
           name="live"
-          options={{
-            ...OFF_BAR,
-          }}
-        />
-        {/* Planner (calendar) moved into the Create chooser — hidden from bottom nav */}
-        <Tabs.Screen
-          name="planner"
           options={{
             ...OFF_BAR,
           }}
@@ -141,6 +131,7 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  logoIcon: { width: 30, height: 30 },
   activeIconContainer: {
     padding: 6,
     borderRadius: 12,

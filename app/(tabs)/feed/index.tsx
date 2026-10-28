@@ -37,6 +37,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useTabBar } from '@/contexts/TabBarContext';
+import { useCreatePost } from '@/contexts/CreatePostContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import StoriesViewer, { type StoryUser, type StoryMedia } from '@/components/StoriesViewer';
 import StoryRing from '@/components/StoryRing';
@@ -582,6 +583,7 @@ function formatCount(n: number): string {
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { openCreate } = useCreatePost();
   const { colors, isDark } = useTheme();
   const floatBarSpace = insets.top + FLOAT_BAR_HEIGHT;
   // Light status-bar icons while the feed is showing (they sit on the dark
@@ -1125,6 +1127,9 @@ export default function FeedScreen() {
           </ScrollView>
 
           <View style={styles.floatIcons}>
+            <TouchableOpacity onPress={openCreate} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityLabel="New post">
+              <Plus size={25} color="#FFFFFF" strokeWidth={2.2} />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/search' as any)}
               hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
