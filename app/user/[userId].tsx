@@ -219,7 +219,11 @@ export default function UserProfileScreen() {
       if (active) setLoading(false);
     })();
     return () => { active = false; };
-  }, [userId]);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The signed-in user can load after this screen opens (e.g. from a link),
+  // so re-check the follow button once we know who's looking.
+  useEffect(() => { checkFollowStatus(); }, [checkFollowStatus]);
 
   useEffect(() => {
     Animated.parallel([

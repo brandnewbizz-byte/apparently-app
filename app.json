@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "apparently app real app",
+    "name": "Apparently",
     "slug": "apparently-app-real-app",
     "version": "1.1.0",
     "owner": "sharehost",
@@ -22,9 +22,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.rork.apparently-app-real-app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
-        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone",
-        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
+        "NSCameraUsageDescription": "Apparently uses your camera so you can take photos and videos for posts and stories, and show yourself in Spot rooms.",
+        "NSMicrophoneUsageDescription": "Apparently uses your microphone for voice notes in messages and for talking with friends in live posts and Spot rooms.",
+        "NSPhotoLibraryUsageDescription": "Apparently uses your photo library so you can share photos and videos in posts, stories, messages and Spot rooms.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -37,14 +37,7 @@
       "permissions": [
         "android.permission.VIBRATE",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.VIBRATE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -62,15 +55,16 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera",
-          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone",
+          "cameraPermission": "Apparently uses your camera so you can take photos and videos for posts and stories, and show yourself in Spot rooms.",
+          "microphonePermission": "Apparently uses your microphone for voice notes in messages and for talking with friends in live posts and Spot rooms.",
           "recordAudioAndroid": true
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "The app accesses your photos to let you share them with your friends."
+          "photosPermission": "Apparently uses your photo library so you can share photos and videos in posts, stories, messages and Spot rooms.",
+          "cameraPermission": "Apparently uses your camera so you can take photos and videos for posts and stories, and show yourself in Spot rooms."
         }
       ],
       "expo-image",
@@ -80,8 +74,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
-          "color": "#001F3D"
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#E91E8C"
         }
       ],
       "expo-asset"

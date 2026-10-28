@@ -1,6 +1,6 @@
-// TextPostBar.tsx — lightweight inline text-post input.
-// Replaces the big PostComposer for text-only posts: a small bar where the
-// user types and presses enter (or taps send) to publish immediately.
+// TextPostBar.tsx — quick text-post sheet.
+// A small bottom sheet (Cancel · Text post · Post) with a multi-line box,
+// instead of the big PostComposer, for text-only posts.
 
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useRef, useState } from 'react';
@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -62,40 +63,41 @@ export default function TextPostBar({
   };
 
   const canPost = text.trim().length > 0;
+  const MAX = 1000;
 
   return (
-    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-        <View
-          style={[
-            styles.bar,
-            { backgroundColor: surfaceColor, borderColor, paddingBottom: Math.max(insets.bottom, 12) },
-          ]}
-        >
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[styles.sheet, { backgroundColor: surfaceColor, borderColor, paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityLabel="Cancel text post">
+              <Text style={[styles.cancel, { color: textColor }]}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={[styles.title, { color: textColor }]}>Text post</Text>
+            <TouchableOpacity
+              onPress={submit}
+              disabled={!canPost}
+              style={[styles.postBtn, { backgroundColor: accentColor, opacity: canPost ? 1 : 0.4 }]}
+              accessibilityLabel="Post"
+            >
+              <Send size={15} color="#FFF" />
+              <Text style={styles.postText}>Post</Text>
+            </TouchableOpacity>
+          </View>
           <TextInput
             ref={inputRef}
-            style={[styles.input, { color: textColor, backgroundColor: 'rgba(255,255,255,0.06)' }]}
-            placeholder="Write something…"
-            placeholderTextColor="rgba(255,255,255,0.35)"
+            style={[styles.input, { color: textColor, backgroundColor, borderColor }]}
+            placeholder="What's on your mind?"
+            placeholderTextColor="#9CA3AF"
             value={text}
             onChangeText={setText}
-            onSubmitEditing={submit}
-            returnKeyType="send"
-            maxLength={1000}
-            blurOnSubmit={false}
+            multiline
+            maxLength={MAX}
+            textAlignVertical="top"
+            accessibilityLabel="Post text"
           />
-          <TouchableOpacity
-            onPress={submit}
-            disabled={!canPost}
-            style={[
-              styles.sendBtn,
-              { backgroundColor: canPost ? accentColor : 'rgba(255,255,255,0.15)' },
-            ]}
-            activeOpacity={0.8}
-          >
-            <Send size={18} color="#FFF" />
-          </TouchableOpacity>
+          <Text style={styles.counter}>{text.length}/{MAX}</Text>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -104,31 +106,29 @@ export default function TextPostBar({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 20,
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
-    paddingVertical: 11,
-    borderRadius: 24,
+    paddingTop: 14,
+    gap: 10,
   },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cancel: { fontSize: 15, fontWeight: '500', opacity: 0.8 },
+  title: { fontSize: 16, fontWeight: '700' },
+  postBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
+  postText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  input: {
+    minHeight: 110,
+    maxHeight: 240,
+    fontSize: 17,
+    lineHeight: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
   },
+  counter: { alignSelf: 'flex-end', fontSize: 12, color: '#9CA3AF' },
 });
