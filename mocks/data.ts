@@ -29,6 +29,10 @@ export interface Post {
   videoUrl?: string;
   mediaType?: 'image' | 'video';
   timestamp: string;
+  /** ISO created_at from the database (timestamp may be a display string). */
+  createdAt?: string;
+  /** Whether the signed-in viewer has liked this post (from post_likes). */
+  likedByMe?: boolean;
   likes: number;
   comments: number;
   shares: number;

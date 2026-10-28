@@ -10,7 +10,7 @@ import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import { isLocalFileUri } from '@/lib/media';
 import { sanitizeCaption, generateUsername } from '@/lib/sanitize';
-import { persistableImageUri } from '@/lib/storage';
+import { persistableImageUri, uploadVideoToStorage } from '@/lib/storage';
 import { queueAction, dequeueAction } from '@/lib/offlineQueue';
 import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
@@ -133,8 +133,12 @@ interface SocialState {
   userStories: UserStory[];
   feedStories: Story[];
   isLoading: boolean;
+  /** True until the first feed load from Supabase has finished. */
+  isFeedLoading: boolean;
+  /** Re-fetch posts, like/comment counts and the viewer's likes. */
+  refreshPosts: () => Promise<void>;
   toggleLike: (postId: string, initialLikeCount?: number) => void;
-  addComment: (postId: string, text: string, parentId?: string) => void;
+  addComment: (postId: string, text: string, parentId?: string) => Promise<boolean>;
   toggleCommentLike: (postId: string, commentId: string) => void;
   sharePost: (post: Post) => Promise<void>;
   getComments: (postId: string) => SocialComment[];
@@ -143,7 +147,8 @@ interface SocialState {
   getStoryInteraction: (storyId: string) => StoryInteraction;
   updatePost: (postId: string, content: string) => void;
   deletePost: (postId: string) => void;
-  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => void;
+  /** Uploads media, saves the post and resolves with its id (null on failure). */
+  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => Promise<string | null>;
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
@@ -160,6 +165,38 @@ interface SocialState {
 }
 
 
+/** Maps a row from localApi.getPosts() (posts + joined profile) to a Post. */
+const mapApiPost = (p: any): Post => {
+  const joinedUser = p.user;
+  return {
+    id: p.id,
+    user: {
+      id: p.user_id,
+      name: joinedUser?.name || joinedUser?.username || p.author_name || 'Unknown',
+      username: joinedUser?.username || p.author_username || generateUsername(p.user_id),
+      avatar: joinedUser?.avatar || p.author_avatar || '',
+      isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
+      followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
+      relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
+    },
+    content: p.content,
+    imageUrl: p.image_url,
+    videoUrl: p.video_url,
+    mediaType: p.media_type as 'image' | 'video' | undefined,
+    timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
+    createdAt: p.created_at || undefined,
+    likedByMe: !!p.liked_by_me,
+    likes: p.likes || 0,
+    comments: p.comments || 0,
+    shares: p.shares || 0,
+    category: p.category || undefined,
+    postKind: p.post_kind || 'post',
+    renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
+    isApparently: !!p.is_apparently,
+    apparentlyTag: p.apparently_tag,
+  } as Post;
+};
+
 const buildDefaultState = (posts: Post[]) => {
   const base: Record<string, PostInteraction> = {};
   posts.forEach((post) => {
@@ -167,7 +204,7 @@ const buildDefaultState = (posts: Post[]) => {
       likeCount: post.likes,
       commentCount: post.comments,
       shareCount: post.shares,
-      isLiked: false,
+      isLiked: !!post.likedByMe,
       comments: [],
     };
   });
@@ -201,25 +238,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   const [apiPosts, setApiPosts] = useState<Post[] | null>(null);
   const apiLoaded = useRef(false);
 
-  // Fetch like statuses from Supabase for all loaded posts
-  useEffect(() => {
-    if (!authUserId || authUserId === 'u-dev') return;
-    const postIds = Object.keys(interactions);
-    if (postIds.length === 0) return;
-    
-    postIds.forEach(postId => {
-      localApi.getLikeStatus(postId, authUserId).then(({ liked }) => {
-        if (liked) {
-          setInteractions((prev: Record<string, PostInteraction>) => {
-            const current = prev[postId];
-            if (!current) return { ...prev, [postId]: { likeCount: 1, commentCount: 0, shareCount: 0, isLiked: true, comments: [] } };
-            if (current.isLiked) return prev;
-            return { ...prev, [postId]: { ...current, isLiked: true, likeCount: Math.max(current.likeCount, 1) } };
-          });
-        }
-      });
-    });
-  }, [authUserId]); // Run once when auth is ready
+  // Like status now arrives with the posts themselves (liked_by_me from
+  // localApi.getPosts), so there is no per-post status fetch here any more.
 
   // Get real auth user ID + profile on mount (profile used to attribute like/comment notifications)
   useEffect(() => {
@@ -355,38 +375,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
 
   useEffect(() => {
     if (postsQuery.data) {
+      // Fallback source only. Likes/comment counts come from the API-backed
+      // feed (refreshPosts), which reads post_likes / post_comments directly.
+      // The old code overlaid like state cached on the phone, so likes leaked
+      // between accounts and never matched the server.
       setFeedPosts(postsQuery.data);
-      // Build defaults from DB, then overlay any persisted likes/stats from AsyncStorage
-      const defaults = buildDefaultState(postsQuery.data);
-      AsyncStorage.getItem('apparently_social_interactions').then((persisted) => {
-        if (persisted) {
-          try {
-            const saved: Record<string, PostInteraction> = JSON.parse(persisted);
-            // Merge: persisted values win over defaults
-            const merged: Record<string, PostInteraction> = {};
-            for (const id of new Set([...Object.keys(defaults), ...Object.keys(saved)])) {
-              const d = defaults[id] || { likeCount: 0, commentCount: 0, shareCount: 0, isLiked: false, comments: [] };
-              const s = saved[id] || { likeCount: 0, commentCount: 0, shareCount: 0, isLiked: false, comments: [] };
-              merged[id] = {
-                ...d,
-                likeCount: s.likeCount !== undefined ? s.likeCount : d.likeCount,
-                isLiked: s.isLiked !== undefined ? s.isLiked : d.isLiked,
-                commentCount: s.commentCount !== undefined ? s.commentCount : d.commentCount,
-                shareCount: s.shareCount !== undefined ? s.shareCount : d.shareCount,
-                comments: s.comments || d.comments,
-              };
-            }
-            setInteractions(merged);
-            logger.info('SocialContext', 'Merged persisted interactions', { merged: Object.keys(merged).length });
-          } catch {
-            setInteractions(defaults);
-          }
-        } else {
-          setInteractions(defaults);
-        }
-      }).catch(() => {
-        setInteractions(defaults);
-      });
     }
   }, [postsQuery.data]);
 
@@ -532,7 +525,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Toggled like', { postId, isLiked: updated.isLiked, likeCount: updated.likeCount });
     persistState(next);
     if (authUserId && authUserId !== 'u-dev') {
-      localApi.toggleLike(postId, authUserId).catch((e: any) => {
+      // Send the state the user tapped (idempotent). A blind server-side
+      // toggle could do the opposite whenever screen and server disagreed.
+      localApi.setLike(postId, authUserId, updated.isLiked).catch((e: any) => {
         logger.warn('SocialContext', 'toggleLike API failed — queuing for retry', { error: e?.message, postId });
         // `updated.isLiked` is the state the user wants (the old code queued the
         // opposite action, so a failed like was replayed as an unlike).
@@ -556,11 +551,11 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         }
       });
     }
-  }, [ensureInteraction, interactions, persistState, authUserId]);
+  }, [ensureInteraction, interactions, persistState, authUserId, currentUserProfile]);
 
-  const addComment = useCallback((postId: string, text: string, parentId?: string) => {
+  const addComment = useCallback(async (postId: string, text: string, parentId?: string): Promise<boolean> => {
     if (!text.trim()) {
-      return;
+      return false;
     }
     const current = ensureInteraction(postId);
     const newComment: SocialComment = {
@@ -599,11 +594,15 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     const next = { ...interactions, [postId]: updated };
     logger.info('SocialContext', 'Added comment', { postId, commentCount: updated.commentCount, parentId });
     persistState(next);
+    let saved = false;
     if (authUserId && authUserId !== 'u-dev') {
-      localApi.addComment(postId, authUserId, text, parentId).catch((e: any) => {
+      try {
+        await localApi.addComment(postId, authUserId, text, parentId);
+        saved = true;
+      } catch (e: any) {
         logger.warn('SocialContext', 'addComment API failed — queuing for retry', { error: e?.message, postId });
         queueAction({ id: `comment_${postId}_${newComment.id}`, type: 'comment', payload: { postId, userId: authUserId, text, parentId }, createdAt: Date.now() });
-      });
+      }
     }
     // Send notification to post author (DB columns: user_id, actor_id, actor_name, data)
     if (authUserId && authUserId !== 'u-dev') {
@@ -626,7 +625,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         logger.warn('SocialContext', 'comment mention processing failed', { error: e?.message })
       );
     }
-  }, [ensureInteraction, interactions, persistState, authUserId]);
+    return saved;
+  }, [ensureInteraction, interactions, persistState, authUserId, currentUserProfile]);
 
   const toggleCommentLike = useCallback((postId: string, commentId: string) => {
     const current = ensureInteraction(postId);
@@ -838,93 +838,86 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     logger.info('SocialContext', 'Deleted post', { postId });
   }, [interactions, persistState, userPosts, persistUserPostsMutation, queryClient]);
 
-  const createPost = useCallback((content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => {
+  // ─── API-backed feed: single loader used on start-up, refresh and realtime ───
+  const [isFeedLoading, setIsFeedLoading] = useState(true);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshPosts = useCallback((): Promise<void> => {
+    // Coalesce overlapping refreshes (pull-to-refresh + realtime + post create).
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const run = localApi.getPosts()
+      .then((rawPosts: any[]) => {
+        const mapped = (rawPosts || []).map(mapApiPost);
+        logger.info('SocialContext', 'Loaded feed', { length: mapped.length });
+        setApiPosts(mapped);
+        setInteractions(prev => {
+          const fresh = buildDefaultState(mapped);
+          // Keep comments already loaded for an open post sheet.
+          for (const id of Object.keys(fresh)) {
+            if (prev[id]?.comments?.length) fresh[id].comments = prev[id].comments;
+          }
+          return fresh;
+        });
+      })
+      .catch((err: any) => {
+        logger.warn('SocialContext', 'Feed load failed', { message: err?.message });
+      })
+      .finally(() => {
+        refreshInFlight.current = null;
+        setIsFeedLoading(false);
+      });
+    refreshInFlight.current = run;
+    return run;
+  }, []);
+
+  const createPost = useCallback(async (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }): Promise<string | null> => {
     const isVideo = options?.mediaType === 'video';
-    const videoUrl = isVideo ? imageUrl : undefined;
-    const rawImageUrl = isVideo ? undefined : imageUrl;
     const safeContent = sanitizeCaption(content);
 
-    const doCreatePost = (finalImageUrl: string | undefined) => {
-      logger.info('SocialContext', 'Creating post...', { hasVideo: !!videoUrl, hasImage: !!finalImageUrl });
-
-      // Resolve the real authenticated user id at write time. Using the
-      // session (not the 'u-dev' fallback) guarantees the post lands under the
-      // user's own profile, so it shows up in the profile grid.
-      DatabaseService.getCurrentUserId().then((userId) => {
-        if (!userId) {
-          logger.warn('SocialContext', 'createPost blocked - no user session');
-          return;
-        }
-
-        // Single write path to Supabase `posts` (no duplicate insert).
-        localApi.createPost(userId, safeContent, isVideo ? videoUrl : finalImageUrl, options)
-          .then((saved) => {
-            logger.info('SocialContext', 'Post saved to backend', { id: saved?.id });
-            queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-
-            if (saved?.id) {
-              processMentions(userId, safeContent, saved.id, 'post').catch((e) =>
-                logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
-              );
-            }
-
-            apiLoaded.current = false;
-            localApi.getPosts().then((rawPosts: any[]) => {
-              const mapped: Post[] = rawPosts.map((p: any) => {
-                const joinedUser = p.user;
-                return {
-                  id: p.id,
-                  user: {
-                    id: p.user_id,
-                    name: joinedUser?.name || p.author_name || 'Unknown',
-                    username: joinedUser?.username || p.author_username || generateUsername(p.user_id),
-                    avatar: joinedUser?.avatar || p.author_avatar || '',
-                    isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
-                    followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
-                    relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
-                  },
-                  content: p.content,
-                  imageUrl: p.image_url,
-                  videoUrl: p.video_url,
-                  mediaType: p.media_type as 'image' | 'video' | undefined,
-                  timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : 'Just now',
-                  likes: p.likes || 0,
-                  comments: p.comments || 0,
-                  shares: p.shares || 0,
-                  category: p.category || undefined,
-                  postKind: p.post_kind || 'post',
-                  renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-                };
-              });
-              setApiPosts(mapped);
-              setInteractions(buildDefaultState(mapped));
-            });
-          })
-          .catch((err) => {
-            logger.warn('SocialContext', 'Failed to save post to backend', { message: err?.message });
-          });
-      });
-    };
-
-    // If the image is a local file:// path, upload to Supabase Storage first.
-    // persistableImageUri guarantees a refresh-safe value: hosted URL when
-    // storage works, or a base64 data URI fallback — never a temporary file://
-    // path (which is what caused feed images to go black after refresh).
-    if (rawImageUrl && isLocalFileUri(rawImageUrl)) {
-      persistableImageUri(rawImageUrl, 'user-media', `posts/${authUserId}`)
-        .then((finalUrl) => {
-          logger.info('SocialContext', 'Post image made persistable', { hasImage: !!finalUrl });
-          doCreatePost(finalUrl);
-        })
-        .catch(() => {
-          logger.warn('SocialContext', 'Could not persist image, creating post without image');
-          doCreatePost(undefined);
-        });
-      return;
+    // Resolve the real authenticated user id at write time so the post lands
+    // under the user's own profile.
+    const userId = await DatabaseService.getCurrentUserId();
+    if (!userId) {
+      logger.warn('SocialContext', 'createPost blocked - no user session');
+      return null;
     }
 
-    doCreatePost(rawImageUrl);
-  }, [queryClient, authUserId]);
+    // Local media must be uploaded first. A file:// path saved to the
+    // database only exists on the poster's phone, so everyone else would see
+    // a black card (this is what happened to video posts before).
+    let mediaUrl: string | undefined = imageUrl;
+    if (imageUrl && isLocalFileUri(imageUrl)) {
+      if (isVideo) {
+        const hosted = await uploadVideoToStorage(imageUrl, 'user-media', `posts/${userId}`);
+        if (!hosted || isLocalFileUri(hosted)) {
+          logger.warn('SocialContext', 'Video upload failed — post not created');
+          return null;
+        }
+        mediaUrl = hosted;
+      } else {
+        mediaUrl = await persistableImageUri(imageUrl, 'user-media', `posts/${userId}`);
+        if (!mediaUrl) {
+          logger.warn('SocialContext', 'Image upload failed — post not created');
+          return null;
+        }
+      }
+    }
+
+    try {
+      const saved = await localApi.createPost(userId, safeContent, mediaUrl, options);
+      logger.info('SocialContext', 'Post saved to backend', { id: saved?.id });
+      if (saved?.id) {
+        processMentions(userId, safeContent, saved.id, 'post').catch((e) =>
+          logger.warn('SocialContext', 'mention processing failed', { error: e?.message })
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
+      await refreshPosts();
+      return saved?.id ?? null;
+    } catch (err: any) {
+      logger.warn('SocialContext', 'Failed to save post to backend', { message: err?.message });
+      return null;
+    }
+  }, [queryClient, refreshPosts]);
 
   const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
     logger.info('SocialContext', 'Creating story...');
@@ -975,45 +968,32 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
   }, [queryClient]);
 
   // ─── API-backed data loading ───
+  // Load once the session is known (so liked_by_me is right), and again when
+  // the signed-in account changes.
   useEffect(() => {
-    if (apiLoaded.current) return;
+    if (authUserId === 'u-dev' && apiLoaded.current) return;
     apiLoaded.current = true;
-    localApi.getPosts().then((rawPosts: any[]) => {
-      const mapped: Post[] = rawPosts.map((p: any) => {
-        const joinedUser = p.user;
-        return {
-          id: p.id,
-          user: {
-            id: p.user_id,
-            name: joinedUser?.name || p.author_name || 'Unknown',
-            username: joinedUser?.username || p.author_username || generateUsername(p.user_id),
-            avatar: joinedUser?.avatar || p.author_avatar || '',
-            isVerified: !!(joinedUser?.is_verified ?? p.author_verified),
-            followersCount: joinedUser?.followers_count ?? p.author_followers ?? 0,
-            relationshipCategory: joinedUser?.relationship_category || p.author_relationship,
-          },
-          content: p.content,
-          imageUrl: p.image_url,
-          videoUrl: p.video_url,
-          mediaType: p.media_type as 'image' | 'video' | undefined,
-          timestamp: p.created_at ? timeAgo(new Date(p.created_at)) : p.timestamp || 'unknown',
-          likes: p.likes || 0,
-          comments: p.comments || 0,
-          shares: p.shares || 0,
-          category: p.category || undefined,
-          postKind: p.post_kind || 'post',
-          renderFullImage: Boolean(p.image_url?.startsWith?.('data:') || p.image_url?.startsWith?.('file:')),
-          isApparently: !!p.is_apparently,
-          apparentlyTag: p.apparently_tag,
-        };
-      });
-      logger.info('SocialContext', 'Loaded', { length: mapped.length });
-      setApiPosts(mapped);
-      setInteractions(buildDefaultState(mapped));
-    }).catch(err => {
-      logger.info('SocialContext', 'Local API unavailable, using mock data', { message: err.message });
-    });
-  }, []);
+    refreshPosts();
+  }, [authUserId, refreshPosts]);
+
+  // New / deleted posts from anyone show up without a manual refresh.
+  useEffect(() => {
+    if (!authUserId || authUserId === 'u-dev') return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { refreshPosts(); }, 800);
+    };
+    const channel = supabase
+      .channel('feed-posts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, schedule)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, schedule)
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [authUserId, refreshPosts]);
 
   // ── Hidden posts + blocked users (persisted per account) ──
   // hidden_posts rows were written before but never read back, so hidden
@@ -1093,6 +1073,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     userStories,
     feedStories,
     isLoading: query.isLoading || postsQuery.isLoading,
+    isFeedLoading,
+    refreshPosts,
     toggleLike,
     addComment,
     toggleCommentLike,

@@ -4,7 +4,7 @@ import {
    Wrench, Bookmark,
   FileText, X, Send, ChevronLeft,
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
-  Star, MessagesSquare, Forward
+  MessageCircle, MoreHorizontal, Volume2, VolumeX, Camera, Users
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +26,8 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,6 +52,7 @@ import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import AppVideo from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
+import { getComments } from '@/lib/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -127,81 +130,113 @@ function timeAgo(dateStr: string): string {
 // SECTION 1: Post Detail Modal
 // ═══════════════════════════════════════════════════════════════════════════
 
+function Avatar({ uri, name, size, colors }: { uri?: string; name?: string; size: number; colors: any }) {
+  if (uri) return <RNImage source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+  const initial = (name || '?').trim().charAt(0).toUpperCase() || '?';
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.accent + '30', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: colors.accent, fontWeight: '700', fontSize: size * 0.42 }}>{initial}</Text>
+    </View>
+  );
+}
+
+function mapApiComment(c: any): Comment {
+  return {
+    id: String(c.id),
+    user: { name: c.author_name || 'User', avatar: c.author_avatar || '', userId: c.author_id },
+    text: c.text,
+    timestamp: c.created_at || '',
+  };
+}
+
 function PostDetailModal({
   post,
   visible,
   onClose,
   colors,
   onSave,
+  isSaved,
   onPlayVideo,
+  onOpenProfile,
 }: {
   post: FeedPost;
   visible: boolean;
   onClose: () => void;
   colors: any;
   onSave: (postId: string) => void;
+  isSaved: boolean;
   onPlayVideo?: (uri: string) => void;
+  onOpenProfile: (userId?: string) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInputInstance>(null);
   const [commentText, setCommentText] = useState('');
+  const [sending, setSending] = useState(false);
   const { interactions, toggleLike, addComment } = useSocial();
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
-  const [kbHeight, setKbHeight] = useState(0);
-  const [localComments, setLocalComments] = useState<Comment[]>([]);
-
-  // Sync local comments with SocialContext interactions on mount and when interaction changes
-  useEffect(() => {
-    const synced: Comment[] = (interaction?.comments || []).map((c: any) => ({
-      id: c.id,
-      user: { name: c.userName || c.user?.name || 'User', avatar: c.userAvatar || c.user?.avatar || '', userId: c.userId },
-      text: c.text,
-      timestamp: c.timestamp || c.createdAt || '',
-    }));
-    if (synced.length > 0) {
-      setLocalComments(synced);
-    } else if (post.comments_list && post.comments_list.length > 0) {
-      // Fallback to post-level comments if no interactions exist
-      setLocalComments(post.comments_list);
-    }
-  }, [interaction, post.comments_list]);
-  const cat = CATEGORY_CONFIG[post.category] || CATEGORY_CONFIG.Creative;
-  const CatIcon = cat.icon;
-  const authorAvatar = post.author.avatar || '';
-
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', (e) => setKbHeight(e.endCoordinates.height));
-    const hide = Keyboard.addListener('keyboardWillHide', () => setKbHeight(0));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
-
+  const likeCount = interaction?.likeCount ?? post.likes ?? 0;
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(true);
   const { user: currentUser } = useAuth();
-  const commentAvatar = currentUser?.avatar || '';
+  const myName = currentUser?.fullName || currentUser?.username || 'You';
 
-  const handleSendComment = () => {
+  // Comments live in post_comments — load them every time the sheet opens
+  // (they used to come only from this phone's cache, so nobody saw anyone
+  // else's comments).
+  const loadComments = useCallback(async () => {
+    try {
+      const rows = await getComments(post.id);
+      const flat: Comment[] = [];
+      for (const c of rows || []) {
+        flat.push(mapApiComment(c));
+        for (const r of (c as any).replies || []) flat.push(mapApiComment(r));
+      }
+      setComments(flat);
+    } catch {
+      // keep whatever is on screen
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [post.id]);
+
+  useEffect(() => {
+    if (visible) { setLoadingComments(true); loadComments(); }
+  }, [visible, loadComments]);
+
+  const handleSendComment = async () => {
     const trimmed = commentText.trim();
-    if (!trimmed) return;
+    if (!trimmed || sending) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const newComment: Comment = {
-      id: `c-new-${Date.now()}`,
-      user: { name: 'You', avatar: commentAvatar, userId: currentUser?.id },
+    const temp: Comment = {
+      id: `pending-${Date.now()}`,
+      user: { name: myName, avatar: currentUser?.avatar || '', userId: currentUser?.id },
       text: trimmed,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
     };
-    setLocalComments((prev) => [newComment, ...prev]);
+    setComments((prev) => [...prev, temp]);
     setCommentText('');
-    // Persist the comment to Supabase + SocialContext so it survives reload
-    // and notifies the post author. addComment manages optimistic state.
-    addComment(post.id, trimmed);
+    setSending(true);
+    const ok = await addComment(post.id, trimmed);
+    setSending(false);
+    if (ok) {
+      loadComments();
+    } else {
+      setComments((prev) => prev.filter((c) => c.id !== temp.id));
+      setCommentText(trimmed);
+      Alert.alert('Comment not posted', 'Check your connection and try again.');
+    }
   };
 
+  const isVideo = post.type === 'video' && !!post.videoUrl;
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
-        {/* Modal Header */}
-        <View style={[styles.modalHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose} style={styles.modalBackBtn}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={[styles.modalContainer, { backgroundColor: colors.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={[styles.modalHeader, { paddingTop: Platform.OS === 'ios' ? 14 : insets.top + 8, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} style={styles.modalBackBtn} accessibilityLabel="Close">
             <ChevronLeft size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.modalTitle, { color: colors.text }]}>Post</Text>
@@ -209,117 +244,100 @@ function PostDetailModal({
         </View>
 
         <FlatList
-          data={localComments}
+          data={comments}
           keyExtractor={(c) => c.id}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: Math.max(100, kbHeight + 60) }}
-          ListHeaderComponent={() => (
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 24 }}
+          ListHeaderComponent={
             <View style={styles.modalContent}>
-              {/* Author header */}
-              <View style={styles.modalAuthorRow}>
-                {authorAvatar ? (
-                  <RNImage source={{ uri: authorAvatar }} style={styles.modalAvatar} />
-                ) : null}
+              <TouchableOpacity style={styles.modalAuthorRow} onPress={() => onOpenProfile(post.author.userId)}>
+                <Avatar uri={post.author.avatar} name={post.author.name} size={40} colors={colors} />
                 <View style={{ flex: 1 }}>
-                  <View style={styles.nameRow}>
-                    <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
-                  </View>
+                  <Text style={[styles.authorName, { color: colors.text }]}>{post.author.name}</Text>
                   <Text style={[styles.metaSub, { color: colors.textTertiary }]}>
                     {timeAgo(post.timestamp)}{post.location ? ` · ${post.location}` : ''}
                   </Text>
                 </View>
-              </View>
+              </TouchableOpacity>
 
-              {/* Caption */}
-              <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
-
-              {/* Media */}
-              {post.media && (
-                <View style={styles.mediaWrap}>
-                  <RNImage
-                    source={{ uri: post.media }}
-                    style={[styles.modalMedia, { height: 400 }]}
-                    resizeMode="cover"
-                  />
-                  {post.type === 'video' && post.videoUrl && (
-                    <TouchableOpacity style={styles.playOverlay} onPress={() => onPlayVideo?.(post.videoUrl!)}>
-                      <View style={[styles.playBtn, { width: 56, height: 56, borderRadius: 28 }]}>
-                        <Play size={24} color="#FFF" fill="#FFF" style={{ marginLeft: 2 }} />
-                      </View>
+              {post.media ? (
+                <View style={[styles.mediaWrap, { marginTop: 12, backgroundColor: '#000' }]}>
+                  {isVideo ? (
+                    <AppVideo source={{ uri: post.videoUrl }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="contain" shouldPlay isLooping useNativeControls />
+                  ) : (
+                    <TouchableOpacity activeOpacity={0.95} onPress={() => onPlayVideo?.(post.media!)}>
+                      <RNImage source={{ uri: post.media }} style={[styles.modalMedia, { height: 420, marginTop: 0 }]} resizeMode="cover" />
                     </TouchableOpacity>
                   )}
                 </View>
-              )}
+              ) : null}
 
-              {/* Tags */}
-              <View style={[styles.tagRow, { marginTop: 10 }]}>
-                {post.tags.map((tag) => (
-                  <View key={tag} style={[styles.tag, { backgroundColor: colors.accent + '10' }]}>
-                    <Text style={[styles.tagText, { color: colors.accent }]}>#{tag}</Text>
-                  </View>
-                ))}
-              </View>
+              {post.caption ? (
+                <Text style={[styles.caption, { color: colors.text, marginTop: 12, fontSize: 15 }]}>{post.caption}</Text>
+              ) : null}
 
-              {/* Actions bar */}
               <View style={[styles.detailActions, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
                 <TouchableOpacity
                   style={styles.detailActionBtn}
                   onPress={() => { toggleLike(post.id, post.likes ?? 0); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  accessibilityLabel={liked ? 'Unlike' : 'Like'}
                 >
-                  <Star size={20} color={liked ? '#EF4444' : colors.textTertiary} fill={liked ? '#EF4444' : 'none'} />
+                  <Heart size={24} color={liked ? '#FF3040' : colors.text} fill={liked ? '#FF3040' : 'none'} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.detailActionBtn} onPress={() => inputRef.current?.focus()}>
-                  <MessagesSquare size={20} color={colors.textTertiary} />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)}>
-                  <Bookmark size={20} color={colors.textTertiary} />
+                <Text style={[styles.detailCount, { color: colors.text }]}>{likeCount} {likeCount === 1 ? 'like' : 'likes'}</Text>
+                <View style={{ flex: 1 }} />
+                <TouchableOpacity style={styles.detailActionBtn} onPress={() => onSave(post.id)} accessibilityLabel={isSaved ? 'Unsave' : 'Save'}>
+                  <Bookmark size={24} color={colors.text} fill={isSaved ? colors.text : 'none'} />
                 </TouchableOpacity>
               </View>
 
-              {/* Comments header */}
-              <View style={{ marginTop: 8 }}>
-                <Text style={[styles.commentsHeader, { color: colors.text }]}>
-                  Comments ({localComments.length})
-                </Text>
-              </View>
+              <Text style={[styles.commentsHeader, { color: colors.text }]}>
+                {loadingComments ? 'Comments' : `Comments (${comments.length})`}
+              </Text>
+              {!loadingComments && comments.length === 0 ? (
+                <Text style={{ color: colors.textTertiary, fontSize: 14, paddingVertical: 12 }}>No comments yet. Start the conversation.</Text>
+              ) : null}
             </View>
-          )}
+          }
           renderItem={({ item: comment }) => (
-            <View style={styles.commentItem}>
-              <RNImage source={{ uri: comment.user.name === 'You' ? commentAvatar : comment.user.avatar }} style={styles.commentAvatar} />
+            <View style={[styles.commentItem, comment.id.startsWith('pending-') && { opacity: 0.55 }]}>
+              <TouchableOpacity onPress={() => onOpenProfile(comment.user.userId)}>
+                <Avatar uri={comment.user.avatar} name={comment.user.name} size={32} colors={colors} />
+              </TouchableOpacity>
               <View style={{ flex: 1 }}>
-                <View style={styles.commentBubble}>
-                  <Text style={[styles.commentName, { color: colors.text }]}>{comment.user.name}</Text>
-                  <Text style={[styles.commentText, { color: colors.textSecondary }]}>{comment.text}</Text>
-                </View>
-                <Text style={[styles.commentTime, { color: colors.textTertiary }]}>{comment.timestamp}</Text>
+                <Text style={[styles.commentText, { color: colors.text }]}>
+                  <Text style={styles.commentName}>{comment.user.name}</Text>{'  '}{comment.text}
+                </Text>
+                <Text style={[styles.commentTime, { color: colors.textTertiary }]}>
+                  {comment.id.startsWith('pending-') ? 'Posting…' : timeAgo(comment.timestamp)}
+                </Text>
               </View>
             </View>
           )}
         />
 
-        {/* Comment input */}
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.bottom}>
-          <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 4 }]}>
-            <RNImage
-              source={{ uri: commentAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }}
-              style={styles.commentInputAvatar}
-            />
-            <TextInput
-              style={[styles.commentInputField, { backgroundColor: colors.surface, color: colors.text }]}
-              placeholder="Add a comment..."
-              placeholderTextColor={colors.textTertiary}
-              value={commentText}
-              onChangeText={setCommentText}
-              onSubmitEditing={handleSendComment}
-              returnKeyType="send"
-            />
-            <TouchableOpacity style={[styles.sendBtn, { backgroundColor: commentText.trim() ? colors.accent : colors.surface }]} onPress={handleSendComment}>
-              <Send size={16} color={commentText.trim() ? '#FFF' : colors.textTertiary} />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
+        <View style={[styles.commentInput, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 8) + 4 }]}>
+          <Avatar uri={currentUser?.avatar} name={myName} size={32} colors={colors} />
+          <TextInput
+            style={[styles.commentInputField, { backgroundColor: colors.surface, color: colors.text }]}
+            placeholder={`Add a comment as ${myName}…`}
+            placeholderTextColor={colors.textTertiary}
+            value={commentText}
+            onChangeText={setCommentText}
+            onSubmitEditing={handleSendComment}
+            returnKeyType="send"
+            maxLength={1000}
+          />
+          <TouchableOpacity
+            disabled={!commentText.trim() || sending}
+            onPress={handleSendComment}
+            accessibilityLabel="Post comment"
+          >
+            <Text style={{ color: commentText.trim() && !sending ? colors.accent : colors.textTertiary, fontWeight: '700', fontSize: 15 }}>Post</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -334,7 +352,6 @@ function PostCard({
   onPress,
   onSave,
   onComment,
-  onTagTap,
   onMediaTap,
   onShare,
   onDelete,
@@ -343,13 +360,15 @@ function PostCard({
   isSaved: isSavedProp,
   height,
   isActive,
+  muted,
+  onToggleMute,
 }: {
   post: FeedPost;
   colors: any;
   onPress: () => void;
   onSave: (postId: string) => void;
   onComment: (post: FeedPost) => void;
-  onTagTap: (tag: string) => void;
+  onTagTap?: (tag: string) => void;
   onMediaTap: (uri: string, isVideo?: boolean) => void;
   onShare: (post: FeedPost) => void;
   onDelete?: (postId: string) => void;
@@ -358,29 +377,64 @@ function PostCard({
   isSaved?: boolean;
   height?: number;
   isActive?: boolean;
+  muted: boolean;
+  onToggleMute: () => void;
 }) {
-  const [saved, setSaved] = useState(isSavedProp ?? false);
-  // Sync with parent if savedIds changes externally
-  useEffect(() => { setSaved(isSavedProp ?? false); }, [isSavedProp]);
+  const saved = !!isSavedProp;
   const { interactions, toggleLike } = useSocial();
   const interaction = interactions[post.id];
   const liked = interaction?.isLiked ?? false;
   const likeCount = interaction?.likeCount ?? (post.likes ?? 0);
-  const commentCount = post.stats.comments || (post.comments_list?.length || 0);
+  const commentCount = interaction?.commentCount ?? post.stats.comments ?? 0;
   const authorAvatar = post.author.avatar || '';
   const { user: currentUser } = useAuth();
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const routerFromCard = useRouter();
+  const isVideo = post.type === 'video' && !!post.videoUrl;
+  // The tab bar floats over the bottom of each full-screen post.
+  const cardInsets = useSafeAreaInsets();
+  const tabBarSpace = (Platform.OS === 'ios' ? 56 : 52) + Math.max(cardInsets.bottom, 0);
+
+  // ── Double-tap to like (Instagram): big heart pops over the media ──
+  const burst = useRef(new Animated.Value(0)).current;
+  const lastTap = useRef(0);
+  const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (singleTapTimer.current) clearTimeout(singleTapTimer.current); }, []);
+
+  const playBurst = () => {
+    burst.setValue(0);
+    Animated.sequence([
+      Animated.spring(burst, { toValue: 1, useNativeDriver: true, friction: 4, tension: 120 }),
+      Animated.delay(350),
+      Animated.timing(burst, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const handleMediaPress = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 280) {
+      lastTap.current = 0;
+      if (singleTapTimer.current) { clearTimeout(singleTapTimer.current); singleTapTimer.current = null; }
+      // Double-tap only ever likes — it never un-likes.
+      if (!liked) toggleLike(post.id, post.likes ?? 0);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      playBurst();
+      return;
+    }
+    lastTap.current = now;
+    singleTapTimer.current = setTimeout(() => {
+      singleTapTimer.current = null;
+      // Single tap: videos toggle sound (Reels), photos open full screen.
+      if (isVideo) onToggleMute();
+      else onMediaTap(post.media!, false);
+    }, 280);
+  };
 
   const handleSave = () => {
-    setSaved(!saved);
     onSave(post.id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const handleLike = () => {
-    // Pass post.likes as initialLikeCount so aggregated posts (marketplace, bundles, etc.)
-    // don't reset to 0 on first interaction
     toggleLike(post.id, post.likes ?? 0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
@@ -388,14 +442,7 @@ function PostCard({
   const handleMenuPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const isOwnPost = !!(currentUser?.id && post.author.userId === currentUser.id);
-    const options: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
-      { text: 'Report', style: 'destructive', onPress: () => onReport(post.id) },
-    ];
-    // Hide is for other people's posts (remove from your feed); delete is for your own.
-    if (!isOwnPost) {
-      options.push({ text: 'Hide', onPress: () => onHide(post.id) });
-    }
-    options.push({ text: 'Copy Link', onPress: () => { Share.share({ message: `Check this out: ${post.caption}` }); } });
+    const options: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [];
     if (isOwnPost) {
       options.push({
         text: 'Delete Post',
@@ -406,122 +453,136 @@ function PostCard({
             'Are you sure you want to delete this post? This cannot be undone.',
             [
               { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: () => onDelete?.(post.id),
-              },
+              { text: 'Delete', style: 'destructive', onPress: () => onDelete?.(post.id) },
             ],
             { cancelable: true },
           );
         },
       });
+    } else {
+      options.push({ text: 'Report', style: 'destructive', onPress: () => onReport(post.id) });
+      // Hide is for other people's posts (removes it from your feed).
+      options.push({ text: 'Hide', onPress: () => onHide(post.id) });
     }
+    options.push({ text: 'Share', onPress: () => onShare(post) });
     options.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Post Options', `By ${post.author.name}`, options, { cancelable: true });
   };
 
-  const typeLabel = null;
-
   const handleProfileTap = () => {
     if (!post.author.userId) return;
     if (post.author.userId === currentUser?.id) {
-      // Own profile → go to bottom tab profile
       routerFromCard.push('/(tabs)/profile' as any);
     } else {
-      // Someone else → dedicated user profile page
       routerFromCard.push(`/user/${post.author.userId}` as any);
     }
   };
 
+  const burstStyle = {
+    opacity: burst,
+    transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }],
+  };
+
   return (
-    <View style={[igCardStyles.card, { backgroundColor: colors.surface, height: height ?? undefined, marginBottom: height ? 0 : 16 }]}>
-      {/* Media — Reels-style full-screen fill, author overlaid top-left (Instagram style) */}
+    <View style={[igCardStyles.card, { backgroundColor: post.media ? '#000' : colors.surface, height: height ?? undefined, marginBottom: height ? 0 : 16 }]}>
       {post.media ? (
         <View style={height ? { flex: 1 } : undefined}>
-          <TouchableOpacity activeOpacity={0.9} onPress={() => onMediaTap(post.videoUrl || post.media!, post.type === 'video' && !!post.videoUrl)} style={height ? { flex: 1 } : undefined}>
-            <RNImage
-              source={{ uri: post.media }}
-              style={[
-                igCardStyles.media,
-                height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT },
-              ]}
-              resizeMode="cover"
-            />
-            {post.type === 'video' && post.videoUrl && (
-              <TouchableOpacity style={igCardStyles.playOverlay} onPress={() => onMediaTap(post.videoUrl!, true)}>
-                <View style={igCardStyles.playBtn}>
-                  <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
-                </View>
-              </TouchableOpacity>
+          <Pressable onPress={handleMediaPress} style={height ? { flex: 1 } : undefined} accessibilityLabel={isVideo ? 'Video. Double tap to like, tap to mute or unmute' : 'Photo. Double tap to like, tap to view'}>
+            {isVideo ? (
+              isActive ? (
+                <AppVideo
+                  source={{ uri: post.videoUrl }}
+                  style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
+                  resizeMode="cover"
+                  shouldPlay
+                  isLooping
+                  isMuted={muted}
+                />
+              ) : (
+                // Off-screen videos don't hold a player (saves memory/battery).
+                <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]} />
+              )
+            ) : (
+              <RNImage
+                source={{ uri: post.media }}
+                style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
+                resizeMode="cover"
+              />
             )}
-            {post.type === 'video' && !post.videoUrl && (
-              <View style={igCardStyles.playOverlay}>
+            {isVideo && !isActive ? (
+              <View style={igCardStyles.playOverlay} pointerEvents="none">
                 <View style={igCardStyles.playBtn}>
                   <Play size={22} color="#FFF" fill="#FFF" style={{ marginLeft: 3 }} />
                 </View>
               </View>
-            )}
-          </TouchableOpacity>
+            ) : null}
+            <Animated.View style={[igCardStyles.playOverlay, burstStyle]} pointerEvents="none">
+              <Heart size={96} color="#FFFFFF" fill="#FFFFFF" />
+            </Animated.View>
+          </Pressable>
 
           {/* Author overlay — avatar + name on the content, top-left */}
           <View style={igCardStyles.authorOverlay} pointerEvents="box-none">
             <TouchableOpacity style={igCardStyles.authorOverlayLeft} onPress={handleProfileTap}>
-              {authorAvatar ? (
-                <RNImage source={{ uri: authorAvatar }} style={igCardStyles.overlayAvatar} />
-              ) : null}
+              <Avatar uri={authorAvatar} name={post.author.name} size={26} colors={colors} />
               <View style={{ flexShrink: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={igCardStyles.overlayUsername} numberOfLines={1}>{post.author.name}</Text>
-                  {typeLabel ? (
-                    <Text style={igCardStyles.overlayTypeLabel} numberOfLines={1}>· {typeLabel}</Text>
-                  ) : null}
-                </View>
-                {post.location ? (
-                  <Text style={igCardStyles.overlayLocation} numberOfLines={1}>{post.location}</Text>
-                ) : null}
+                <Text style={igCardStyles.overlayUsername} numberOfLines={1}>{post.author.name}</Text>
+                <Text style={igCardStyles.overlayLocation} numberOfLines={1}>
+                  {post.location ? `${post.location} · ` : ''}{timeAgo(post.timestamp)}
+                </Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.overlayMenuBtn} onPress={handleMenuPress}>
-              <Text style={igCardStyles.overlayMenuDots}>···</Text>
+            <TouchableOpacity style={igCardStyles.overlayMenuBtn} onPress={handleMenuPress} accessibilityLabel="Post options">
+              <MoreHorizontal size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
-          {/* Right action rail — like / comment / share / repost / save, centered vertically */}
+          {/* Right action rail */}
           <View style={igCardStyles.actionRail} pointerEvents="box-none">
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleLike}>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleLike} accessibilityLabel={liked ? 'Unlike' : 'Like'}>
               <View style={igCardStyles.railIconWrap}>
-                <Heart size={24} strokeWidth={2} color={liked ? '#EF4444' : '#FFFFFF'} fill={liked ? '#EF4444' : 'none'} />
+                <Heart size={26} strokeWidth={2} color={liked ? '#FF3040' : '#FFFFFF'} fill={liked ? '#FF3040' : 'none'} />
               </View>
-              <Text style={igCardStyles.railCount}>{likeCount > 0 ? likeCount : ' '}</Text>
+              <Text style={igCardStyles.railCount}>{likeCount > 0 ? formatCount(likeCount) : ' '}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onComment(post)}>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onComment(post)} accessibilityLabel="Comments">
               <View style={igCardStyles.railIconWrap}>
-                <MessagesSquare size={24} strokeWidth={2} color="#FFFFFF" />
+                <MessageCircle size={26} strokeWidth={2} color="#FFFFFF" />
               </View>
-              <Text style={igCardStyles.railCount}>{commentCount > 0 ? commentCount : ' '}</Text>
+              <Text style={igCardStyles.railCount}>{commentCount > 0 ? formatCount(commentCount) : ' '}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)}>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={() => onShare(post)} accessibilityLabel="Share">
               <View style={igCardStyles.railIconWrap}>
-                <Forward size={24} strokeWidth={2} color="#FFFFFF" />
+                <Send size={24} strokeWidth={2} color="#FFFFFF" style={{ transform: [{ rotate: '15deg' }] }} />
               </View>
+              <Text style={igCardStyles.railCount}> </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave}>
+            <TouchableOpacity style={igCardStyles.railBtn} onPress={handleSave} accessibilityLabel={saved ? 'Unsave' : 'Save'}>
               <View style={igCardStyles.railIconWrap}>
-                <Bookmark size={24} strokeWidth={2} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
+                <Bookmark size={25} strokeWidth={2} color="#FFFFFF" fill={saved ? '#FFFFFF' : 'none'} />
               </View>
             </TouchableOpacity>
+            {isVideo ? (
+              <TouchableOpacity style={[igCardStyles.railBtn, { marginTop: 8 }]} onPress={onToggleMute} accessibilityLabel={muted ? 'Unmute' : 'Mute'}>
+                <View style={igCardStyles.railIconWrap}>
+                  {muted ? <VolumeX size={20} color="#FFFFFF" /> : <Volume2 size={20} color="#FFFFFF" />}
+                </View>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
-          {/* Bottom caption — overlaid on the lower half of the media */}
-          {post.caption ? (
-            <View style={igCardStyles.commentPreview} pointerEvents="none">
+          {/* Bottom caption — tap to open the post + comments */}
+          <TouchableOpacity activeOpacity={0.85} style={[igCardStyles.commentPreview, { bottom: height ? tabBarSpace : 0 }]} onPress={onPress}>
+            {post.caption ? (
               <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
-                <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{' '}
+                <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{post.author.name}</Text>{'  '}
                 {post.caption}
               </Text>
-            </View>
-          ) : null}
+            ) : null}
+            <Text style={igCardStyles.commentPreviewLinkText}>
+              {commentCount > 0 ? `View all ${commentCount} comment${commentCount === 1 ? '' : 's'}` : 'Add a comment…'}
+            </Text>
+          </TouchableOpacity>
 
           {/* Live voice layer — only the active post holds a connection */}
           {isActive ? (
@@ -530,67 +591,53 @@ function PostCard({
               userId={currentUser?.id ?? ''}
               userName={currentUser?.fullName || currentUser?.username || 'You'}
               avatar={currentUser?.avatar || null}
+              bottomOffset={height ? tabBarSpace : 0}
             />
           ) : null}
         </View>
       ) : (
-        <>
-          {/* Header — text-only post keeps its own row (no media to overlay) */}
-          <View style={igCardStyles.header}>
-            <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
-              {authorAvatar ? (
-                <RNImage source={{ uri: authorAvatar }} style={igCardStyles.avatar} />
-              ) : null}
-              <View style={igCardStyles.headerText}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
-                  {typeLabel && (
-                    <Text style={[igCardStyles.typeLabel, { color: colors.textTertiary }]}>· {typeLabel}</Text>
-                  )}
-                </View>
-                {post.location ? (
-                  <Text style={[igCardStyles.location, { color: colors.textTertiary }]}>{post.location}</Text>
-                ) : null}
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={igCardStyles.menuBtn} onPress={handleMenuPress}>
-              <Text style={[igCardStyles.menuDots, { color: colors.textSecondary }]}>···</Text>
-            </TouchableOpacity>
-          </View>
-        </>
+        <View style={igCardStyles.header}>
+          <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
+            <Avatar uri={authorAvatar} name={post.author.name} size={36} colors={colors} />
+            <View style={igCardStyles.headerText}>
+              <Text style={[igCardStyles.username, { color: colors.text }]}>{post.author.name}</Text>
+              <Text style={[igCardStyles.location, { color: colors.textTertiary }]}>
+                {post.location ? `${post.location} · ` : ''}{timeAgo(post.timestamp)}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={igCardStyles.menuBtn} onPress={handleMenuPress} accessibilityLabel="Post options">
+            <MoreHorizontal size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       )}
 
-      {/* Text-only post: larger caption area */}
-      {!post.media && post.caption ? (
-        <View style={[igCardStyles.textOnlyArea, height ? { flex: 1 } : undefined]}>
-          <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={height ? 20 : 6}>
-            {post.caption}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Below-media content — text-only posts only (media posts overlay everything) */}
+      {/* Text-only post */}
       {!post.media ? (
         <>
-          {/* Action Bar — Instagram style: ♡ 💬 ✈  |  🔖 */}
+          <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={[igCardStyles.textOnlyArea, height ? { flex: 1 } : undefined]}>
+            <Text style={[igCardStyles.textOnlyCaption, { color: colors.text }]} numberOfLines={height ? 18 : 6}>
+              {post.caption}
+            </Text>
+          </TouchableOpacity>
+
           <View style={igCardStyles.actionBar}>
             <View style={igCardStyles.actionLeft}>
-              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleLike}>
-                <Star size={26} color={liked ? '#EF4444' : colors.text} fill={liked ? '#EF4444' : 'none'} />
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleLike} accessibilityLabel={liked ? 'Unlike' : 'Like'}>
+                <Heart size={26} color={liked ? '#FF3040' : colors.text} fill={liked ? '#FF3040' : 'none'} />
               </TouchableOpacity>
-              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onComment(post)}>
-                <MessagesSquare size={26} color={colors.text} />
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onComment(post)} accessibilityLabel="Comments">
+                <MessageCircle size={26} color={colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onShare(post)}>
-                <Forward size={23} color={colors.text} />
+              <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={() => onShare(post)} accessibilityLabel="Share">
+                <Send size={24} color={colors.text} style={{ transform: [{ rotate: '15deg' }] }} />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleSave}>
+            <TouchableOpacity style={igCardStyles.actionIconBtn} onPress={handleSave} accessibilityLabel={saved ? 'Unsave' : 'Save'}>
               <Bookmark size={26} color={colors.text} fill={saved ? colors.text : 'none'} />
             </TouchableOpacity>
           </View>
 
-          {/* Likes count */}
           <View style={igCardStyles.likesRow}>
             <Text style={[igCardStyles.likesText, { color: colors.text }]}>
               {liked ? (
@@ -601,25 +648,23 @@ function PostCard({
             </Text>
           </View>
 
-          {/* Comments link */}
-          {(post.stats.comments > 0 || post.comments_list?.length) && (
-            <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
-              <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
-                View all {post.stats.comments || post.comments_list?.length || 0} comments
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Timestamp */}
-          <View style={igCardStyles.timestampRow}>
-            <Text style={[igCardStyles.timestamp, { color: colors.textTertiary }]}>
-              {timeAgo(post.timestamp)}
+          <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
+            <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
+              {commentCount > 0 ? `View all ${commentCount} comment${commentCount === 1 ? '' : 's'}` : 'Add a comment…'}
             </Text>
-          </View>
+          </TouchableOpacity>
+          <View style={{ height: 14 }} />
         </>
       ) : null}
     </View>
   );
+}
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}K`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+  return String(n);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -636,7 +681,11 @@ export default function FeedScreen() {
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost, createPost, toggleLike, feedStories, userStories, createStory, getAllPosts, hidePost } = useSocial();
+  const { deletePost, createPost, feedStories, userStories, getAllPosts, hidePost, refreshPosts, isFeedLoading } = useSocial();
+  // Videos start muted (like Reels); one tap toggles sound for the whole feed.
+  const [muted, setMuted] = useState(true);
+  // "Posting…" banner while media uploads and the post saves.
+  const [posting, setPosting] = useState<{ thumb?: string; failed?: boolean; retry?: () => void } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -700,6 +749,7 @@ export default function FeedScreen() {
   }, [authUser?.id]);
 
   const queryClient = useQueryClient();
+  const listRef = useRef<FlatList<FeedPost>>(null);
   const [userPosts, setUserPosts] = useState<FeedPost[]>([]);
   // ── Mentions strip: posts where someone I follow @-mentioned me ──
   const [mentionThumbs, setMentionThumbs] = useState<{ id: string; mediaUrl: string; isVideo: boolean; postId: string }[]>([]);
@@ -764,8 +814,7 @@ export default function FeedScreen() {
   // Load feed posts: show ONLY network posts (people you follow + people who follow you + yourself), newest first
   const lastPostCountRef = useRef('');
   const loadFeedPosts = useCallback(() => {
-    const posts = getAllPosts();
-    if (!posts || posts.length === 0) return;
+    const posts = getAllPosts() || [];
     const allPosts: FeedPost[] = posts
       .filter((p: any) => {
         const authorId = p.user?.id || p.user_id;
@@ -781,7 +830,8 @@ export default function FeedScreen() {
         type: ((p.mediaType === 'video' || p.videoUrl || p.video_url) ? 'video' : (p.imageUrl || p.image_url) ? 'photo' : 'text') as PostType,
         author: { name: p.user?.name || p.author_name || 'Unknown', avatar: p.user?.avatar || '', userId: p.user?.id || p.user_id },
         category: p.category || 'General',
-        timestamp: p.timestamp || p.created_at || '',
+        // createdAt is the real ISO time; `timestamp` may already be "2h".
+        timestamp: p.createdAt || p.created_at || p.timestamp || '',
         caption: p.content || p.caption || '',
         media: p.imageUrl || p.image_url || p.mediaUri || p.videoUrl || p.video_url || '',
         videoUrl: p.videoUrl || p.video_url,
@@ -789,12 +839,12 @@ export default function FeedScreen() {
         tags: p.tags || [],
         stats: { saves: p.shares || 0, comments: p.comments || 0 },
       }))
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    // Only update if post list actually changed
-    const key = allPosts.map(p => p.id).join(',');
+      .sort((a, b) => (new Date(b.timestamp).getTime() || 0) - (new Date(a.timestamp).getTime() || 0));
+    // Only update if the posts (or their counts) actually changed
+    const key = allPosts.map(p => `${p.id}:${p.likes}:${p.stats.comments}`).join(',');
     if (key === lastPostCountRef.current) return;
     lastPostCountRef.current = key;
-    setUserPosts(prev => (allPosts.length > 0 || prev.length > 0) ? allPosts : prev);
+    setUserPosts(allPosts);
   }, [getAllPosts, networkIds, authUser?.id]);
 
   // Run the loader whenever the posts provider signals new data (mount/refresh)
@@ -805,14 +855,8 @@ export default function FeedScreen() {
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [viewerMedia, setViewerMedia] = useState<string | null>(null);
   const [viewerMediaIsVideo, setViewerMediaIsVideo] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-
-  // Clear initial load state after first render
-  useEffect(() => {
-    const timer = setTimeout(() => setIsInitialLoad(false), 400);
-    return () => clearTimeout(timer);
-  }, []);
+  // Skeletons only while the very first load is still running.
+  const isInitialLoad = isFeedLoading && userPosts.length === 0;
 
   // ── Transform stories into StoryUser[] format for StoriesViewer ──
   const storyUsers = useMemo((): StoryUser[] => {
@@ -863,6 +907,13 @@ export default function FeedScreen() {
     }));
   }, [userStories, feedStories, networkIds]);
 
+  const myStoryIndex = useMemo(() => storyUsers.findIndex((u) => u.userId === authUser?.id), [storyUsers, authUser?.id]);
+
+  const toggleMute = useCallback(() => {
+    Haptics.selectionAsync();
+    setMuted((m) => !m);
+  }, []);
+
   const filteredPosts = useMemo(() => {
     // ── Deduplication: prefer context data over hardcoded ──
     const seenIds = new Set<string>();
@@ -903,42 +954,46 @@ export default function FeedScreen() {
     setRefreshing(true);
     setTagFilter(null);
     try {
-      // Await query invalidation so the spinner stops once data is refetched
-      await queryClient.invalidateQueries({ queryKey: ['supabasePosts'] });
-      setRefreshKey((k) => k + 1);
-      loadMentions();
+      // The feed reads from refreshPosts (posts + live like/comment counts).
+      // Before, pull-to-refresh only invalidated an unused query, so new
+      // posts never appeared until the app restarted.
+      await Promise.all([
+        refreshPosts(),
+        loadNetwork(),
+        loadMentions(),
+        queryClient.invalidateQueries({ queryKey: ['supabaseStories'] }),
+      ]);
     } finally {
       setRefreshing(false);
     }
-  }, [queryClient, loadMentions]);
+  }, [queryClient, loadMentions, loadNetwork, refreshPosts]);
 
-  const handleSavePost = (postId: string) => {
-    setSavedIds((prev) => {
+  const handleSavePost = useCallback((postId: string) => {
+    if (!authUser?.id) return;
+    const wasSaved = savedIds.has(postId);
+    const flip = (save: boolean) => setSavedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(postId)) {
-        next.delete(postId);
-        // Remove from Supabase
-        if (authUser?.id) supabase.from('saved_posts').delete().eq('user_id', authUser.id).eq('post_id', postId).then(({ error }) => {
-          if (error) console.warn('[Feed] Unsave failed:', error.message);
-        });
-      } else {
-        next.add(postId);
-        // Save to Supabase
-        if (authUser?.id) supabase.from('saved_posts').insert({ user_id: authUser.id, post_id: postId, created_at: new Date().toISOString() }).then(({ error }) => {
-          if (error) console.warn('[Feed] Save failed:', error.message);
-        });
-      }
+      if (save) next.add(postId); else next.delete(postId);
       return next;
     });
-  };
+    flip(!wasSaved);
+    const request = wasSaved
+      ? supabase.from('saved_posts').delete().eq('user_id', authUser.id).eq('post_id', postId)
+      : supabase.from('saved_posts').upsert({ user_id: authUser.id, post_id: postId }, { onConflict: 'user_id,post_id' });
+    request.then(({ error }) => {
+      if (error) {
+        flip(wasSaved); // put it back so the icon matches the server
+        Alert.alert(wasSaved ? 'Could not unsave' : 'Could not save', 'Check your connection and try again.');
+      }
+    });
+  }, [authUser?.id, savedIds]);
 
   const handleSharePost = async (post: FeedPost) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const link = post.videoUrl || post.media;
+    const text = [`${post.author.name} on Apparently`, post.caption, link].filter(Boolean).join('\n\n');
     try {
-      await Share.share({
-        message: post.caption,
-        url: post.media,
-      });
+      await Share.share(Platform.OS === 'ios' && link ? { message: [`${post.author.name} on Apparently`, post.caption].filter(Boolean).join('\n\n'), url: link } : { message: text });
     } catch (err) {
       // user cancelled share — ignore
     }
@@ -971,56 +1026,26 @@ export default function FeedScreen() {
   const VideoPlayer = AppVideo;
 
   const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
-    const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const timestamp = new Date().toISOString();
-    const isVideoPost = createMediaType === 'video';
-
-    // Display at 9:16 Reels proportions (1080×1920) — media fills with center crop
-    let displayHeight: number | undefined;
-    let displayWidth: number | undefined;
-    if (data.mediaWidth && data.mediaHeight && data.mediaWidth > 0) {
-      displayHeight = FEED_MEDIA_HEIGHT;
-      displayWidth = SCREEN_WIDTH;
-    }
-
-    const newPost: FeedPost = {
-      id,
-      type: isVideoPost ? 'video' : 'photo',
-      author: {
-        name: 'You',
-        avatar: userAvatar,
-        userId: authUser?.id,
-      },
-      category: data.category || createCategory || 'General',
-      timestamp: 'Just now',
-      caption: data.caption,
-      media: data.mediaUri,
-      videoUrl: isVideoPost ? data.mediaUri : undefined,
-      mediaWidth: displayWidth,
-      mediaHeight: displayHeight,
-      likes: 0,
-      tags: createCategory ? [createCategory] : [],
-      stats: { saves: 0, comments: 0 },
+    const isVideoPost = !!data.mediaUri && createMediaType === 'video';
+    const run = async () => {
+      setPosting({ thumb: isVideoPost ? undefined : data.mediaUri });
+      const id = await createPost(data.caption, data.mediaUri, {
+        mediaType: data.mediaUri ? (isVideoPost ? 'video' : 'image') : undefined,
+      });
+      if (id) {
+        setPosting(null);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Keep the profile grid in sync
+        addUserPost({ id, caption: data.caption, mediaUri: data.mediaUri, timestamp: new Date().toISOString() });
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setPosting({ thumb: isVideoPost ? undefined : data.mediaUri, failed: true, retry: run });
+      }
     };
+    run();
 
-    // Add to feed
-    setUserPosts((prev) => [newPost, ...prev]);
-
-    // Persist to SocialContext so posts appear in getAllPosts() and profile grid.
-    // Fire-and-forget: if the DB write fails, the post still shows locally.
-    try { createPost(data.caption, data.mediaUri, { mediaType: isVideoPost ? 'video' : 'image' }); } catch (err: any) {
-      console.warn('[Feed] createPost failed (post will show locally):', err?.message || err);
-    }
-
-    // Share to profile
-    addUserPost({
-      id,
-      caption: data.caption,
-      mediaUri: data.mediaUri,
-      timestamp,
-    });
-
-    // Close modals
+    // Close the composer right away; the banner shows progress.
     setShowCreate(false);
     setCreatePreloadMedia(null);
     setCreateCategory(null);
@@ -1035,6 +1060,7 @@ export default function FeedScreen() {
         setShowCamera(true);
       }},
       { text: 'Write Text Post', onPress: () => {
+        setCreateMediaType('photo');
         setCreatePreloadMedia(null);
         setCreatePreloadMediaWidth(undefined);
         setCreatePreloadMediaHeight(undefined);
@@ -1046,6 +1072,8 @@ export default function FeedScreen() {
 
   // Called when user captures from InstagramCamera
   const handleCameraCapture = (media: CapturedMedia) => {
+    // The camera captures photos; reset in case a video was picked earlier.
+    setCreateMediaType('photo');
     setCreatePreloadMedia(media.uri);
     setCreatePreloadMediaWidth(media.width);
     setCreatePreloadMediaHeight(media.height);
@@ -1066,12 +1094,18 @@ export default function FeedScreen() {
     });
     if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
-      setCreatePreloadMedia(asset.uri);
-      setCreateMediaType(asset.type === 'video' ? 'video' : 'photo');
       if (asset.type === 'video' && asset.duration && asset.duration > 60000) {
         Alert.alert('Video too long', 'Please select a video under 60 seconds.');
         return;
       }
+      if (asset.fileSize && asset.fileSize > 100 * 1024 * 1024) {
+        Alert.alert('File too large', 'Please pick something under 100 MB.');
+        return;
+      }
+      setCreatePreloadMedia(asset.uri);
+      setCreatePreloadMediaWidth(asset.width);
+      setCreatePreloadMediaHeight(asset.height);
+      setCreateMediaType(asset.type === 'video' ? 'video' : 'photo');
       setShowCamera(false);
       showTabBar();
       setShowCreate(true);
@@ -1134,39 +1168,63 @@ export default function FeedScreen() {
           </View>
         )}
 
-        {/* ── Stories Row (fixed header) ── */}
-        {storyUsers.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-              marginBottom: 6,
-              gap: 8,
+        {/* ── Stories Row — always shown so you can add a story ── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 0, paddingVertical: 4, marginBottom: 4, gap: 8 }}
+        >
+          <StoryRing
+            avatar={userAvatar}
+            name="Your story"
+            hasUnviewed={myStoryIndex >= 0}
+            isAddStory={myStoryIndex < 0}
+            onPress={() => {
+              if (myStoryIndex >= 0) {
+                setStoryViewerStartIndex(myStoryIndex);
+                setShowStoriesViewer(true);
+              } else {
+                setShowCreateStory(true);
+              }
             }}
-          >
-            <StoryRing
-              avatar={userAvatar}
-              name="Your Story"
-              hasUnviewed={false}
-              isAddStory
-              onPress={() => setShowCreateStory(true)}
-            />
-            {storyUsers.map((storyUser, idx) => (
+          />
+          {storyUsers.map((storyUser, idx) => (
+            storyUser.userId === authUser?.id ? null : (
               <StoryRing
                 key={storyUser.userId}
                 avatar={storyUser.avatar}
-                name={storyUser.name === 'You' ? 'Your Story' : storyUser.name}
+                name={storyUser.name}
                 hasUnviewed
                 onPress={() => {
                   setStoryViewerStartIndex(idx);
                   setShowStoriesViewer(true);
                 }}
               />
-            ))}
-          </ScrollView>
-        )}
+            )
+          ))}
+        </ScrollView>
+
+        {/* ── Posting progress ── */}
+        {posting ? (
+          <View style={[styles.postingBar, { backgroundColor: colors.surface }]}>
+            {posting.thumb ? <RNImage source={{ uri: posting.thumb }} style={styles.postingThumb} /> : <View style={[styles.postingThumb, { backgroundColor: colors.border }]} />}
+            <Text style={{ flex: 1, color: posting.failed ? '#EF4444' : colors.text, fontWeight: '600', fontSize: 14 }}>
+              {posting.failed ? "Couldn't post — check your connection" : 'Posting…'}
+            </Text>
+            {posting.failed ? (
+              <>
+                <TouchableOpacity onPress={() => posting.retry?.()} style={{ paddingHorizontal: 8 }}>
+                  <Text style={{ color: colors.accent, fontWeight: '700' }}>Retry</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setPosting(null)} accessibilityLabel="Dismiss">
+                  <X size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <ActivityIndicator size="small" color={colors.accent} />
+            )}
+          </View>
+        ) : null}
 
         {/* ── Mentions Strip (fixed header) ── */}
         {mentionThumbs.length > 0 && (
@@ -1219,6 +1277,7 @@ export default function FeedScreen() {
       ) : (
         <View style={{ flex: 1 }} onLayout={(e) => { const h = e.nativeEvent.layout.height; if (h > 0 && Math.abs(h - feedHeight) > 1) setFeedHeight(h); }}>
         <FlatList
+          ref={listRef}
           data={filteredPosts}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -1227,6 +1286,8 @@ export default function FeedScreen() {
               colors={colors}
               height={contentHeight || undefined}
               isActive={item.id === activePostId}
+              muted={muted}
+              onToggleMute={toggleMute}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1256,16 +1317,39 @@ export default function FeedScreen() {
           disableIntervalMomentum
           viewabilityConfig={viewabilityConfig}
           onViewableItemsChanged={onViewableItemsChanged}
+          getItemLayout={contentHeight ? (_, index) => ({ length: contentHeight, offset: contentHeight * index, index }) : undefined}
+          windowSize={5}
+          maxToRenderPerBatch={3}
+          initialNumToRender={2}
+          removeClippedSubviews={Platform.OS === 'android'}
 
-                ListEmptyComponent={() => (
-          <View style={styles.emptyState}>
-            <FileText size={48} color={colors.textTertiary} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No posts yet</Text>
-            <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-              {tagFilter ? `No posts tagged #${tagFilter}.` : `Nothing here right now.`}
-            </Text>
-          </View>
-        )}
+          ListEmptyComponent={() => (
+            <View style={[styles.emptyState, contentHeight ? { height: contentHeight, paddingTop: 0 } : null]}>
+              <View style={[styles.emptyIcon, { backgroundColor: colors.accent + '18' }]}>
+                {tagFilter ? <FileText size={34} color={colors.accent} /> : <Users size={34} color={colors.accent} />}
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {tagFilter ? 'No matching posts' : 'Your feed is quiet'}
+              </Text>
+              <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
+                {tagFilter
+                  ? `No posts tagged #${tagFilter}.`
+                  : 'Posts from people you follow, people who follow you, and you show up here.'}
+              </Text>
+              {!tagFilter ? (
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                  <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.accent }]} onPress={() => router.push('/(tabs)/search' as any)}>
+                    <Search size={16} color="#FFF" />
+                    <Text style={styles.emptyBtnText}>Find people</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={handleCreateTap}>
+                    <Camera size={16} color={colors.text} />
+                    <Text style={[styles.emptyBtnText, { color: colors.text }]}>Create post</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          )}
         />
         </View>
       )}
@@ -1278,7 +1362,13 @@ export default function FeedScreen() {
           onClose={() => setSelectedPost(null)}
           colors={colors}
           onSave={handleSavePost}
-          onPlayVideo={(uri) => { setViewerMediaIsVideo(true); setViewerMedia(uri); }}
+          isSaved={savedIds.has(selectedPost.id)}
+          onPlayVideo={(uri) => { setViewerMediaIsVideo(false); setViewerMedia(uri); }}
+          onOpenProfile={(userId) => {
+            if (!userId) return;
+            setSelectedPost(null);
+            router.push((userId === authUser?.id ? '/(tabs)/profile' : `/user/${userId}`) as any);
+          }}
         />
       )}
 
@@ -1413,7 +1503,12 @@ const styles = StyleSheet.create({
   // List
   listContent: { paddingBottom: 100 },
   // Empty
-  emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 8 },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 8, paddingHorizontal: 24 },
+  emptyIcon: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 11, borderRadius: 22 },
+  emptyBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  postingBar: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, marginBottom: 8 },
+  postingThumb: { width: 36, height: 36, borderRadius: 6 },
   emptyTitle: { fontSize: 18, fontWeight: '700' },
   emptySub: { fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
   // ── Modal Styles ──
@@ -1431,9 +1526,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderBottomWidth: 1,
   },
   detailActionBtn: { padding: 4 },
-  commentsHeader: { fontSize: 15, fontWeight: '700', marginTop: 4, marginBottom: 8 },
+  commentsHeader: { fontSize: 15, fontWeight: '700', marginTop: 12, marginBottom: 8 },
+  detailCount: { fontSize: 14, fontWeight: '700' },
   // Comments in modal
-  commentItem: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
+  commentItem: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 14 },
   commentAvatar: { width: 32, height: 32, borderRadius: 10, marginTop: 2 },
   commentBubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
   commentName: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
@@ -1529,7 +1625,7 @@ const igCardStyles = StyleSheet.create({
   railBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 0 },
   railIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.30)', alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
   railCount: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
-  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 52, paddingLeft: 12, paddingRight: 12, paddingBottom: 10, paddingTop: 12, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10 },
+  commentPreview: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 14, paddingRight: 64, paddingBottom: 10, paddingTop: 10, backgroundColor: 'rgba(0,0,0,0.42)', zIndex: 10 },
   commentPreviewCaption: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.92)', marginBottom: 6, paddingRight: 12 },
   commentPreviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 },
   commentPreviewLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },

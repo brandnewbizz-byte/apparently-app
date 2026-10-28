@@ -18,9 +18,11 @@ interface PostLiveLayerProps {
   userId: string;
   userName: string;
   avatar: string | null;
+  /** Extra space at the bottom (the tab bar sits over the post). */
+  bottomOffset?: number;
 }
 
-export default function PostLiveLayer({ postId, userId, userName, avatar }: PostLiveLayerProps) {
+export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0 }: PostLiveLayerProps) {
   const voice = usePostVoiceRoom({ postId, userId, userName, enabled: !!userId });
 
   // Our mic is "talking" when it's on and unmuted — bridged into presence so
@@ -49,12 +51,12 @@ export default function PostLiveLayer({ postId, userId, userName, avatar }: Post
       </View>
 
       {/* Active speakers — bottom-left, above the voice controls */}
-      <View style={{ position: 'absolute', bottom: 152, left: 12, zIndex: 12 }} pointerEvents="none">
+      <View style={{ position: 'absolute', bottom: 100 + bottomOffset, left: 12, zIndex: 12 }} pointerEvents="none">
         <ActiveSpeakers participants={presence.participants} speakingIds={voice.speakingIds} />
       </View>
 
       {/* Voice controls — bottom-center, above the comment preview (which reaches ~102px tall) */}
-      <View style={{ position: 'absolute', bottom: 112, left: 0, right: 0, alignItems: 'center', zIndex: 13 }}>
+      <View style={{ position: 'absolute', bottom: 60 + bottomOffset, left: 0, right: 0, alignItems: 'center', zIndex: 13 }}>
         <PostVoiceControls
           listening={voice.isListening}
           micActive={voice.isMicActive}

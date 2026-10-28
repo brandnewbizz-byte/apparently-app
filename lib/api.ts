@@ -28,21 +28,36 @@ export async function getPosts() {
     .in('id', userIds);
   const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
-  // Server-authoritative like counts: read actual post_likes rows (the posts.likes
-  // column is not maintained on like/unlike), so the displayed count never drifts.
-  let likeCountById = new Map<string, number>();
+  // Server-authoritative counts: the posts.likes / posts.comments columns are
+  // not maintained by any trigger, so count the real post_likes / post_comments
+  // rows. Also work out which posts the signed-in viewer has liked, so the
+  // heart state follows the account (not whatever phone they used last).
   const postIds = data.map((p: any) => p.id);
-  const { data: likeRows, error: likesErr } = await supabase
-    .from('post_likes')
-    .select('post_id')
-    .in('post_id', postIds);
+  const { data: sessionData } = await supabase.auth.getSession();
+  const viewerId = sessionData?.session?.user?.id ?? null;
+
+  const [{ data: likeRows, error: likesErr }, { data: commentRows, error: commentsErr }] = await Promise.all([
+    supabase.from('post_likes').select('post_id, user_id').in('post_id', postIds),
+    supabase.from('post_comments').select('post_id').in('post_id', postIds),
+  ]);
+
+  const likeCountById = new Map<string, number>();
+  const likedByMe = new Set<string>();
   if (likesErr) {
     console.error('[getPosts] Error fetching like counts:', likesErr.message);
-  } else if (likeRows) {
-    likeCountById = (likeRows as { post_id: string }[]).reduce((m, r) => {
-      m.set(r.post_id, (m.get(r.post_id) || 0) + 1);
-      return m;
-    }, new Map<string, number>());
+  } else {
+    for (const r of (likeRows || []) as { post_id: string; user_id: string }[]) {
+      likeCountById.set(r.post_id, (likeCountById.get(r.post_id) || 0) + 1);
+      if (viewerId && r.user_id === viewerId) likedByMe.add(r.post_id);
+    }
+  }
+  const commentCountById = new Map<string, number>();
+  if (commentsErr) {
+    console.error('[getPosts] Error fetching comment counts:', commentsErr.message);
+  } else {
+    for (const r of (commentRows || []) as { post_id: string }[]) {
+      commentCountById.set(r.post_id, (commentCountById.get(r.post_id) || 0) + 1);
+    }
   }
 
   // Merge profile data into each post
@@ -50,7 +65,9 @@ export async function getPosts() {
     const profile = profileMap.get(p.user_id);
     return {
       ...p,
-      likes: likeCountById.get(p.id) ?? p.likes ?? 0,
+      likes: likesErr ? (p.likes ?? 0) : (likeCountById.get(p.id) ?? 0),
+      comments: commentsErr ? (p.comments ?? 0) : (commentCountById.get(p.id) ?? 0),
+      liked_by_me: likedByMe.has(p.id),
       user: profile ? {
         id: profile.id,
         name: profile.full_name,
