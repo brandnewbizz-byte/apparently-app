@@ -20,9 +20,11 @@ interface PostLiveLayerProps {
   avatar: string | null;
   /** Extra space at the bottom (the tab bar sits over the post). */
   bottomOffset?: number;
+  /** Space taken by the floating top bar. */
+  topOffset?: number;
 }
 
-export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0 }: PostLiveLayerProps) {
+export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0, topOffset = 0 }: PostLiveLayerProps) {
   const voice = usePostVoiceRoom({ postId, userId, userName, enabled: !!userId });
 
   // Our mic is "talking" when it's on and unmuted — bridged into presence so
@@ -42,7 +44,7 @@ export default function PostLiveLayer({ postId, userId, userName, avatar, bottom
   return (
     <>
       {/* Presence pill — top-left, below the author overlay (author pill is ~54px tall with a location line) */}
-      <View style={{ position: 'absolute', top: 60, left: 12, zIndex: 12 }}>
+      <View style={{ position: 'absolute', top: 60 + topOffset, left: 12, zIndex: 12 }}>
         <PostPresenceIndicator
           presenceCount={presence.presenceCount}
           talkingCount={presence.talkingCount}

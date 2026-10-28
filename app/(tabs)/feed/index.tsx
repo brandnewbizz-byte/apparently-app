@@ -6,7 +6,9 @@ import {
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   MessageCircle, MoreHorizontal, Volume2, VolumeX, Camera, Users
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { setStatusBarStyle } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -48,7 +50,6 @@ import SkeletonCard from '@/components/SkeletonCard';
 import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostComposer';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
-import { useActiveFeedPost } from '@/hooks/useActiveFeedPost';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import AppVideo from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
@@ -59,6 +60,9 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 // Reels-style 9:16 portrait container (1080×1920 proportions)
 const FEED_ASPECT = 9 / 16; // width:height
 const FEED_MEDIA_HEIGHT = Math.round(SCREEN_WIDTH / FEED_ASPECT);
+// Floating top bar (stories + actions) that hovers over the feed
+const STORY_SIZE = 40;
+const FLOAT_BAR_HEIGHT = 52; // below the status bar
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -362,6 +366,7 @@ function PostCard({
   isActive,
   muted,
   onToggleMute,
+  topOffset = 0,
 }: {
   post: FeedPost;
   colors: any;
@@ -379,6 +384,8 @@ function PostCard({
   isActive?: boolean;
   muted: boolean;
   onToggleMute: () => void;
+  /** Space taken by the floating top bar (keeps overlays below it). */
+  topOffset?: number;
 }) {
   const saved = !!isSavedProp;
   const { interactions, toggleLike } = useSocial();
@@ -522,7 +529,7 @@ function PostCard({
           </Pressable>
 
           {/* Author overlay — avatar + name on the content, top-left */}
-          <View style={igCardStyles.authorOverlay} pointerEvents="box-none">
+          <View style={[igCardStyles.authorOverlay, { top: 10 + topOffset }]} pointerEvents="box-none">
             <TouchableOpacity style={igCardStyles.authorOverlayLeft} onPress={handleProfileTap}>
               <Avatar uri={authorAvatar} name={post.author.name} size={26} colors={colors} />
               <View style={{ flexShrink: 1 }}>
@@ -592,11 +599,12 @@ function PostCard({
               userName={currentUser?.fullName || currentUser?.username || 'You'}
               avatar={currentUser?.avatar || null}
               bottomOffset={height ? tabBarSpace : 0}
+              topOffset={topOffset}
             />
           ) : null}
         </View>
       ) : (
-        <View style={igCardStyles.header}>
+        <View style={[igCardStyles.header, { paddingTop: 10 + topOffset }]}>
           <TouchableOpacity style={igCardStyles.headerLeft} onPress={handleProfileTap}>
             <Avatar uri={authorAvatar} name={post.author.name} size={36} colors={colors} />
             <View style={igCardStyles.headerText}>
@@ -676,7 +684,16 @@ function formatCount(n: number): string {
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const floatBarSpace = insets.top + FLOAT_BAR_HEIGHT;
+  // Light status-bar icons while the feed is showing (they sit on the dark
+  // top fade); restore the theme's style when leaving the tab.
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light');
+      return () => setStatusBarStyle(isDark ? 'light' : 'dark');
+    }, [isDark]),
+  );
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
@@ -710,7 +727,22 @@ export default function FeedScreen() {
   const contentHeight = feedHeight > 0 ? feedHeight : 0;
 
   // ── Live Voice Feed: active-post detection (TikTok-style snap paging) ──
-  const { activePostId, viewabilityConfig, onViewableItemsChanged } = useActiveFeedPost();
+  // Each post is exactly one page tall, so the active post is simply
+  // round(scrollY / pageHeight). (FlatList viewability callbacks proved
+  // unreliable with full-screen paging — they stopped firing entirely.)
+  const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (settleTimer.current) clearTimeout(settleTimer.current); }, []);
+  const trackActive = useCallback((y: number, pageHeight: number) => {
+    if (pageHeight <= 0) return;
+    const idx = Math.max(0, Math.round(y / pageHeight));
+    if (idx === activeIndexRef.current) return;
+    activeIndexRef.current = idx;
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    // Short settle so fast flicks don't spin up a video/voice room per post.
+    settleTimer.current = setTimeout(() => setActiveIndex(idx), 200);
+  }, []);
 
   // ── Scroll-away header: hides on scroll up, reappears on scroll down ──
   const headerTranslateY = useRef(new Animated.Value(0)).current;
@@ -914,7 +946,7 @@ export default function FeedScreen() {
     setMuted((m) => !m);
   }, []);
 
-  const filteredPosts = useMemo(() => {
+  const filteredPosts = useMemo<FeedPost[]>(() => {
     // ── Deduplication: prefer context data over hardcoded ──
     const seenIds = new Set<string>();
     const seenContentKeys = new Set<string>();
@@ -949,6 +981,8 @@ export default function FeedScreen() {
     // Keep newest-first order (posts are pre-sorted in loadFeedPosts)
     return all;
   }, [userPosts, tagFilter]);
+
+  const activePostId = filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1130,83 +1164,99 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header — pinned in normal flow (content below sits flush against it) */}
-      <View
-        style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}
-      >
-        <View style={styles.headerRow}>
-          <View style={styles.brandRow}>
-            <View style={styles.brandIcon}>
-              <Sparkles size={16} color="#FFF" />
-            </View>
-            <Text style={[styles.brandName, { color: colors.text }]}>Apparently</Text>
-          </View>
-          <View style={styles.headerActions}>
+      {/* Floating top bar — stories + actions hover over the feed, so posts
+          get the whole screen (the old logo header + story row took ~25%). */}
+      <View style={[styles.floatBar, { paddingTop: insets.top + 4 }]} pointerEvents="box-none">
+        <LinearGradient
+          colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0)']}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+        <View style={styles.floatRow} pointerEvents="box-none">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ alignItems: 'center', paddingLeft: 9, paddingRight: 6 }}
+          >
+            <StoryRing
+              avatar={userAvatar}
+              name="Your story"
+              size={STORY_SIZE}
+              showName={false}
+              hasUnviewed={myStoryIndex >= 0}
+              isAddStory={myStoryIndex < 0}
+              onPress={() => {
+                if (myStoryIndex >= 0) {
+                  setStoryViewerStartIndex(myStoryIndex);
+                  setShowStoriesViewer(true);
+                } else {
+                  setShowCreateStory(true);
+                }
+              }}
+            />
+            {storyUsers.map((storyUser, idx) => (
+              storyUser.userId === authUser?.id ? null : (
+                <StoryRing
+                  key={storyUser.userId}
+                  avatar={storyUser.avatar}
+                  name={storyUser.name}
+                  size={STORY_SIZE}
+                  showName={false}
+                  hasUnviewed
+                  onPress={() => {
+                    setStoryViewerStartIndex(idx);
+                    setShowStoriesViewer(true);
+                  }}
+                />
+              )
+            ))}
+            {/* Mentions from people you follow — small tiles after the stories */}
+            {mentionThumbs.length > 0 ? <View style={styles.floatDivider} /> : null}
+            {mentionThumbs.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                activeOpacity={0.85}
+                onPress={() => { setViewerMedia(t.mediaUrl); setViewerMediaIsVideo(t.isVideo); }}
+                style={styles.mentionTile}
+                accessibilityLabel="Post you were mentioned in"
+              >
+                {t.isVideo ? (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
+                    <Play size={14} color="#FFF" fill="#FFF" />
+                  </View>
+                ) : (
+                  <RNImage source={{ uri: t.mediaUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                )}
+                <View style={styles.mentionBadge}><Text style={styles.mentionBadgeText}>@</Text></View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <View style={styles.floatIcons}>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/search' as any)}
               hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-              style={{ marginRight: 16 }}
               accessibilityLabel="Search"
             >
-              <Search size={24} color={colors.text} strokeWidth={2} />
+              <Search size={23} color="#FFFFFF" strokeWidth={2.2} />
             </TouchableOpacity>
-            <View style={{ marginLeft: 6 }}>
-              <HeaderActivityButtons size={24} />
-            </View>
+            <HeaderActivityButtons size={23} color="#FFFFFF" gap={18} />
           </View>
         </View>
 
-        {/* Tag filter active indicator */}
-        {tagFilter && (
-          <View style={[styles.tagFilterBar, { borderBottomColor: colors.border }]}>
-            <View style={[styles.tagFilterPill, { backgroundColor: colors.accent + '15' }]}>
-              <Text style={[styles.tagFilterText, { color: colors.accent }]}>#{tagFilter}</Text>
-              <TouchableOpacity onPress={() => setTagFilter(null)}>
-                <X size={12} color={colors.accent} />
-              </TouchableOpacity>
-            </View>
+        {tagFilter ? (
+          <View style={[styles.tagFilterPill, { backgroundColor: 'rgba(0,0,0,0.55)', marginLeft: 12, marginTop: 6 }]}>
+            <Text style={[styles.tagFilterText, { color: '#FFF' }]}>#{tagFilter}</Text>
+            <TouchableOpacity onPress={() => setTagFilter(null)} accessibilityLabel="Clear filter">
+              <X size={12} color="#FFF" />
+            </TouchableOpacity>
           </View>
-        )}
-
-        {/* ── Stories Row — always shown so you can add a story ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 0, paddingVertical: 4, marginBottom: 4, gap: 8 }}
-        >
-          <StoryRing
-            avatar={userAvatar}
-            name="Your story"
-            hasUnviewed={myStoryIndex >= 0}
-            isAddStory={myStoryIndex < 0}
-            onPress={() => {
-              if (myStoryIndex >= 0) {
-                setStoryViewerStartIndex(myStoryIndex);
-                setShowStoriesViewer(true);
-              } else {
-                setShowCreateStory(true);
-              }
-            }}
-          />
-          {storyUsers.map((storyUser, idx) => (
-            storyUser.userId === authUser?.id ? null : (
-              <StoryRing
-                key={storyUser.userId}
-                avatar={storyUser.avatar}
-                name={storyUser.name}
-                hasUnviewed
-                onPress={() => {
-                  setStoryViewerStartIndex(idx);
-                  setShowStoriesViewer(true);
-                }}
-              />
-            )
-          ))}
-        </ScrollView>
+        ) : null}
 
         {/* ── Posting progress ── */}
         {posting ? (
-          <View style={[styles.postingBar, { backgroundColor: colors.surface }]}>
+          <View style={[styles.postingBar, { backgroundColor: colors.surface, marginHorizontal: 12, marginTop: 6 }]}>
             {posting.thumb ? <RNImage source={{ uri: posting.thumb }} style={styles.postingThumb} /> : <View style={[styles.postingThumb, { backgroundColor: colors.border }]} />}
             <Text style={{ flex: 1, color: posting.failed ? '#EF4444' : colors.text, fontWeight: '600', fontSize: 14 }}>
               {posting.failed ? "Couldn't post — check your connection" : 'Posting…'}
@@ -1225,57 +1275,22 @@ export default function FeedScreen() {
             )}
           </View>
         ) : null}
-
-        {/* ── Mentions Strip (fixed header) ── */}
-        {mentionThumbs.length > 0 && (
-          <View style={{ marginBottom: 6 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text, paddingHorizontal: 16, marginBottom: 8 }}>Mentions</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
-            >
-              {mentionThumbs.map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  activeOpacity={0.85}
-                  onPress={() => { setViewerMedia(t.mediaUrl); setViewerMediaIsVideo(t.isVideo); }}
-                  style={{ width: 76, height: 76, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border, position: 'relative' }}
-                >
-                  {t.isVideo && VideoPlayer ? (
-                    <VideoPlayer
-                      source={{ uri: t.mediaUrl }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="cover"
-                      shouldPlay={false}
-                      isMuted
-                    />
-                  ) : (
-                    <RNImage source={{ uri: t.mediaUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                  )}
-                  {t.isVideo && (
-                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' }}>
-                      <Play size={18} color="#FFF" fill="#FFF" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
       </View>
 
       {isInitialLoad ? (
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 100 }}
+          contentContainerStyle={{ paddingTop: floatBarSpace + 8, paddingBottom: insets.bottom + 100 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
         >
           <SkeletonCard count={5} shimmerColor={colors.accent + '30'} baseColor={colors.surface} />
         </ScrollView>
       ) : (
         <View style={{ flex: 1 }} onLayout={(e) => { const h = e.nativeEvent.layout.height; if (h > 0 && Math.abs(h - feedHeight) > 1) setFeedHeight(h); }}>
+        {/* Mount the list only once the page height is known, so every post
+            is one exact page from the first frame (mixing measured and fixed
+            heights left the list unable to render posts further down). */}
+        {contentHeight > 0 ? (
         <FlatList
           ref={listRef}
           data={filteredPosts}
@@ -1288,6 +1303,7 @@ export default function FeedScreen() {
               isActive={item.id === activePostId}
               muted={muted}
               onToggleMute={toggleMute}
+              topOffset={floatBarSpace}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setSelectedPost(item);
@@ -1308,23 +1324,23 @@ export default function FeedScreen() {
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             handleTabBarScroll(y);
+            trackActive(y, contentHeight);
           }}
+          onMomentumScrollEnd={(e) => trackActive(e.nativeEvent.contentOffset.y, contentHeight)}
           scrollEventThrottle={16}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} progressViewOffset={floatBarSpace} />}
           decelerationRate="fast"
           snapToInterval={contentHeight || undefined}
           snapToAlignment="start"
           disableIntervalMomentum
-          viewabilityConfig={viewabilityConfig}
-          onViewableItemsChanged={onViewableItemsChanged}
-          getItemLayout={contentHeight ? (_, index) => ({ length: contentHeight, offset: contentHeight * index, index }) : undefined}
+          getItemLayout={(_, index) => ({ length: contentHeight, offset: contentHeight * index, index })}
           windowSize={5}
           maxToRenderPerBatch={3}
           initialNumToRender={2}
           removeClippedSubviews={Platform.OS === 'android'}
 
           ListEmptyComponent={() => (
-            <View style={[styles.emptyState, contentHeight ? { height: contentHeight, paddingTop: 0 } : null]}>
+            <View style={[styles.emptyState, contentHeight ? { height: contentHeight, paddingTop: floatBarSpace } : null]}>
               <View style={[styles.emptyIcon, { backgroundColor: colors.accent + '18' }]}>
                 {tagFilter ? <FileText size={34} color={colors.accent} /> : <Users size={34} color={colors.accent} />}
               </View>
@@ -1351,6 +1367,7 @@ export default function FeedScreen() {
             </View>
           )}
         />
+        ) : null}
         </View>
       )}
 
@@ -1450,6 +1467,13 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  floatBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30, elevation: 30, paddingBottom: 14 },
+  floatRow: { height: FLOAT_BAR_HEIGHT - 4, flexDirection: 'row', alignItems: 'center' },
+  floatIcons: { flexDirection: 'row', alignItems: 'center', gap: 18, paddingLeft: 10, paddingRight: 16 },
+  floatDivider: { width: 1, height: 26, backgroundColor: 'rgba(255,255,255,0.35)', marginHorizontal: 6 },
+  mentionTile: { width: 36, height: 36, borderRadius: 9, overflow: 'hidden', marginHorizontal: 3, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)', backgroundColor: '#222' },
+  mentionBadge: { position: 'absolute', right: 1, bottom: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: '#7C3AED', alignItems: 'center', justifyContent: 'center' },
+  mentionBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '800', marginTop: -1 },
   // Header
   header: { paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
   headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },

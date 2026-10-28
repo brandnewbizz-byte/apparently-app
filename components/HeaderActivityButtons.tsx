@@ -13,9 +13,10 @@ import { useMessaging } from '@/contexts/MessagingContext';
  *  ♡  Activity (notifications) — red dot when there's anything new
  *  ✈  Messages — red count badge for unread conversations
  */
-export default function HeaderActivityButtons({ size = 25 }: { size?: number }) {
+export default function HeaderActivityButtons({ size = 25, color, gap }: { size?: number; color?: string; gap?: number }) {
   const router = useRouter();
   const { colors } = useTheme();
+  const iconColor = color || colors.text;
   const { unreadCount: unreadNotifications } = useNotifications();
   const { conversations } = useMessaging();
   const unreadThreads = conversations.filter((c) => (c.unreadCount || 0) > 0).length;
@@ -39,7 +40,7 @@ export default function HeaderActivityButtons({ size = 25 }: { size?: number }) 
   };
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, gap !== undefined && { gap }]}>
       <TouchableOpacity
         onPress={() => go('/notifications')}
         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
@@ -47,7 +48,7 @@ export default function HeaderActivityButtons({ size = 25 }: { size?: number }) 
         testID="header-notifications"
       >
         <Animated.View style={{ transform: [{ scale: pop }] }}>
-          <Heart size={size} color={colors.text} strokeWidth={2} />
+          <Heart size={size} color={iconColor} strokeWidth={2} />
           {unreadNotifications > 0 && <View style={[styles.dot, { borderColor: colors.background }]} />}
         </Animated.View>
       </TouchableOpacity>
@@ -59,7 +60,7 @@ export default function HeaderActivityButtons({ size = 25 }: { size?: number }) 
         testID="header-messages"
       >
         <View>
-          <Send size={size - 1} color={colors.text} strokeWidth={2} style={{ transform: [{ rotate: '15deg' }] }} />
+          <Send size={size - 1} color={iconColor} strokeWidth={2} style={{ transform: [{ rotate: '15deg' }] }} />
           {unreadThreads > 0 && (
             <View style={[styles.badge, { borderColor: colors.background }]}>
               <Text style={styles.badgeText}>{unreadThreads > 9 ? '9+' : unreadThreads}</Text>

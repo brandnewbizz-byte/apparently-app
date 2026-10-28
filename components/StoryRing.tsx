@@ -30,6 +30,8 @@ interface StoryRingProps {
   isAddStory?: boolean;
   /** Tap handler */
   onPress: () => void;
+  /** Show the name under the ring (default: true) */
+  showName?: boolean;
 }
 
 // ── Component ──
@@ -42,6 +44,7 @@ export default function StoryRing({
   nameSize = 12,
   isAddStory = false,
   onPress,
+  showName = true,
 }: StoryRingProps) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -83,9 +86,10 @@ export default function StoryRing({
     // "Add Story" button with plus icon
     return (
       <TouchableOpacity
-        style={styles.container}
+        style={[styles.container, !showName && { width: size, marginHorizontal: 3 }]}
         onPress={handlePress}
         activeOpacity={0.7}
+        accessibilityLabel={name}
       >
         <Animated.View
           style={[
@@ -137,26 +141,29 @@ export default function StoryRing({
               />
               {/* Plus icon overlay */}
               <View style={styles.plusIconContainer}>
-                <Text style={styles.plusIcon}>+</Text>
+                <Text style={[styles.plusIcon, { fontSize: Math.max(16, size * 0.4) }]}>+</Text>
               </View>
             </View>
           </View>
         </Animated.View>
-        <Text
-          style={[styles.name, { fontSize: nameSize, marginTop: size * 0.08 }]}
-          numberOfLines={1}
-        >
-          {name}
-        </Text>
+        {showName ? (
+          <Text
+            style={[styles.name, { fontSize: nameSize, marginTop: size * 0.08 }]}
+            numberOfLines={1}
+          >
+            {name}
+          </Text>
+        ) : null}
       </TouchableOpacity>
     );
   }
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={[styles.container, !showName && { width: size, marginHorizontal: 3 }]}
       onPress={handlePress}
       activeOpacity={0.7}
+      accessibilityLabel={name}
     >
       <Animated.View
         style={[
@@ -232,12 +239,14 @@ export default function StoryRing({
           </View>
         )}
       </Animated.View>
-      <Text
-        style={[styles.name, { fontSize: nameSize, marginTop: size * 0.08 }]}
-        numberOfLines={1}
-      >
-        {name}
-      </Text>
+      {showName ? (
+        <Text
+          style={[styles.name, { fontSize: nameSize, marginTop: size * 0.08 }]}
+          numberOfLines={1}
+        >
+          {name}
+        </Text>
+      ) : null}
     </TouchableOpacity>
   );
 }
