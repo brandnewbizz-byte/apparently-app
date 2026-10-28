@@ -10,7 +10,6 @@ import {
   Bookmark,
   Trophy,
   
-  Sparkles,
   Wrench,
   Star,
   Heart,
@@ -1842,9 +1841,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
         <View style={styles.headerMain}>
           <View style={styles.logoContainer}>
-            <View style={styles.logoIcon}>
-              <Sparkles size={18} color="#FFF" />
-            </View>
+            <Image source={require('@/assets/images/planner-tab.png')} style={styles.logoImage} resizeMode="contain" accessibilityLabel="Apparently logo" />
             <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
           </View>
           <View style={styles.headerActions}>
@@ -2146,6 +2143,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  logoImage: { width: 40, height: 40 },
   logoIcon: {
     width: 36,
     height: 36,
