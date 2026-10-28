@@ -1,12 +1,54 @@
 import React, { memo, useMemo, useRef } from 'react';
 import { Image, PanResponder, StyleSheet, Text, View } from 'react-native';
-import type { SpotItem } from '@/lib/spot';
+import Svg, { ClipPath, Defs, Image as SvgImage, Polygon } from 'react-native-svg';
+import type { SpotItem, SpotPoint } from '@/lib/spot';
+import { depthScale } from '@/components/spot/RoomScene';
+
+/** Bounding box (0–1, image space) of a cut-out outline. */
+export function cutoutBox(pts: SpotPoint[]) {
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  return { x0, y0, w: Math.max(0.01, x1 - x0), h: Math.max(0.01, y1 - y0) };
+}
+
+const fitLongest = (ratio: number, longest: number) => (ratio >= 1 ? { w: longest, h: longest / ratio } : { w: longest * ratio, h: longest });
 
 /** Box size (pt) of an item before scaling. */
 export function baseSize(it: SpotItem): { w: number; h: number } {
   if (it.kind === 'note') return { w: 132, h: 120 };
-  if (it.kind === 'photo') return { w: 136, h: 158 };
+  if (it.kind === 'photo') {
+    const aspect = it.aspect || 1;
+    if (it.cutout) {
+      const b = cutoutBox(it.cutout);
+      return fitLongest((b.w * aspect) / b.h, 150);
+    }
+    if (it.bare) return fitLongest(aspect, 150);
+    return { w: 136, h: 158 };
+  }
   return { w: 64, h: 64 };
+}
+
+/** A photo clipped to its traced outline, with a white sticker edge. */
+function CutoutImage({ item, w, h }: { item: SpotItem; w: number; h: number }) {
+  const aspect = item.aspect || 1;
+  const IW = 100 * aspect;
+  const IH = 100;
+  const b = cutoutBox(item.cutout || []);
+  const pts = (item.cutout || []).map((p) => `${p.x * IW},${p.y * IH}`).join(' ');
+  const pad = Math.max(b.w * IW, b.h * IH) * 0.05;
+  const vb = `${b.x0 * IW - pad} ${b.y0 * IH - pad} ${b.w * IW + pad * 2} ${b.h * IH + pad * 2}`;
+  const clipId = `cut-${item.id}`;
+  return (
+    <Svg width={w} height={h} viewBox={vb} style={styles.cutShadow}>
+      <Defs>
+        <ClipPath id={clipId}><Polygon points={pts} /></ClipPath>
+      </Defs>
+      <Polygon points={pts} fill="#FFF" stroke="#FFF" strokeWidth={pad * 1.4} strokeLinejoin="round" />
+      {item.imageUrl ? (
+        <SvgImage href={{ uri: item.imageUrl }} x={0} y={0} width={IW} height={IH} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
+      ) : null}
+    </Svg>
+  );
 }
 
 interface Props {
@@ -31,8 +73,11 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
   const y = live?.y ?? item.y;
   const z = live?.z ?? item.z;
   const { w, h } = baseSize(item);
-  const sw = w * item.scale;
-  const sh = h * item.scale;
+  // Things further back in the room look smaller.
+  const depth = depthScale(y);
+  const sw = w * item.scale * depth;
+  const sh = h * item.scale * depth;
+  const k = item.scale * depth;
 
   // Latest values for the gesture handlers (created once).
   const ref = useRef({ item, x, y, canvasW, canvasH, topZ, enabled, onDrag, onDrop, onDoubleTap, onTap, onLongPress });
@@ -64,8 +109,9 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
       g.current.moved = true;
       // Keep the whole item inside the room.
       const { w: bw, h: bh } = baseSize(s.item);
-      const hx = (bw * s.item.scale) / 2 / Math.max(s.canvasW, 1);
-      const hy = (bh * s.item.scale) / 2 / Math.max(s.canvasH, 1);
+      const d = depthScale(s.y);
+      const hx = (bw * s.item.scale * d) / 2 / Math.max(s.canvasW, 1);
+      const hy = (bh * s.item.scale * d) / 2 / Math.max(s.canvasH, 1);
       const nx = Math.min(1 - hx, Math.max(hx, g.current.startX + gs.dx / Math.max(s.canvasW, 1)));
       const ny = Math.min(1 - hy, Math.max(hy, g.current.startY + gs.dy / Math.max(s.canvasH, 1)));
       g.current.last = { x: nx, y: ny };
@@ -107,17 +153,25 @@ function SpotItemView({ item, live, canvasW, canvasH, enabled, topZ, myId, selec
         },
       ]}
       pointerEvents={enabled ? 'auto' : 'none'}
-      accessibilityLabel={item.kind === 'note' ? `Note: ${item.text}` : item.kind === 'sticker' ? `${item.emoji} sticker` : 'Photo'}
+      accessibilityLabel={item.kind === 'note' ? `Note: ${item.text}` : item.kind === 'sticker' ? `${item.emoji} sticker` : item.cutout ? 'Cut-out photo' : 'Photo'}
     >
+      {/* Contact shadow on the floor */}
+      {item.kind !== 'note' ? (
+        <View pointerEvents="none" style={[styles.floorShadow, { width: sw * 0.8, height: Math.max(6, sh * 0.12), borderRadius: sw, bottom: -Math.max(3, sh * 0.05), opacity: beingMoved || selected ? 0.12 : 0.22 }]} />
+      ) : null}
       {item.kind === 'sticker' ? (
-        <Text style={{ fontSize: 46 * item.scale, lineHeight: 56 * item.scale, textAlign: 'center' }}>{item.emoji}</Text>
+        <Text style={{ fontSize: 46 * k, lineHeight: 56 * k, textAlign: 'center' }}>{item.emoji}</Text>
       ) : item.kind === 'note' ? (
-        <View style={[styles.note, { backgroundColor: item.color || '#FEF08A', padding: 10 * item.scale }]}>
-          <Text style={[styles.noteText, { fontSize: 14 * item.scale, lineHeight: 18 * item.scale }]} numberOfLines={6}>{item.text}</Text>
-          <Text style={[styles.noteBy, { fontSize: 10 * item.scale }]} numberOfLines={1}>— {item.ownerId === myId ? 'you' : item.ownerName.split(' ')[0]}</Text>
+        <View style={[styles.note, { backgroundColor: item.color || '#FEF08A', padding: 10 * k }]}>
+          <Text style={[styles.noteText, { fontSize: 14 * k, lineHeight: 18 * k }]} numberOfLines={6}>{item.text}</Text>
+          <Text style={[styles.noteBy, { fontSize: 10 * k }]} numberOfLines={1}>— {item.ownerId === myId ? 'you' : item.ownerName.split(' ')[0]}</Text>
         </View>
+      ) : item.cutout ? (
+        <CutoutImage item={item} w={sw} h={sh} />
+      ) : item.bare ? (
+        item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={[styles.bare, { width: sw, height: sh }]} resizeMode="contain" /> : null
       ) : (
-        <View style={[styles.polaroid, { padding: 6 * item.scale, paddingBottom: 22 * item.scale }]}>
+        <View style={[styles.polaroid, { padding: 6 * k, paddingBottom: 22 * k }]}>
           {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.photo} resizeMode="cover" /> : <View style={[styles.photo, { backgroundColor: '#E5E7EB' }]} />}
         </View>
       )}
@@ -152,6 +206,9 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 5,
   },
   photo: { flex: 1, borderRadius: 2 },
+  bare: { shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 4 } },
+  cutShadow: { shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 6, shadowOffset: { width: 0, height: 5 } },
+  floorShadow: { position: 'absolute', alignSelf: 'center', backgroundColor: '#000' },
   ring: { ...StyleSheet.absoluteFill, borderRadius: 10, borderWidth: 2, borderColor: '#38BDF8', margin: -6 },
   ringRemote: { borderColor: '#F472B6', borderStyle: 'dashed' },
   reactions: { position: 'absolute', bottom: -14, flexDirection: 'row', gap: 3, alignSelf: 'center' },

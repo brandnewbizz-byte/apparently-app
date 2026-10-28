@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, PanResponder, Platform, Share, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Image, PanResponder, Platform, Pressable, Share, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette } from 'lucide-react-native';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette, Mic, Video, VideoOff } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useSpotRoom } from '@/hooks/useSpotRoom';
+import { useSpotVoice } from '@/hooks/useSpotVoice';
+import { useCameraPermissions } from '@/lib/safe-camera';
 import {
   getRoom, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
   type SpotPoint, type SpotRoom,
@@ -20,6 +23,10 @@ import DoodleLayer from '@/components/spot/DoodleLayer';
 import BurstLayer from '@/components/spot/BurstLayer';
 import SpotItemView from '@/components/spot/SpotItemView';
 import { AddSheet, ItemMenu } from '@/components/spot/SpotSheets';
+import RoomScene from '@/components/spot/RoomScene';
+import { MyCameraBubble, RemoteCameraBubbles, type RemoteCam } from '@/components/spot/CameraBubbles';
+import CutoutSheet, { type PhotoStyle, type PickedPhoto } from '@/components/spot/CutoutSheet';
+import InviteSheet from '@/components/spot/InviteSheet';
 
 type Mode = 'move' | 'draw';
 const PEN_WIDTHS = [3, 6, 12];
@@ -52,6 +59,58 @@ export default function SpotRoomScreen() {
   const [uploading, setUploading] = useState(false);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [myStroke, setMyStroke] = useState<SpotPoint[]>([]);
+  const [showInvite, setShowInvite] = useState(false);
+  const [picked, setPicked] = useState<PickedPhoto | null>(null);
+  const [camOn, setCamOn] = useState(false);
+  const [cams, setCams] = useState<Record<string, RemoteCam>>({});
+  const [, requestCamera] = useCameraPermissions();
+
+  // ── Voice (hold to talk) ──────────────────────────────────────────────────
+  const live = useMemo(() => ({ send: room.send, on: room.on }), [room.send, room.on]);
+  const voice = useSpotVoice(live, me);
+  const pressingMic = useRef(false);
+  const micDown = async () => {
+    pressingMic.current = true;
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    const r = await voice.startTalking();
+    if (r === 'denied') Alert.alert('Microphone access needed', 'Allow microphone access in Settings to talk in rooms.');
+    if (r === 'ok' && !pressingMic.current) voice.stopTalking();
+  };
+  const micUp = () => { pressingMic.current = false; voice.stopTalking(); };
+
+  // ── Camera bubbles ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!me) return;
+    const offCam = room.on('cam', (p) => {
+      if (!p?.uid || p.uid === me.id || !p.img) return;
+      setCams((prev) => ({ ...prev, [p.uid]: { uid: p.uid, name: p.name || 'Someone', img: p.img, at: Date.now() } }));
+    });
+    const offCamOff = room.on('camOff', (p) => setCams((prev) => { if (!prev[p?.uid]) return prev; const n = { ...prev }; delete n[p.uid]; return n; }));
+    const sweep = setInterval(() => setCams((prev) => {
+      const stale = Object.values(prev).filter((c) => Date.now() - c.at > 7000);
+      if (!stale.length) return prev;
+      const n = { ...prev };
+      stale.forEach((c) => delete n[c.uid]);
+      return n;
+    }), 2000);
+    return () => { offCam(); offCamOff(); clearInterval(sweep); };
+  }, [room.on, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleCamera = async () => {
+    tap();
+    if (camOn) {
+      setCamOn(false);
+      if (me) room.send('camOff', { uid: me.id });
+      return;
+    }
+    const perm = await requestCamera();
+    if (!perm?.granted) { Alert.alert('Camera access needed', 'Allow camera access in Settings to show your camera in rooms.'); return; }
+    setCamOn(true);
+  };
+  const sendFrame = useCallback((img: string) => {
+    if (me) room.send('cam', { uid: me.id, name: me.name, img });
+  }, [room.send, me]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (me) room.send('camOff', { uid: me.id }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Full-screen room: hide the tab bar while inside.
   useEffect(() => { hideTabBar(); return () => showTabBar(); }, [hideTabBar, showTabBar]);
@@ -141,19 +200,44 @@ export default function SpotRoomScreen() {
     const it = await room.add({ kind: 'note', text, color, x: nearCenter(), y: nearCenter() });
     if (!it) Alert.alert('Not added', 'Check your connection and try again.');
   };
-  const addPhoto = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Photos access needed', 'Allow photo access in Settings to pin a photo.'); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+  const addPhoto = async (source: 'camera' | 'library') => {
+    const perm = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(source === 'camera' ? 'Camera access needed' : 'Photos access needed', 'Allow access in Settings to add photos to the room.');
+      return;
+    }
+    // No built-in crop: it would flatten transparent (already cut-out) PNGs.
+    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.85 };
+    const r = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
     if (r.canceled || !r.assets?.[0]) return;
+    const a = r.assets[0];
+    setShowAdd(false);
+    setPicked({ uri: a.uri, width: a.width || 1, height: a.height || 1, mimeType: a.mimeType });
+  };
+
+  const placePhoto = async (style: PhotoStyle, outline?: SpotPoint[]) => {
+    if (!picked) return;
     setUploading(true);
     try {
-      const url = await uploadImageToStorage(r.assets[0].uri, 'room-files', `spot/${roomId}`);
+      const png = style === 'bare' && (picked.mimeType === 'image/png' || /\.png($|\?)/i.test(picked.uri));
+      // Shrink big camera photos before upload.
+      const small = picked.width > 1280
+        ? await manipulateAsync(picked.uri, [{ resize: { width: 1280 } }], { compress: 0.8, format: png ? SaveFormat.PNG : SaveFormat.JPEG })
+        : { uri: picked.uri };
+      const url = await uploadImageToStorage(small.uri, 'room-files', `spot/${roomId}`, 3, png ? 'image/png' : 'image/jpeg');
       if (!url || url.startsWith('file:')) throw new Error('upload failed');
-      setShowAdd(false);
       setMode('move');
-      const it = await room.add({ kind: 'photo', imageUrl: url, x: nearCenter(), y: nearCenter() });
+      const it = await room.add({
+        kind: 'photo', imageUrl: url, x: nearCenter(), y: 0.55 + Math.random() * 0.2,
+        aspect: picked.width / Math.max(1, picked.height),
+        cutout: style === 'cutout' ? outline : undefined,
+        bare: style === 'bare',
+      });
       if (!it) throw new Error('save failed');
+      tap(Haptics.ImpactFeedbackStyle.Medium);
+      setPicked(null);
     } catch {
       Alert.alert('Photo not added', 'Check your connection and try again.');
     } finally {
@@ -170,6 +254,7 @@ export default function SpotRoomScreen() {
 
   const invite = () => {
     tap();
+    setShowInvite(false);
     Share.share({ message: `Come hang out in my room "${info?.name || 'Spot'}" on Apparently 🎈\n${roomLink(roomId || '')}` }).catch(() => {});
   };
 
@@ -202,6 +287,7 @@ export default function SpotRoomScreen() {
     <View style={{ flex: 1, backgroundColor: theme.colors[0] }}>
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <RoomScene width={size.w} height={size.h} theme={theme} />
 
       {/* ── Canvas ── */}
       <View
@@ -210,7 +296,7 @@ export default function SpotRoomScreen() {
         {...canvasPan.panHandlers}
       >
         <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setSelectedId(null)} disabled={mode === 'draw'} />
-        <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} />
+        <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} grid={false} />
         {size.w > 0 ? things.map((it) => (
           <SpotItemView
             key={it.id}
@@ -258,22 +344,24 @@ export default function SpotRoomScreen() {
           </View>
         </View>
         <View style={styles.avatars}>
-          {room.members.slice(0, 4).map((m, i) => (
-            m.avatar ? (
-              <Image key={m.id} source={{ uri: m.avatar }} style={[styles.avatar, { marginLeft: i ? -10 : 0, borderColor: theme.colors[0] }]} />
+          {room.members.slice(0, 4).map((m, i) => {
+            const talkingNow = m.id === me?.id ? voice.talking : !!voice.speaking[m.id];
+            const ring = talkingNow ? '#22C55E' : theme.colors[0];
+            return m.avatar ? (
+              <Image key={m.id} source={{ uri: m.avatar }} style={[styles.avatar, { marginLeft: i ? -10 : 0, borderColor: ring }]} />
             ) : (
-              <View key={m.id} style={[styles.avatar, styles.avatarFallback, { marginLeft: i ? -10 : 0, borderColor: theme.colors[0] }]}>
+              <View key={m.id} style={[styles.avatar, styles.avatarFallback, { marginLeft: i ? -10 : 0, borderColor: ring }]}>
                 <Text style={styles.avatarInitial}>{(m.name || '?').charAt(0).toUpperCase()}</Text>
               </View>
-            )
-          ))}
+            );
+          })}
         </View>
         {isHost ? (
           <TouchableOpacity onPress={() => setShowThemes((v) => !v)} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Change room theme">
             <Palette size={19} color={fg} />
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity onPress={invite} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Invite friends">
+        <TouchableOpacity onPress={() => { tap(); setShowInvite(true); }} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Invite friends">
           <UserPlus size={19} color={fg} />
         </TouchableOpacity>
       </View>
@@ -290,6 +378,40 @@ export default function SpotRoomScreen() {
           ))}
         </View>
       ) : null}
+
+      {/* ── Who's talking ── */}
+      {(() => {
+        const names = room.members.filter((m) => m.id !== me?.id && voice.speaking[m.id]).map((m) => m.name.split(' ')[0]);
+        if (voice.talking) names.unshift('You');
+        if (!names.length) return null;
+        return (
+          <View pointerEvents="none" style={[styles.talkPill, { top: insets.top + 56 }]}>
+            <Mic size={13} color="#FFF" />
+            <Text style={styles.talkText} numberOfLines={1}>{names.join(', ')} {names.length > 1 || names[0] === 'You' ? 'talking' : 'is talking'}…</Text>
+          </View>
+        );
+      })()}
+
+      {/* ── Camera bubbles ── */}
+      <RemoteCameraBubbles cams={Object.values(cams)} speaking={voice.speaking} />
+      {camOn ? <MyCameraBubble onFrame={sendFrame} onClose={toggleCamera} talking={voice.talking} /> : null}
+
+      {/* ── Mic + camera ── */}
+      <View style={[styles.sideCol, { bottom: insets.bottom + (mode === 'draw' || showReact ? 152 : 100) }]} pointerEvents="box-none">
+        <TouchableOpacity onPress={toggleCamera} style={[styles.sideBtn, camOn && styles.sideBtnOn]} accessibilityLabel={camOn ? 'Turn camera off' : 'Turn camera on'}>
+          {camOn ? <VideoOff size={20} color="#FFF" /> : <Video size={20} color="#111" />}
+        </TouchableOpacity>
+        <Pressable
+          onPressIn={micDown}
+          onPressOut={micUp}
+          style={[styles.micBtn, voice.talking && styles.micBtnOn]}
+          accessibilityLabel="Hold to talk"
+          accessibilityHint="Press and hold to speak to everyone in the room"
+        >
+          <Mic size={26} color="#FFF" />
+        </Pressable>
+        <Text style={[styles.micHint, { color: fg }]}>{voice.talking ? 'Talking…' : 'Hold to talk'}</Text>
+      </View>
 
       {/* ── Draw options ── */}
       {mode === 'draw' ? (
@@ -359,6 +481,15 @@ export default function SpotRoomScreen() {
         onPhoto={addPhoto}
         uploading={uploading}
       />
+      <CutoutSheet photo={picked} busy={uploading} onCancel={() => !uploading && setPicked(null)} onDone={placePhoto} />
+      <InviteSheet
+        visible={showInvite}
+        room={info}
+        me={me}
+        hereIds={room.members.map((m) => m.id)}
+        onClose={() => setShowInvite(false)}
+        onShareLink={invite}
+      />
       <ItemMenu
         item={menuItem}
         myId={me?.id || ''}
@@ -421,6 +552,15 @@ const styles = StyleSheet.create({
   penWidth: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   penWidthOn: { backgroundColor: '#E0F2FE' },
   sep: { width: 1, height: 22, backgroundColor: '#E5E7EB', marginHorizontal: 2 },
+
+  talkPill: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.92)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, maxWidth: '80%' },
+  talkText: { color: '#FFF', fontWeight: '800', fontSize: 12 },
+  sideCol: { position: 'absolute', right: 14, alignItems: 'center', gap: 10 },
+  sideBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', ...shadow },
+  sideBtnOn: { backgroundColor: '#EF4444' },
+  micBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)', ...shadow },
+  micBtnOn: { backgroundColor: '#22C55E', transform: [{ scale: 1.12 }] },
+  micHint: { fontSize: 11, fontWeight: '800', marginTop: -4, textShadowColor: 'rgba(0,0,0,0.25)', textShadowRadius: 3 },
 
   reactBar: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', gap: 4, backgroundColor: '#FFF', borderRadius: 28, paddingHorizontal: 8, paddingVertical: 6, ...shadow },
   reactBtn: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },

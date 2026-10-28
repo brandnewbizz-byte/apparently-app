@@ -29,10 +29,12 @@ interface Props {
   ink: string;
   doodles: SpotItem[];
   live: LiveStroke[];
+  /** Draw the dot grid (off when the 3D room scene is behind). */
+  grid?: boolean;
 }
 
 /** Dot-grid background + every saved and in-progress doodle. */
-function DoodleLayer({ width, height, ink, doodles, live }: Props) {
+function DoodleLayer({ width, height, ink, doodles, live, grid = true }: Props) {
   if (!width || !height) return null;
   return (
     <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -41,7 +43,7 @@ function DoodleLayer({ width, height, ink, doodles, live }: Props) {
           <Circle cx="2" cy="2" r="1.3" fill={ink} />
         </Pattern>
       </Defs>
-      <Rect x="0" y="0" width={width} height={height} fill="url(#dots)" />
+      {grid ? <Rect x="0" y="0" width={width} height={height} fill="url(#dots)" /> : null}
       {doodles.map((d) => (
         <Path
           key={d.id}

@@ -73,6 +73,12 @@ export interface SpotItem {
   imageUrl?: string;
   points?: SpotPoint[];
   width?: number;
+  /** Photo cut-out outline, normalised to the image (0–1). */
+  cutout?: SpotPoint[];
+  /** Photo width / height. */
+  aspect?: number;
+  /** Photo shown without a frame (e.g. an already cut-out PNG sticker). */
+  bare?: boolean;
   /** emoji → user ids who reacted with it */
   reactions: Record<string, string[]>;
 }
@@ -125,6 +131,9 @@ export function mapItem(r: any): SpotItem {
     imageUrl: r.image_url || undefined,
     points: Array.isArray(m.points) ? m.points : undefined,
     width: Number(m.width) || undefined,
+    cutout: Array.isArray(m.cutout) && m.cutout.length > 2 ? m.cutout : undefined,
+    aspect: Number(m.aspect) || undefined,
+    bare: !!m.bare,
     reactions: (m.reactions && typeof m.reactions === 'object') ? m.reactions : {},
   };
 }
@@ -216,6 +225,7 @@ export async function listItems(roomId: string): Promise<SpotItem[]> {
 export async function addItem(roomId: string, me: { id: string; name: string }, item: {
   kind: SpotItemKind; x?: number; y?: number; z: number; scale?: number; rotation?: number;
   emoji?: string; text?: string; color?: string; imageUrl?: string; points?: SpotPoint[]; width?: number;
+  cutout?: SpotPoint[]; aspect?: number; bare?: boolean;
 }): Promise<SpotItem> {
   const { data, error } = await supabase
     .from('virtual_room_objects')
@@ -236,7 +246,7 @@ export async function addItem(roomId: string, me: { id: string; name: string }, 
       owner_name: me.name,
       metadata: {
         emoji: item.emoji, text: item.text, color: item.color,
-        points: item.points, width: item.width, reactions: {},
+        points: item.points, width: item.width, cutout: item.cutout, aspect: item.aspect, bare: item.bare || undefined, reactions: {},
       },
     })
     .select('*')
@@ -260,7 +270,8 @@ export async function updateItemMeta(item: SpotItem, patch: Partial<Pick<SpotIte
   if (patch.text !== undefined) row.notes = patch.text;
   row.metadata = {
     emoji: item.emoji, text: patch.text ?? item.text, color: item.color,
-    points: item.points, width: item.width, reactions: patch.reactions ?? item.reactions,
+    points: item.points, width: item.width, cutout: item.cutout, aspect: item.aspect, bare: item.bare || undefined,
+    reactions: patch.reactions ?? item.reactions,
   };
   const { error } = await supabase.from('virtual_room_objects').update(row).eq('id', item.id);
   if (error) throw error;
@@ -282,3 +293,125 @@ export function toggleReaction(reactions: Record<string, string[]>, emoji: strin
 }
 
 export const roomLink = (id: string) => `rork-app://live/room/${id}`;
+
+
+// ── Invites ───────────────────────────────────────────────────────────────
+export interface SpotPerson { id: string; name: string; username: string; avatar: string | null }
+export interface SpotInvite {
+  id: string;
+  roomId: string;
+  roomName: string;
+  theme: string;
+  fromId: string;
+  fromName: string;
+  fromAvatar: string | null;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
+const mapPerson = (p: any): SpotPerson => ({
+  id: p.id, name: p.full_name || p.username || 'Someone', username: p.username || '', avatar: p.avatar || null,
+});
+
+/** People I follow or who follow me (best invite candidates), or a search. */
+export async function findPeople(myId: string, query = ''): Promise<SpotPerson[]> {
+  const q = query.trim().replace(/[%,()]/g, '');
+  if (q) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, avatar')
+      .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
+      .neq('id', myId)
+      .limit(25);
+    return (data || []).map(mapPerson);
+  }
+  const { data: f } = await supabase
+    .from('follows')
+    .select('follower_id, following_id')
+    .or(`follower_id.eq.${myId},following_id.eq.${myId}`)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  const ids = Array.from(new Set((f || []).map((r: any) => (r.follower_id === myId ? r.following_id : r.follower_id)))).filter((id) => id && id !== myId);
+  if (!ids.length) return [];
+  const { data } = await supabase.from('profiles').select('id, full_name, username, avatar').in('id', ids.slice(0, 100));
+  return (data || []).map(mapPerson).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function sendRoomInvites(room: Pick<SpotRoom, 'id' | 'name' | 'theme'>, me: { id: string; name: string; avatar?: string | null }, people: SpotPerson[]) {
+  if (!people.length) return 0;
+  const rows = people.map((p) => ({
+    user_id: p.id,
+    type: 'room_invite',
+    title: 'Spot invite',
+    body: `${me.name} invited you to "${room.name}"`,
+    actor_id: me.id,
+    actor_name: me.name,
+    actor_avatar: me.avatar || null,
+    read: false,
+    data: { room_id: room.id, room_name: room.name, theme: room.theme, status: 'pending' },
+  }));
+  const { error } = await supabase.from('notifications').insert(rows);
+  if (error) throw error;
+  return rows.length;
+}
+
+function mapInvite(n: any): SpotInvite {
+  const d = n.data || {};
+  return {
+    id: n.id,
+    roomId: d.room_id,
+    roomName: d.room_name || 'A Spot room',
+    theme: d.theme || 'lounge',
+    fromId: n.actor_id,
+    fromName: n.actor_name || 'Someone',
+    fromAvatar: n.actor_avatar || null,
+    status: d.status === 'accepted' || d.status === 'declined' ? d.status : 'pending',
+    createdAt: n.created_at,
+  };
+}
+
+export async function listInvites(myId: string): Promise<SpotInvite[]> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, data, actor_id, actor_name, actor_avatar, created_at')
+    .eq('user_id', myId)
+    .eq('type', 'room_invite')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  const seen = new Set<string>();
+  // Newest invite per room only.
+  return (data || []).map(mapInvite).filter((i) => i.roomId && !seen.has(i.roomId) && seen.add(i.roomId));
+}
+
+/** Accept or decline an invite. Lets the host know when someone accepts. */
+export async function answerInvite(inviteId: string, accept: boolean, me: { id: string; name: string; avatar?: string | null }) {
+  const { data: row } = await supabase.from('notifications').select('id, data, actor_id').eq('id', inviteId).maybeSingle();
+  if (!row) throw new Error('Invite not found');
+  const data = { ...(row.data || {}), status: accept ? 'accepted' : 'declined' };
+  const { error } = await supabase.from('notifications').update({ data, read: true }).eq('id', inviteId);
+  if (error) throw error;
+  if (accept && row.actor_id) {
+    await supabase.from('notifications').insert({
+      user_id: row.actor_id,
+      type: 'general',
+      title: 'Invite accepted',
+      body: `${me.name} joined your room "${data.room_name || 'Spot'}"`,
+      actor_id: me.id,
+      actor_name: me.name,
+      actor_avatar: me.avatar || null,
+      read: false,
+      data: { room_id: data.room_id, room_name: data.room_name, kind: 'room_invite_accepted' },
+    });
+  }
+  return data;
+}
+
+export async function getRooms(ids: string[]): Promise<SpotRoom[]> {
+  if (!ids.length) return [];
+  const { data } = await supabase
+    .from('rooms')
+    .select('id, name, environment, creator_id, creator_name, creator_avatar, visibility, created_at, updated_at')
+    .in('id', ids);
+  return (data || []).map(mapRoom);
+}

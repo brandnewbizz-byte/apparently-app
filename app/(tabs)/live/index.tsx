@@ -7,10 +7,13 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ChevronLeft, Plus, Lock, Globe, X, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, Plus, Lock, Globe, X, Sparkles, Check } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { createRoom, deleteRoom, listRooms, themeFor, SPOT_THEMES, type SpotRoom } from '@/lib/spot';
+import {
+  answerInvite, createRoom, deleteRoom, getRooms, listInvites, listRooms, themeFor, SPOT_THEMES,
+  type SpotInvite, type SpotRoom,
+} from '@/lib/spot';
 
 const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
@@ -61,14 +64,41 @@ export default function SpotLobby() {
   const [theme, setTheme] = useState(SPOT_THEMES[0].id);
   const [privateRoom, setPrivateRoom] = useState(false);
 
+  const [invites, setInvites] = useState<SpotInvite[]>([]);
+  const [joined, setJoined] = useState<SpotRoom[]>([]);
+  const [answering, setAnswering] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    try { setRooms(await listRooms(user?.id)); } catch { /* keep list */ } finally { setLoading(false); }
+    try {
+      const [list, inv] = await Promise.all([listRooms(user?.id), user?.id ? listInvites(user.id).catch(() => []) : Promise.resolve([])]);
+      setRooms(list);
+      setInvites(inv);
+      const acceptedIds = inv.filter((i) => i.status === 'accepted').map((i) => i.roomId);
+      setJoined(acceptedIds.length ? (await getRooms(acceptedIds)).filter((r) => r.creatorId !== user?.id) : []);
+    } catch { /* keep list */ } finally { setLoading(false); }
   }, [user?.id]);
+
+  const respond = async (inv: SpotInvite, accept: boolean) => {
+    if (!user?.id || answering) return;
+    tap();
+    setAnswering(inv.id);
+    try {
+      await answerInvite(inv.id, accept, { id: user.id, name: user.fullName || user.username || 'Someone', avatar: user.avatar || null });
+      setInvites((prev) => prev.map((i) => (i.id === inv.id ? { ...i, status: accept ? 'accepted' : 'declined' } : i)));
+      if (accept) router.push(`/(tabs)/live/room/${inv.roomId}` as any);
+    } catch {
+      Alert.alert('Something went wrong', 'Please try again.');
+    } finally {
+      setAnswering(null);
+    }
+  };
+  const pending = invites.filter((i) => i.status === 'pending');
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const mine = rooms.filter((r) => r.creatorId === user?.id);
-  const open = rooms.filter((r) => r.creatorId !== user?.id);
+  const joinedIds = new Set(joined.map((r) => r.id));
+  const open = rooms.filter((r) => r.creatorId !== user?.id && !joinedIds.has(r.id));
 
   const openRoom = (id: string) => { tap(); router.push(`/(tabs)/live/room/${id}` as any); };
 
@@ -132,6 +162,30 @@ export default function SpotLobby() {
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.textTertiary} />
         ) : (
           <View style={{ paddingHorizontal: 16 }}>
+            {pending.length ? (
+              <>
+                <Text style={[styles.section, { color: colors.text }]}>Invites</Text>
+                {pending.map((inv) => {
+                  const t = themeFor(inv.theme);
+                  return (
+                    <View key={inv.id} style={[styles.invite, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <LinearGradient colors={t.colors} style={styles.inviteArt}><Text style={{ fontSize: 20 }}>{t.emoji}</Text></LinearGradient>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{inv.roomName}</Text>
+                        <Text style={[styles.cardSub, { color: colors.textSecondary }]} numberOfLines={1}>{inv.fromName} invited you · {ago(inv.createdAt)}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => respond(inv, false)} disabled={!!answering} style={[styles.inviteBtn, { backgroundColor: colors.surfaceHighlight }]} accessibilityLabel={`Decline ${inv.roomName}`}>
+                        <X size={16} color={colors.text} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => respond(inv, true)} disabled={!!answering} style={[styles.inviteBtn, { backgroundColor: '#8B5CF6' }]} accessibilityLabel={`Accept ${inv.roomName}`}>
+                        {answering === inv.id ? <ActivityIndicator size="small" color="#FFF" /> : <Check size={16} color="#FFF" strokeWidth={3} />}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </>
+            ) : null}
+
             <Text style={[styles.section, { color: colors.text }]}>Your rooms</Text>
             {mine.length === 0 ? (
               <TouchableOpacity style={[styles.empty, { borderColor: colors.border }]} onPress={() => setShowNew(true)}>
@@ -143,6 +197,15 @@ export default function SpotLobby() {
                 {mine.map((r) => <RoomCard key={r.id} room={r} mine colors={colors} onOpen={() => openRoom(r.id)} onLongPress={() => manage(r)} />)}
               </View>
             )}
+
+            {joined.length ? (
+              <>
+                <Text style={[styles.section, { color: colors.text }]}>{"Rooms you're in"}</Text>
+                <View style={styles.grid}>
+                  {joined.map((r) => <RoomCard key={r.id} room={r} mine={false} colors={colors} onOpen={() => openRoom(r.id)} />)}
+                </View>
+              </>
+            ) : null}
 
             {open.length ? (
               <>
@@ -189,7 +252,7 @@ export default function SpotLobby() {
             <View style={[styles.toggle, { backgroundColor: colors.surfaceHighlight }]}>
               {[
                 { v: false, label: 'Anyone', icon: Globe },
-                { v: true, label: 'Link only', icon: Lock },
+                { v: true, label: 'Invite only', icon: Lock },
               ].map((o) => {
                 const on = privateRoom === o.v;
                 const Icon = o.icon;
@@ -212,6 +275,9 @@ export default function SpotLobby() {
 }
 
 const styles = StyleSheet.create({
+  invite: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 16, padding: 10, marginBottom: 8 },
+  inviteArt: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  inviteBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1 },
   hero: { paddingHorizontal: 20, paddingBottom: 24, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
   back: { width: 40, height: 40, marginLeft: -8, alignItems: 'center', justifyContent: 'center' },

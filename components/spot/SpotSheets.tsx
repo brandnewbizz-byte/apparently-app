@@ -35,7 +35,7 @@ export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploadi
   onClose: () => void;
   onSticker: (emoji: string) => void;
   onNote: (text: string, color: string) => void;
-  onPhoto: () => void;
+  onPhoto: (source: 'camera' | 'library') => void;
   uploading: boolean;
 }) {
   const [tab, setTab] = useState<AddTab>('stickers');
@@ -108,9 +108,12 @@ export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploadi
       ) : (
         <View style={{ alignItems: 'center', gap: 12, paddingVertical: 14 }}>
           <View style={styles.photoIcon}><ImageIcon size={30} color="#7C3AED" /></View>
-          <Text style={styles.photoText}>Pin a photo for everyone — a place, an outfit, a menu, anything.</Text>
-          <TouchableOpacity style={[styles.primary, { alignSelf: 'stretch' }]} onPress={onPhoto} disabled={uploading}>
-            {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Choose a photo</Text>}
+          <Text style={styles.photoText}>Snap something — a car, a pair of shoes, your dog — then trace around it and only that part lands in the room. ✂️</Text>
+          <TouchableOpacity style={[styles.primary, { alignSelf: 'stretch' }]} onPress={() => onPhoto('camera')} disabled={uploading} accessibilityLabel="Take a photo">
+            {uploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>Take a photo</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.primary, { alignSelf: 'stretch', backgroundColor: '#F3F4F6' }]} onPress={() => onPhoto('library')} disabled={uploading} accessibilityLabel="Choose from library">
+            <Text style={[styles.primaryText, { color: '#111' }]}>Choose from library</Text>
           </TouchableOpacity>
         </View>
       )}

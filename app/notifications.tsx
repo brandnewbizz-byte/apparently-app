@@ -18,6 +18,7 @@ import { ChevronLeft, ChevronRight, Heart, Phone, UserPlus, Video, X, Check } fr
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications, AppNotification } from '@/contexts/NotificationsContext';
+import { answerInvite } from '@/lib/spot';
 import { useConnections, ConnectionRequest } from '@/contexts/ConnectionsContext';
 import { supabase } from '@/lib/supabase';
 
@@ -73,7 +74,9 @@ function describe(n: AppNotification): string {
       : `offered to help with${d.request_title ? ` "${d.request_title}"` : ' your request'}.`;
     case 'job_grabbed': return `grabbed your ${d.job_label || 'job'}${d.job_title ? ` "${d.job_title}"` : ''}.`;
     case 'call_request': return 'is calling you.';
-    case 'room_invite': return 'invited you to a live room.';
+    case 'room_invite': return d.status === 'declined'
+      ? `invited you to "${d.room_name || 'a Spot room'}" · declined`
+      : `invited you to hang out in "${d.room_name || 'a Spot room'}" on Spot.`;
     default: return n.body || n.title || '';
   }
 }
@@ -185,7 +188,15 @@ export default function NotificationsScreen() {
     }
     if (n.type === 'room_invite') {
       const roomId = n.data?.room_id;
-      if (roomId) router.push(`/(tabs)/live/room/${roomId}` as any);
+      if (!roomId) return;
+      if (n.data?.status === 'pending' && user) {
+        answerInvite(n.id, true, { id: user.id, name: user.fullName || user.username || 'Someone', avatar: user.avatar }).catch(() => {});
+      }
+      router.push(`/(tabs)/live/room/${roomId}` as any);
+      return;
+    }
+    if (n.type === 'general' && n.data?.room_id) {
+      router.push(`/(tabs)/live/room/${n.data.room_id}` as any);
       return;
     }
     if (n.type === 'call_request') return;
@@ -248,12 +259,22 @@ export default function NotificationsScreen() {
       );
     }
     if (n.type === 'room_invite') {
+      const status = n.data?.status;
+      if (status === 'declined') return null;
       return (
         <View style={styles.actionPair}>
-          <TouchableOpacity style={[styles.smallPill, { backgroundColor: colors.accent }]} onPress={() => openNotification(n)}>
-            <Text style={styles.smallPillText}>Join</Text>
+          <TouchableOpacity style={[styles.smallPill, { backgroundColor: colors.accent }]} onPress={() => openNotification(n)} accessibilityLabel={status === 'accepted' ? 'Join room' : 'Accept invite'}>
+            <Text style={styles.smallPillText}>{status === 'accepted' ? 'Join' : 'Accept'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.roundAction, { backgroundColor: colors.backgroundTertiary }]} onPress={() => remove(n.id)}>
+          <TouchableOpacity
+            style={[styles.roundAction, { backgroundColor: colors.backgroundTertiary }]}
+            accessibilityLabel="Decline invite"
+            onPress={() => {
+              if (status === 'pending' && user) {
+                answerInvite(n.id, false, { id: user.id, name: user.fullName || user.username || 'Someone' }).then(() => refresh()).catch(() => remove(n.id));
+              } else remove(n.id);
+            }}
+          >
             <X size={16} color={colors.text} />
           </TouchableOpacity>
         </View>

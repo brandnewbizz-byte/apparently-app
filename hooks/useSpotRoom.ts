@@ -30,6 +30,8 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   const [bursts, setBursts] = useState<Burst[]>([]);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  // Listeners for the voice / camera events (handled by their own hooks).
+  const busRef = useRef<Map<string, Set<(payload: any) => void>>>(new Map());
   const lastMoveSent = useRef<Record<string, number>>({});
   const lastStrokeSent = useRef(0);
   const myId = me?.id || '';
@@ -58,6 +60,9 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
       .catch((e) => { if (alive) setError(e?.message || 'Could not load this room'); })
       .finally(() => { if (alive) setLoading(false); });
 
+    const emit = (event: string, payload: any) => {
+      busRef.current.get(event)?.forEach((fn) => { try { fn(payload); } catch {} });
+    };
     const channel = supabase.channel(`spot:${roomId}`, { config: { presence: { key: myId }, broadcast: { self: false } } });
     channelRef.current = channel;
 
@@ -88,6 +93,10 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
         setLiveStrokes((prev) => { const n = { ...prev }; delete n[payload.uid]; return n; });
       })
       .on('broadcast', { event: 'burst' }, ({ payload }) => pushBurst(payload.emoji, payload.x))
+      .on('broadcast', { event: 'voice' }, ({ payload }) => emit('voice', payload))
+      .on('broadcast', { event: 'talk' }, ({ payload }) => emit('talk', payload))
+      .on('broadcast', { event: 'cam' }, ({ payload }) => emit('cam', payload))
+      .on('broadcast', { event: 'camOff' }, ({ payload }) => emit('camOff', payload))
       // Saved changes (covers anyone whose broadcast we missed).
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'virtual_room_objects', filter: `room_id=eq.${roomId}` }, (p: any) => upsert(mapItem(p.new)))
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'virtual_room_objects', filter: `room_id=eq.${roomId}` }, (p: any) => {
@@ -114,6 +123,14 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
     channelRef.current?.send({ type: 'broadcast', event, payload }).catch(() => {});
   }, []);
 
+  /** Listen to a live event (voice / talk / cam / camOff). Returns unsubscribe. */
+  const on = useCallback((event: string, fn: (payload: any) => void) => {
+    const map = busRef.current;
+    if (!map.has(event)) map.set(event, new Set());
+    map.get(event)!.add(fn);
+    return () => { map.get(event)?.delete(fn); };
+  }, []);
+
   const sorted = useMemo(() => Object.values(items).sort((a, b) => a.z - b.z), [items]);
   const topZ = useMemo(() => sorted.reduce((m, i) => Math.max(m, i.z), 0), [sorted]);
 
@@ -121,6 +138,7 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   const add = useCallback(async (input: {
     kind: SpotItemKind; x?: number; y?: number; emoji?: string; text?: string; color?: string;
     imageUrl?: string; points?: SpotPoint[]; width?: number;
+    cutout?: SpotPoint[]; aspect?: number; bare?: boolean;
   }) => {
     if (!roomId || !me) return null;
     // Doodles stay underneath everything else.
@@ -222,5 +240,6 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   return {
     items: sorted, loading, error, members, remoteDrag, liveStrokes, bursts, topZ,
     add, dragTo, dropAt, remove, react, resize, editText, bringToFront, burst, strokeProgress, strokeDone,
+    send, on,
   };
 }

@@ -42,6 +42,7 @@ export async function uploadImageToStorage(
   bucket: string,
   folder: string,
   retries = 3,
+  contentType: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
   // Safety: never proceed with remote URIs
   if (!isLocalFileUri(localUri)) return localUri;
@@ -50,7 +51,7 @@ export async function uploadImageToStorage(
   const { File } = await import('expo-file-system');
 
   let lastError: unknown = null;
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`;
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${contentType === 'image/png' ? 'png' : 'jpg'}`;
   const path = `${folder}/${fileName}`;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -62,7 +63,7 @@ export async function uploadImageToStorage(
       const { data, error } = await supabase.storage
         .from(bucket)
         .upload(path, bytes, {
-          contentType: 'image/jpeg',
+          contentType,
           upsert: true,
         });
 
