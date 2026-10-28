@@ -194,7 +194,9 @@ export default function QuickAddModal({ visible, onClose }: QuickAddModalProps) 
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    createStory(undefined, selectedBg, storyText.trim());
+    createStory(undefined, selectedBg, storyText.trim()).then((ok) => {
+      if (!ok) Alert.alert('Story not shared', 'Check your connection and try again.');
+    });
     console.log('[QuickAdd] Story created', { storyText, selectedBg });
     handleClose();
   };

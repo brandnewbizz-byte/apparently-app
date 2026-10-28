@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { localDateKey } from '@/lib/dates';
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -164,7 +165,7 @@ export default function BrowseJobsScreen() {
         }
       }
 
-      const planDate = job.tasks?.date || new Date().toISOString().split('T')[0];
+      const planDate = job.tasks?.date || localDateKey();
       const planLocation = job.type === 'chauffeur' ? 'coworking' as const : job.type === 'driver' ? 'coworking' as const : 'coworking' as const;
       const planTransport = job.type === 'chauffeur' ? 'chauffeur' as const : 'none' as const;
       

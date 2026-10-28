@@ -81,6 +81,11 @@ export interface Story {
   imageUrl: string;
   timestamp: string;
   viewed: boolean;
+  /** ISO time the story was posted (timestamp is a display string). */
+  createdAt?: string;
+  /** Text stories: background color + text. */
+  backgroundColor?: string;
+  textContent?: string;
 }
 
 export type MarketplaceRateType = 'hourly' | 'session' | 'project' | 'custom';

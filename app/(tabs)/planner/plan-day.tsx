@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { localDateKey } from '@/lib/dates';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -130,7 +131,7 @@ interface PlanForm {
   customBlocks: CustomBlock[];
 }
 
-const formatDate = (date: Date): string => date.toISOString().split('T')[0];
+const formatDate = (date: Date): string => localDateKey(date);
 
 const getDateLabel = (dateStr: string): string => {
   const date = new Date(dateStr + 'T12:00:00');
@@ -157,6 +158,8 @@ export default function PlanDayScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { refetch: refetchPlans } = usePlanner();
+  const { date: initialDate } = useLocalSearchParams<{ date?: string }>();
+  const startDate = initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : formatDate(new Date());
 
   const [currentStep, setCurrentStep] = useState<Step>('basics');
   const [isSaving, setIsSaving] = useState(false);
@@ -183,7 +186,7 @@ export default function PlanDayScreen() {
   }, []);
 
   const [form, setForm] = useState<PlanForm>({
-    date: formatDate(new Date()),
+    date: startDate,
     locationType: 'home',
     transport: 'none',
     chauffeur: {

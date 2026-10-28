@@ -9,6 +9,9 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { localDateKey } from '@/lib/dates';
+import { summarizePlan, formatDuration } from '@/components/planner/planSummary';
+import { formatMinutes } from '@/lib/dates';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -32,7 +35,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner } from '@/contexts/PlannerContext';
 
-const formatDate = (date: Date): string => date.toISOString().split('T')[0];
+const formatDate = (date: Date): string => localDateKey(date);
 
 const getDateLabel = (dateStr: string): string => {
   const date = new Date(dateStr + 'T12:00:00');
@@ -59,7 +62,7 @@ export default function PlanDetailScreen() {
   const router = useRouter();
   const { planId } = useLocalSearchParams<{ planId: string }>();
   const { colors } = useTheme();
-  const { getPlanById, deletePlan } = usePlanner();
+  const { getPlanById, deletePlan, setPlanStatus } = usePlanner();
   const [isDeleting, setIsDeleting] = useState(false);
 
   const plan = useMemo(() => getPlanById(planId || ''), [getPlanById, planId]);
@@ -165,6 +168,15 @@ export default function PlanDetailScreen() {
   }
 
   const StatusIcon = getStatusIcon(plan.status);
+  const summary = summarizePlan(plan);
+  const isBlock = summary.kind === 'block' || summary.kind === 'job' || summary.kind === 'quick';
+  const vaSkills: string[] = Array.isArray((planDetails?.va_details as any)?.skills) ? (planDetails!.va_details as any).skills : Array.isArray((planDetails?.va_details as any)?.tools) ? (planDetails!.va_details as any).tools : [];
+  const vaTasks = (planDetails?.va_details as any)?.tasks;
+  const changeStatus = async (status: 'pending' | 'completed' | 'cancelled') => {
+    const ok = await setPlanStatus(plan.id, status);
+    if (ok) { if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
+    else Alert.alert('Not updated', 'Check your connection and try again.');
+  };
   const locationType = planDetails?.location_type || plan.location_type || 'home';
   const transport = planDetails?.transport || plan.transport || 'none';
   const assistance = planDetails?.assistance || [];
@@ -199,7 +211,7 @@ export default function PlanDetailScreen() {
         showsVerticalScrollIndicator={false}
       >
         <LinearGradient
-          colors={['#7B61FF', '#A78BFA']}
+          colors={[summary.color, summary.color + 'B3']}
           style={styles.headerCard}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -214,12 +226,73 @@ export default function PlanDetailScreen() {
               <Text style={styles.statusText}>{plan.status}</Text>
             </View>
           </View>
-          <Text style={styles.headerTitle}>{plan.date_label || `Plan for ${getDateLabel(plan.date)}`}</Text>
+          <Text style={styles.headerTitle}>{summary.title}</Text>
+          {summary.startMins !== null ? (
+            <Text style={styles.headerSub}>
+              {formatMinutes(summary.startMins)}{summary.durationMins ? ` – ${formatMinutes(summary.startMins + summary.durationMins)} · ${formatDuration(summary.durationMins)}` : ''}
+            </Text>
+          ) : null}
           <Text style={styles.headerSub}>
             Created {new Date(plan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </Text>
         </LinearGradient>
 
+        <View style={styles.statusActions}>
+          {plan.status !== 'completed' ? (
+            <TouchableOpacity style={[styles.statusAction, { backgroundColor: '#10B981' }]} onPress={() => changeStatus('completed')}>
+              <CheckCircle size={18} color="#FFF" />
+              <Text style={styles.statusActionText}>Mark done</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={[styles.statusAction, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => changeStatus('pending')}>
+              <AlertCircle size={18} color={colors.text} />
+              <Text style={[styles.statusActionText, { color: colors.text }]}>Not done yet</Text>
+            </TouchableOpacity>
+          )}
+          {plan.status !== 'cancelled' ? (
+            <TouchableOpacity style={[styles.statusAction, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => changeStatus('cancelled')}>
+              <XCircle size={18} color="#EF4444" />
+              <Text style={[styles.statusActionText, { color: '#EF4444' }]}>Cancel</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {isBlock ? (
+          <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Calendar size={20} color={summary.color} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>{summary.label}</Text>
+            </View>
+            <View style={styles.detailsBox}>
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>When</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>
+                  {getDateLabel(plan.date)}{summary.startMins !== null ? ` · ${formatMinutes(summary.startMins)}` : ''}
+                </Text>
+              </View>
+              {summary.durationMins ? (
+                <View style={styles.detailRow}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Length</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{formatDuration(summary.durationMins)}</Text>
+                </View>
+              ) : null}
+              {summary.subtitle ? (
+                <View style={styles.detailRow}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Details</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{summary.subtitle}</Text>
+                </View>
+              ) : null}
+              {planDetails?.notes ? (
+                <View style={styles.detailRow}>
+                  <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Notes</Text>
+                  <Text style={[styles.detailValue, { color: colors.text }]}>{planDetails.notes}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {!isBlock ? (<>
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <MapPin size={20} color={colors.accent} />
@@ -308,14 +381,14 @@ export default function PlanDetailScreen() {
                 <View style={styles.detailRow}>
                   <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Hours</Text>
                   <Text style={[styles.detailValue, { color: colors.text }]}>
-                    {vaDetails.hours} hour{vaDetails.hours > 1 ? 's' : ''}
+                    {vaDetails.hours || '—'} hour{Number(vaDetails.hours) === 1 ? '' : 's'}
                   </Text>
                 </View>
-                {vaDetails.skills.length > 0 && (
+                {vaSkills.length > 0 && (
                   <View style={styles.detailRow}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Skills</Text>
                     <View style={styles.skillsRow}>
-                      {vaDetails.skills.map((skill, idx) => (
+                      {vaSkills.map((skill, idx) => (
                         <View key={idx} style={[styles.skillChip, { backgroundColor: colors.accent + '15' }]}>
                           <Text style={[styles.skillChipText, { color: colors.accent }]}>{skill}</Text>
                         </View>
@@ -323,10 +396,10 @@ export default function PlanDetailScreen() {
                     </View>
                   </View>
                 )}
-                {vaDetails.tasks && (
+                {vaTasks && (Array.isArray(vaTasks) ? vaTasks.length > 0 : true) && (
                   <View style={styles.detailRow}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Tasks</Text>
-                    <Text style={[styles.detailValue, { color: colors.text }]}>{vaDetails.tasks}</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{Array.isArray(vaTasks) ? vaTasks.join(', ') : String(vaTasks)}</Text>
                   </View>
                 )}
                 {vaDetails.budget && (
@@ -335,12 +408,14 @@ export default function PlanDetailScreen() {
                     <Text style={[styles.detailValue, { color: colors.text }]}>{vaDetails.budget}</Text>
                   </View>
                 )}
+                {vaDetails.deadline ? (
                 <View style={styles.detailRow}>
                   <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Deadline</Text>
                   <Text style={[styles.detailValue, { color: colors.text }]}>
-                    {getDateLabel(vaDetails.deadline)}
+                    {/^\d{4}-\d{2}-\d{2}$/.test(vaDetails.deadline) ? getDateLabel(vaDetails.deadline) : vaDetails.deadline}
                   </Text>
                 </View>
+                ) : null}
               </View>
             )}
           </View>
@@ -356,12 +431,16 @@ export default function PlanDetailScreen() {
           </Text>
         </View>
 
+        </>) : null}
+
+        {!isBlock && (assistance.length > 0 || transport === 'chauffeur') ? (
         <View style={[styles.infoCard, { backgroundColor: colors.accent + '10', borderColor: colors.accent + '30' }]}>
           <AlertCircle size={18} color={colors.accent} />
           <Text style={[styles.infoText, { color: colors.text }]}>
             Service requests from this plan have been posted for providers to accept.
           </Text>
         </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -370,6 +449,25 @@ export default function PlanDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  statusActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  statusAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 46,
+    borderRadius: 14,
+  },
+  statusActionText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700' as const,
   },
   headerDelete: {
     padding: 8,

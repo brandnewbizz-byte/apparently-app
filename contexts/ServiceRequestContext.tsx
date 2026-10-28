@@ -6,6 +6,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { logger } from '@/lib/logger';
 import { uuid } from '@/lib/uuid';
+import { isLocalFileUri } from '@/lib/media';
+import { persistableImageUri } from '@/lib/storage';
 
 export type ServiceCategory =
   | 'photography'
@@ -182,25 +184,38 @@ export function ServiceRequestProvider({ children }: { children: React.ReactNode
         if (isLoaded) saveRequests(updated);
         return updated;
       });
-      // Sync to Supabase — use actual DB column names
-      supabase.from('service_requests').insert({
-        id: newRequest.id,
-        requester_id: newRequest.creatorId || '',
-        creator_id: newRequest.creatorId || '',
-        title: newRequest.title,
-        description: sanitizeBundleDesc(newRequest.description),
-        category: newRequest.category,
-        location: newRequest.location,
-        budget: newRequest.budgetMin || newRequest.budgetMax || 0,
-        status: newRequest.status,
-        created_at: newRequest.createdAt,
-        image_url: newRequest.image || null,
-      }).then(({ error }) => {
+      // Sync to Supabase — use actual DB column names. Local photos are
+      // uploaded first so other people can see the thumbnail.
+      (async () => {
+        const ownerId = newRequest.creatorId || user?.id;
+        if (!ownerId) { logger.warn('ServiceRequestContext', 'Not signed in — request kept on this device only'); return; }
+        let imageUrl: string | null = newRequest.image || null;
+        if (imageUrl && isLocalFileUri(imageUrl)) {
+          imageUrl = (await persistableImageUri(imageUrl, 'user-media', `requests/${ownerId}`)) || null;
+        }
+        const { error } = await supabase.from('service_requests').insert({
+          id: newRequest.id,
+          requester_id: ownerId,
+          creator_id: ownerId,
+          title: newRequest.title,
+          description: sanitizeBundleDesc(newRequest.description),
+          category: newRequest.category,
+          location: newRequest.location,
+          budget: newRequest.budgetMax || newRequest.budgetMin || 0,
+          budget_min: newRequest.budgetMin || null,
+          budget_max: newRequest.budgetMax || null,
+          date: newRequest.date || null,
+          time: newRequest.time || null,
+          tags: newRequest.tags || [],
+          status: newRequest.status,
+          created_at: newRequest.createdAt,
+          image_url: imageUrl,
+        });
         if (error) logger.error('ServiceRequestContext', 'Supabase insert failed', { error });
-      });
+      })();
       return newRequest;
     },
-    [isLoaded, saveRequests]
+    [isLoaded, saveRequests, user?.id]
   );
 
   /**

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { Plus } from 'lucide-react-native';
 
 // ── Props ──
 
@@ -32,6 +33,8 @@ interface StoryRingProps {
   onPress: () => void;
   /** Show the name under the ring (default: true) */
   showName?: boolean;
+  /** When set, a small "+" badge is shown that adds a new story. */
+  onAddPress?: () => void;
 }
 
 // ── Component ──
@@ -45,6 +48,7 @@ export default function StoryRing({
   isAddStory = false,
   onPress,
   showName = true,
+  onAddPress,
 }: StoryRingProps) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -78,6 +82,18 @@ export default function StoryRing({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
   };
+
+  const badgeSize = Math.max(16, Math.round(size * 0.42));
+  const addBadge = onAddPress ? (
+    <TouchableOpacity
+      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onAddPress(); }}
+      hitSlop={10}
+      accessibilityLabel="Add to your story"
+      style={[styles.addBadge, { width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2 }]}
+    >
+      <Plus size={badgeSize * 0.7} color="#FFF" strokeWidth={3} />
+    </TouchableOpacity>
+  ) : null;
 
   const borderWidth = size * 0.05;
   const avatarSize = size - borderWidth * 2 - 4;
@@ -145,6 +161,7 @@ export default function StoryRing({
               </View>
             </View>
           </View>
+          {addBadge}
         </Animated.View>
         {showName ? (
           <Text
@@ -238,6 +255,7 @@ export default function StoryRing({
             />
           </View>
         )}
+        {addBadge}
       </Animated.View>
       {showName ? (
         <Text
@@ -299,6 +317,16 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '300',
     marginTop: -2,
+  },
+  addBadge: {
+    position: 'absolute',
+    right: -3,
+    bottom: -3,
+    backgroundColor: '#0095F6',
+    borderWidth: 2,
+    borderColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   name: {
     color: '#333',

@@ -26,14 +26,14 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useMessaging, Message, SharedPost } from '@/contexts/MessagingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  AudioModule,
+  useAudioRecorder,
   createAudioPlayer,
   setAudioModeAsync,
   requestRecordingPermissionsAsync,
   IOSOutputFormat,
   AudioQuality,
 } from 'expo-audio';
-import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
+import type { AudioPlayer, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
 import { generateUsername } from '@/lib/sanitize';
 
@@ -84,7 +84,15 @@ export default function ConversationScreen() {
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUrlCache, setImageUrlCache] = useState<Record<string, string>>({});
   const [viewerImage, setViewerImage] = useState<string | null>(null);
-  const recordingRef = useRef<AudioRecorder | null>(null);
+  // The recorder must be built from full recording options (useAudioRecorder
+  // flattens them per platform). It used to be created with `{}`, which the
+  // Android native side rejects (no file extension) — so recording always
+  // failed with "Could not access microphone".
+  const recorder = useAudioRecorder(RECORDING_OPTIONS);
+  const recordingRef = useRef(false);
+  const recordStartRef = useRef(0);
+  const [voiceSending, setVoiceSending] = useState(false);
+  const [playPos, setPlayPos] = useState(0);
   const soundRef = useRef<AudioPlayer | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollViewInstance>(null);
@@ -164,71 +172,112 @@ export default function ConversationScreen() {
   };
 
   // ── Voice recording ──
+  // Playback after recording must leave "record" mode, or iOS routes audio to
+  // the earpiece (very quiet) and the silent switch mutes it.
+  const playbackMode = () => setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
+
+  const stopPlayback = () => {
+    if (soundRef.current) {
+      try { soundRef.current.pause(); soundRef.current.remove(); } catch {}
+      soundRef.current = null;
+    }
+    setPlayingAudioId(null);
+    setPlayPos(0);
+  };
+
   const startRecording = async () => {
+    if (recordingRef.current || voiceSending) return;
     try {
       const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) {
-        Alert.alert('Permission Required', 'We need microphone access to send voice notes.');
+        Alert.alert('Microphone access needed', 'Allow microphone access in Settings to send voice notes.');
         return;
       }
+      stopPlayback();
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
         shouldPlayInBackground: false,
         shouldRouteThroughEarpiece: false,
       });
-      const rec = new AudioModule.AudioRecorder({});
-      await rec.prepareToRecordAsync(RECORDING_OPTIONS);
-      rec.record();
-      recordingRef.current = rec;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      recordingRef.current = true;
+      recordStartRef.current = Date.now();
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsRecording(true);
       setRecordingDuration(0);
-      recordingTimerRef.current = setInterval(() => setRecordingDuration(p => p + 1), 1000);
-    } catch (e) {
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(Math.floor((Date.now() - recordStartRef.current) / 1000));
+      }, 250);
+    } catch (e: any) {
       console.warn('[Conversation] startRecording failed:', e);
-      Alert.alert('Error', 'Could not access microphone.');
+      recordingRef.current = false;
+      playbackMode();
+      Alert.alert('Couldn\u2019t start recording', e?.message || 'Please try again.');
     }
   };
 
-  const stopRecording = async () => {
+  /** Ends the recording; uploads and sends it unless `send` is false. */
+  const finishRecording = async (send: boolean) => {
     if (!recordingRef.current) return;
-    const rec = recordingRef.current;
-    recordingRef.current = null;
+    recordingRef.current = false;
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    const durSecs = Math.max(0, Math.round((Date.now() - recordStartRef.current) / 1000));
+    setIsRecording(false);
+    setRecordingDuration(0);
     try {
-      setIsRecording(false);
-      if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
-      await rec.stop();
-      const uri = rec.uri;
-      if (!uri) { setRecordingDuration(0); return; }
-      const dur = recordingDuration;
-      setRecordingDuration(0);
-      // Read local bytes and upload to the private `messages` bucket.
+      await recorder.stop();
+    } catch (e) {
+      console.warn('[Conversation] recorder.stop failed:', e);
+    }
+    await playbackMode();
+    if (!send) return;
+    const uri = recorder.uri;
+    if (!uri) {
+      Alert.alert('Voice note not sent', 'Nothing was recorded. Please try again.');
+      return;
+    }
+    if (durSecs < 1) {
+      Alert.alert('Too short', 'Hold on a little longer to record a voice note.');
+      return;
+    }
+    if (!participantId) return;
+    setVoiceSending(true);
+    try {
+      // Read local bytes and upload to the private `messages` bucket. The
+      // recipient's id is the 2nd folder, which the bucket policy uses to let
+      // them read it.
       const bytes = await readLocalFileBytes(uri);
-      const filePath = `voice/${participantId || 'anon'}/${Date.now()}.m4a`;
+      const filePath = `voice/${participantId}/${Date.now()}.m4a`;
       const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: 'audio/m4a' });
       if (uploadErr) {
         console.warn('[Conversation] voice upload failed:', uploadErr.message);
-        Alert.alert('Error', 'Failed to upload voice note');
+        Alert.alert('Voice note not sent', 'Upload failed. Check your connection and try again.');
         return;
       }
-      if (participantId) {
-        sendMessage(participantId, '', undefined, { voice_note: { path: filePath, duration: dur } });
-      }
+      sendMessage(participantId, '', undefined, { voice_note: { path: filePath, duration: durSecs } });
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
     } catch (e: any) {
-      console.warn('[Conversation] stopRecording failed:', e);
-      Alert.alert('Error', e.message || 'Failed to send voice note');
+      console.warn('[Conversation] voice send failed:', e);
+      Alert.alert('Voice note not sent', e?.message || 'Please try again.');
+    } finally {
+      setVoiceSending(false);
     }
   };
 
+  const stopRecording = () => finishRecording(true);
   // Discard an in-progress voice note (trash button while recording)
-  const cancelRecording = async () => {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    setIsRecording(false);
-    setRecordingDuration(0);
-    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
-    try { await rec?.stop(); } catch {}
-  };
+  const cancelRecording = () => finishRecording(false);
+
+  // Leaving the chat stops any recording / playback.
+  useEffect(() => () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (recordingRef.current) { recordingRef.current = false; recorder.stop().catch(() => {}); }
+    if (soundRef.current) { try { soundRef.current.remove(); } catch {} soundRef.current = null; }
+    setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Image attachments (gallery or camera) ──
   const pickImage = async (source: 'library' | 'camera' = 'library') => {
@@ -278,43 +327,41 @@ export default function ConversationScreen() {
   const togglePlayAudio = async (voiceNote: any, messageId: string) => {
     try {
       if (playingAudioId === messageId) {
-        soundRef.current?.pause();
-        soundRef.current?.remove();
-        soundRef.current = null;
-        setPlayingAudioId(null);
+        stopPlayback();
         return;
       }
-      if (soundRef.current) {
-        soundRef.current.pause();
-        soundRef.current.remove();
-        soundRef.current = null;
-      }
+      stopPlayback();
       // Resolve a signed URL from the stored path (bucket is private).
       let audioUrl: string | null = null;
       const path = voiceNote?.path || voiceNote?.url;
       if (path && !String(path).startsWith('http')) {
-        const { data: signed } = await supabase.storage.from('messages').createSignedUrl(path, 3600);
+        const { data: signed, error } = await supabase.storage.from('messages').createSignedUrl(path, 3600);
+        if (error) console.warn('[Conversation] voice sign failed:', error.message);
         audioUrl = signed?.signedUrl || null;
       } else if (path) {
         audioUrl = path; // legacy public-URL fallback
       }
       if (!audioUrl) {
-        Alert.alert('Error', 'Voice note unavailable');
+        Alert.alert('Voice note unavailable', 'This voice note couldn\u2019t be loaded.');
         return;
       }
-      const player = createAudioPlayer({ uri: audioUrl });
+      await playbackMode();
+      const player = createAudioPlayer({ uri: audioUrl }, { updateInterval: 250 });
       soundRef.current = player;
       setPlayingAudioId(messageId);
+      setPlayPos(0);
       player.addListener('playbackStatusUpdate', (status: any) => {
+        if (soundRef.current !== player) return;
+        if (typeof status.currentTime === 'number') setPlayPos(status.currentTime);
         if (status.didJustFinish) {
-          setPlayingAudioId(null);
-          player.remove();
-          soundRef.current = null;
+          stopPlayback();
         }
       });
       player.play();
     } catch (e) {
       console.warn('[Conversation] audio playback error:', e);
+      stopPlayback();
+      Alert.alert('Couldn\u2019t play voice note', 'Please try again.');
     }
   };
 
@@ -530,16 +577,29 @@ export default function ConversationScreen() {
   const renderVoice = (voice: any, message: Message, isMe: boolean) => {
     const playing = playingAudioId === message.id;
     const fg = isMe ? '#FFFFFF' : colors.text;
-    const secs = Number(voice.duration) || 0;
+    const secs = Math.max(0, Math.round(Number(voice.duration) || 0));
+    const progress = playing && secs > 0 ? Math.min(1, playPos / secs) : 0;
+    const shown = playing ? Math.max(0, secs - Math.floor(playPos)) : secs;
+    const pending = String(message.id || '').startsWith('pending-');
     return (
-      <TouchableOpacity style={styles.voiceRow} onPress={() => togglePlayAudio(voice, message.id)} activeOpacity={0.8}>
+      <TouchableOpacity
+        style={styles.voiceRow}
+        onPress={() => togglePlayAudio(voice, message.id)}
+        onLongPress={() => onMessageLongPress(message)}
+        activeOpacity={0.8}
+        disabled={pending}
+        accessibilityLabel={playing ? 'Pause voice note' : `Play voice note, ${secs} seconds`}
+      >
         {playing ? <Pause size={20} color={fg} fill={fg} /> : <Play size={20} color={fg} fill={fg} />}
         <View style={styles.wave}>
           {WAVE.map((h, i) => (
-            <View key={i} style={{ width: 2.5, height: h, borderRadius: 2, backgroundColor: fg, opacity: playing ? 1 : 0.75 }} />
+            <View
+              key={i}
+              style={{ width: 2.5, height: h, borderRadius: 2, backgroundColor: fg, opacity: playing ? (i / WAVE.length <= progress ? 1 : 0.35) : 0.75 }}
+            />
           ))}
         </View>
-        <Text style={[styles.voiceTime, { color: fg }]}>{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</Text>
+        <Text style={[styles.voiceTime, { color: fg }]}>{Math.floor(shown / 60)}:{String(shown % 60).padStart(2, '0')}</Text>
       </TouchableOpacity>
     );
   };
@@ -760,6 +820,7 @@ export default function ConversationScreen() {
                   <Text style={[styles.recTime, { color: colors.text }]}>
                     {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
                   </Text>
+                  <Text style={{ color: colors.textTertiary, fontSize: 13 }}>Recording…</Text>
                 </View>
                 <TouchableOpacity onPress={stopRecording} style={styles.sendTextBtn} accessibilityLabel="Send voice message">
                   <View style={[styles.roundBtn, { backgroundColor: colors.accent }]}>
@@ -793,8 +854,8 @@ export default function ConversationScreen() {
                   </TouchableOpacity>
                 ) : (
                   <View style={styles.composerIcons}>
-                    <TouchableOpacity onPress={startRecording} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Record voice message">
-                      <Mic size={23} color={colors.text} strokeWidth={1.9} />
+                    <TouchableOpacity onPress={startRecording} disabled={voiceSending} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Record voice message">
+                      <Mic size={23} color={voiceSending ? colors.textTertiary : colors.text} strokeWidth={1.9} />
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => pickImage('library')} disabled={imageUploading} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Send a photo">
                       <ImageIcon size={23} color={imageUploading ? colors.textTertiary : colors.text} strokeWidth={1.9} />
@@ -812,6 +873,7 @@ export default function ConversationScreen() {
             )}
           </View>
           {imageUploading && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending photo…</Text>}
+          {voiceSending && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending voice note…</Text>}
         </View>
       </KeyboardAvoidingView>
 

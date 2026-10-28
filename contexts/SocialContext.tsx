@@ -158,7 +158,9 @@ interface SocialState {
   deletePost: (postId: string) => void;
   /** Uploads media, saves the post and resolves with its id (null on failure). */
   createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => Promise<string | null>;
-  createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => void;
+  /** Uploads (if needed) and saves a story; resolves true once it's saved. */
+  createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => Promise<boolean>;
+  deleteStory: (storyId: string) => Promise<boolean>;
   getAllPosts: () => Post[];
   getAllStories: () => Story[];
   // Saved/bookmarked posts
@@ -365,6 +367,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
               imageUrl: s.image_url,
               timestamp: s.timestamp,
               viewed: s.viewed,
+              createdAt: (s as any).created_at,
+              backgroundColor: (s as any).background_color || undefined,
+              textContent: (s as any).text_content || undefined,
             } as Story;
           });
         }
@@ -958,52 +963,45 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }
   }, [queryClient, refreshPosts]);
 
-  const createStory = useCallback((imageUrl?: string, backgroundColor?: string, textContent?: string) => {
+  const createStory = useCallback(async (imageUrl?: string, backgroundColor?: string, textContent?: string): Promise<boolean> => {
     logger.info('SocialContext', 'Creating story...');
-
-    const doCreateStory = (finalImageUrl: string | undefined) => {
-      DatabaseService.getCurrentUserId().then(async (userId) => {
-        if (!userId) {
-          logger.info('SocialContext', 'createStory blocked - no user session');
-          return;
-        }
-
-        const payload = {
-          user_id: userId,
-          image_url: finalImageUrl || '',
-          timestamp: 'Just now',
-          viewed: false,
-          background_color: backgroundColor,
-          text_content: textContent,
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        };
-
-        const res = await DatabaseService.createStory(payload as any);
-        logger.info('SocialContext', 'Story saved', { id: (res as any)?.id });
-        queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
-      });
-    };
-
-    // Upload local images to Supabase Storage before creating the story.
-    // persistableImageUri falls back to a base64 data URI so the story image
-    // never disappears after refresh (never persists a temporary file:// path).
-    if (imageUrl && isLocalFileUri(imageUrl)) {
-      DatabaseService.getCurrentUserId().then((userId) => {
-        if (!userId) { doCreateStory(undefined); return; }
-        persistableImageUri(imageUrl, 'user-media', `stories/${userId}`)
-          .then((finalUrl) => {
-            logger.info('SocialContext', 'Story image made persistable', { hasImage: !!finalUrl });
-            doCreateStory(finalUrl);
-          })
-          .catch(() => {
-            logger.warn('SocialContext', 'Could not persist story image');
-            doCreateStory(undefined);
-          });
-      });
-      return;
+    try {
+      const userId = await DatabaseService.getCurrentUserId();
+      if (!userId) {
+        logger.info('SocialContext', 'createStory blocked - no user session');
+        return false;
+      }
+      // Local photos are uploaded first so the story never points at a temp file.
+      let finalImageUrl = imageUrl;
+      if (imageUrl && isLocalFileUri(imageUrl)) {
+        finalImageUrl = (await persistableImageUri(imageUrl, 'user-media', `stories/${userId}`)) || undefined;
+        if (!finalImageUrl) return false;
+      }
+      if (!finalImageUrl && !textContent?.trim()) return false;
+      const res = await DatabaseService.createStory({
+        user_id: userId,
+        image_url: finalImageUrl || '',
+        timestamp: 'Just now',
+        viewed: false,
+        background_color: backgroundColor,
+        text_content: textContent?.trim() || undefined,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      } as any);
+      logger.info('SocialContext', 'Story saved', { id: (res as any)?.id });
+      await queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
+      return !!res;
+    } catch (e: any) {
+      logger.warn('SocialContext', 'createStory failed', { error: e?.message });
+      return false;
     }
+  }, [queryClient]);
 
-    doCreateStory(imageUrl);
+  const deleteStory = useCallback(async (storyId: string): Promise<boolean> => {
+    const { error } = await supabase.from('stories').delete().eq('id', storyId);
+    if (error) return false;
+    setFeedStories((prev) => prev.filter((st) => st.id !== storyId));
+    queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
+    return true;
   }, [queryClient]);
 
   // ─── API-backed data loading ───
@@ -1127,6 +1125,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     deletePost,
     createPost,
     createStory,
+    deleteStory,
     getAllPosts,
     getAllStories,
     savedPosts: savedPostIds,

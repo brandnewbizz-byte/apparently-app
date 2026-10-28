@@ -14,9 +14,10 @@ import {
   PanResponder,
   StatusBar,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { X, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 
@@ -46,6 +47,10 @@ interface StoriesViewerProps {
   onClose: () => void;
   allStoryUsers: StoryUser[];
   initialUserIndex: number;
+  /** Signed-in user — their own stories get Add / Delete actions. */
+  currentUserId?: string;
+  onAddStory?: () => void;
+  onDeleteStory?: (storyId: string) => Promise<boolean>;
 }
 
 // ── Constants ──
@@ -121,6 +126,9 @@ export default function StoriesViewer({
   onClose,
   allStoryUsers,
   initialUserIndex,
+  currentUserId,
+  onAddStory,
+  onDeleteStory,
 }: StoriesViewerProps) {
   const insets = useSafeAreaInsets();
 
@@ -140,10 +148,44 @@ export default function StoriesViewer({
   const currentStory = currentUser?.stories?.[storyIndex];
   const totalUserStories = currentUser?.stories?.length ?? 0;
 
+  // Start at the tapped user every time the viewer opens.
+  useEffect(() => {
+    if (visible) {
+      setUserIndex(initialUserIndex);
+      setStoryIndex(0);
+      setPaused(false);
+    }
+  }, [visible, initialUserIndex]);
+
   // Reset story index when user changes
   useEffect(() => {
     setStoryIndex(0);
   }, [userIndex]);
+
+  // If a story is deleted out from under us, stay in range.
+  useEffect(() => {
+    if (totalUserStories > 0 && storyIndex > totalUserStories - 1) setStoryIndex(totalUserStories - 1);
+  }, [totalUserStories, storyIndex]);
+
+  const isOwn = !!currentUserId && currentUser?.userId === currentUserId;
+
+  const confirmDelete = useCallback(() => {
+    if (!currentStory || !onDeleteStory) return;
+    setPaused(true);
+    Alert.alert('Delete this story?', undefined, [
+      { text: 'Cancel', style: 'cancel', onPress: () => setPaused(false) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const ok = await onDeleteStory(currentStory.id);
+          if (!ok) { Alert.alert('Could not delete', 'Please try again.'); setPaused(false); return; }
+          if (totalUserStories <= 1) onClose();
+          setPaused(false);
+        },
+      },
+    ]);
+  }, [currentStory, onDeleteStory, totalUserStories, onClose]);
 
   // Reset progress when story changes
   useEffect(() => {
@@ -310,14 +352,22 @@ export default function StoriesViewer({
         {...panResponder.panHandlers}
       >
         {/* Story Media */}
-        <View style={styles.mediaContainer}>
-          <RNImage
-            source={{ uri: currentStory.mediaUrl }}
-            style={styles.media}
-            resizeMode="cover"
-          />
-          {/* Optional text overlay */}
-          {currentStory.textContent ? (
+        <View style={[styles.mediaContainer, !currentStory.mediaUrl && { backgroundColor: currentStory.backgroundColor || '#667eea' }]}>
+          {currentStory.mediaUrl ? (
+            <RNImage
+              source={{ uri: currentStory.mediaUrl }}
+              style={styles.media}
+              resizeMode="cover"
+            />
+          ) : null}
+          {/* Text story (no photo): big centered text on its color */}
+          {!currentStory.mediaUrl && currentStory.textContent ? (
+            <View style={styles.textStory}>
+              <Text style={styles.textStoryText}>{currentStory.textContent}</Text>
+            </View>
+          ) : null}
+          {/* Optional text overlay on a photo */}
+          {currentStory.mediaUrl && currentStory.textContent ? (
             <View style={styles.textOverlay}>
               <Text style={styles.textOverlayText}>
                 {currentStory.textContent}
@@ -339,10 +389,13 @@ export default function StoriesViewer({
         {/* Header: Avatar + Name + Close */}
         <View style={[styles.header, { top: insets.top + 24 }]}>
           <View style={styles.headerLeft}>
-            <RNImage
-              source={{ uri: currentUser.avatar }}
-              style={styles.headerAvatar}
-            />
+            {currentUser.avatar ? (
+              <RNImage source={{ uri: currentUser.avatar }} style={styles.headerAvatar} />
+            ) : (
+              <View style={[styles.headerAvatar, { backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' }]}>
+                <Text style={{ color: '#FFF', fontWeight: '700' }}>{(currentUser.name || '?').charAt(0).toUpperCase()}</Text>
+              </View>
+            )}
             <View style={styles.headerText}>
               <Text style={styles.headerName} numberOfLines={1}>
                 {currentUser.name}
@@ -383,6 +436,23 @@ export default function StoriesViewer({
           onPressOut={handlePressOut}
           activeOpacity={0}
         />
+
+        {/* Your own story: add another / delete this one */}
+        {isOwn && (onAddStory || onDeleteStory) ? (
+          <View style={[styles.ownBar, { bottom: insets.bottom + 18 }]}>
+            {onAddStory ? (
+              <TouchableOpacity style={styles.ownBtn} onPress={onAddStory} accessibilityLabel="Add to your story">
+                <Plus size={18} color="#FFF" />
+                <Text style={styles.ownBtnText}>Add to story</Text>
+              </TouchableOpacity>
+            ) : null}
+            {onDeleteStory ? (
+              <TouchableOpacity style={[styles.ownBtn, styles.ownIconBtn]} onPress={confirmDelete} accessibilityLabel="Delete this story">
+                <Trash2 size={18} color="#FFF" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Previous/Next story indicators */}
         {storyIndex > 0 && (
@@ -441,6 +511,48 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 32,
+  },
+  textStory: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  textStoryText: {
+    color: '#FFF',
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  ownBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  ownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 42,
+    paddingHorizontal: 18,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  ownIconBtn: {
+    paddingHorizontal: 0,
+    width: 42,
+    justifyContent: 'center',
+  },
+  ownBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   textOverlayText: {
     color: '#FFF',

@@ -596,7 +596,7 @@ export default function FeedScreen() {
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost, createPost, feedStories, userStories, getAllPosts, hidePost, refreshPosts, isFeedLoading } = useSocial();
+  const { deletePost, deleteStory, createPost, feedStories, userStories, getAllPosts, hidePost, refreshPosts, isFeedLoading } = useSocial();
   // Videos start muted (like Reels); one tap toggles sound for the whole feed.
   const [muted, setMuted] = useState(true);
   // "Posting…" banner while media uploads and the post saves.
@@ -793,49 +793,42 @@ export default function FeedScreen() {
     // Combine user stories and feed stories, group by user
     const userMap = new Map<string, { name: string; avatar: string; stories: StoryMedia[] }>();
 
-    const addStory = (
-      id: string,
-      userId: string,
-      name: string,
-      avatar: string,
-      imageUrl: string,
-      timestamp: string,
-    ) => {
+    const addStory = (s: any) => {
+      const userId = s.user?.id;
+      if (!userId) return;
       if (!userMap.has(userId)) {
-        userMap.set(userId, { name, avatar, stories: [] });
+        userMap.set(userId, { name: s.user.name || s.user.username || 'User', avatar: s.user.avatar || '', stories: [] });
       }
       const entry = userMap.get(userId)!;
-      // Avoid duplicates
-      if (!entry.stories.find(s => s.id === id)) {
+      if (!entry.stories.find((x) => x.id === s.id)) {
         entry.stories.push({
-          id,
-          mediaUrl: imageUrl,
-          createdAt: timestamp,
+          id: s.id,
+          mediaUrl: s.imageUrl || '',
+          backgroundColor: s.backgroundColor,
+          textContent: s.textContent,
+          createdAt: s.createdAt || new Date().toISOString(),
         });
       }
     };
 
-    // Add user's own stories first (so they appear first)
-    userStories.forEach(s => {
-      addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
-    });
-
-    // Add feed stories (network only)
-    feedStories.forEach(s => {
+    // Your own stories first, then people in your network.
+    userStories.forEach((s) => addStory(s));
+    feedStories.forEach((s) => {
       const authorId = s.user?.id;
-      if (authorId && networkIds && !networkIds.has(authorId)) return;
-      addStory(s.id, s.user.id, s.user.name, s.user.avatar, s.imageUrl, s.timestamp);
+      if (authorId && authorId !== authUser?.id && networkIds && !networkIds.has(authorId)) return;
+      addStory(s);
     });
 
     return Array.from(userMap.entries()).map(([userId, data]) => ({
       userId,
       name: data.name,
       avatar: data.avatar,
+      // Oldest first, like Instagram — you watch a day's stories in order.
       stories: data.stories.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       ),
-    }));
-  }, [userStories, feedStories, networkIds]);
+    })).sort((a, b) => (a.userId === authUser?.id ? -1 : b.userId === authUser?.id ? 1 : 0));
+  }, [userStories, feedStories, networkIds, authUser?.id]);
 
   const myStoryIndex = useMemo(() => storyUsers.findIndex((u) => u.userId === authUser?.id), [storyUsers, authUser?.id]);
 
@@ -1083,7 +1076,7 @@ export default function FeedScreen() {
               size={STORY_SIZE}
               showName={false}
               hasUnviewed={myStoryIndex >= 0}
-              isAddStory={myStoryIndex < 0}
+              onAddPress={() => setShowCreateStory(true)}
               onPress={() => {
                 if (myStoryIndex >= 0) {
                   setStoryViewerStartIndex(myStoryIndex);
@@ -1316,6 +1309,9 @@ export default function FeedScreen() {
         onClose={() => setShowStoriesViewer(false)}
         allStoryUsers={storyUsers}
         initialUserIndex={storyViewerStartIndex}
+        currentUserId={authUser?.id}
+        onAddStory={() => { setShowStoriesViewer(false); setTimeout(() => setShowCreateStory(true), 300); }}
+        onDeleteStory={deleteStory}
       />
 
       {/* ── Create Story ── */}
@@ -1323,6 +1319,7 @@ export default function FeedScreen() {
         visible={showCreateStory}
         onClose={() => setShowCreateStory(false)}
         onStoryCreated={() => setShowCreateStory(false)}
+        myAvatar={authUser?.avatar || ''}
         colors={{
           background: colors.background,
           text: colors.text,

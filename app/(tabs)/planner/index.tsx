@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,842 +11,553 @@ import {
   Modal,
   TextInput,
   Image,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
-  Calendar,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Plus,
   Wand2,
-  MapPin,
-  Car,
-  CreditCard,
   Clock,
-  Trash2,
-  Users,
-  Package,
-  Truck,
-  HelpCircle,
-  BellRing,
   Briefcase,
-  LayoutGrid,
-  Coffee,
-  Dumbbell,
-  Book,
-  Heart,
-  Zap,
-  Star,
-  ShoppingCart,
-  Phone,
   X,
-  Edit3,
   DollarSign,
-  Tag,
-  Search,
-  ListFilter,
-  MessageSquare,
-  UserPlus,
+  BellRing,
   Camera,
   Radio,
+  Check,
+  CalendarDays,
+  LayoutGrid,
+  MapPin,
+  Search,
+  MessageSquare,
 } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePlanner, type Plan } from '@/contexts/PlannerContext';
-import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type ServiceRequest, type RequestStatus } from '@/contexts/ServiceRequestContext';
+import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type RequestStatus } from '@/contexts/ServiceRequestContext';
 import { useOrders } from '@/contexts/OrdersContext';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { localDateKey, dateFromKey, formatMinutes, formatTime12 } from '@/lib/dates';
+import { summarizePlan, sortByTime, formatDuration, BLOCK_CATEGORIES, type PlanSummary } from '@/components/planner/planSummary';
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const TIME_OPTIONS = Array.from({ length: 34 }, (_, i) => 6 * 60 + i * 30); // 6:00 AM → 10:30 PM
+const DURATIONS = [15, 30, 60, 90, 120, 180];
 
-const formatDate = (date: Date): string => date.toISOString().split('T')[0];
-
-const getDateLabel = (dateStr: string): string => {
-  const date = new Date(dateStr + 'T12:00:00');
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  
-  if (dateStr === formatDate(today)) return 'Today';
-  if (dateStr === formatDate(tomorrow)) return 'Tomorrow';
-  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const REQUEST_STATUS: Record<RequestStatus, { label: string; color: string }> = {
+  open: { label: 'Open', color: '#10B981' },
+  in_progress: { label: 'In progress', color: '#F59E0B' },
+  fulfilled: { label: 'Fulfilled', color: '#6B7280' },
+  cancelled: { label: 'Cancelled', color: '#EF4444' },
 };
 
-const formatTime12 = (time: string): string => {
-  if (!time) return '';
-  const [hours, minutes] = time.split(':');
-  const h = parseInt(hours, 10);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${minutes} ${ampm}`;
+const haptic = (kind: 'light' | 'select' | 'success' = 'light') => {
+  if (Platform.OS === 'web') return;
+  if (kind === 'select') Haptics.selectionAsync();
+  else if (kind === 'success') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 };
 
-const getMonthDays = (year: number, month: number): (Date | null)[] => {
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startDayOfWeek = firstDay.getDay();
-  const daysInMonth = lastDay.getDate();
-  
-  const days: (Date | null)[] = [];
-  for (let i = 0; i < startDayOfWeek; i++) days.push(null);
-  for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
-  
-  const remaining = 7 - (days.length % 7);
-  if (remaining < 7) {
-    for (let i = 0; i < remaining; i++) days.push(null);
-  }
-  
-  return days;
-};
-
-interface CalendarProps {
-  selectedDate: string;
-  onSelectDate: (date: string) => void;
-  datesWithPlans: Set<string>;
-  colors: any;
+function addDays(key: string, n: number) {
+  const d = dateFromKey(key);
+  d.setDate(d.getDate() + n);
+  return localDateKey(d);
 }
 
-const REQUEST_STATUS_COLORS: Record<RequestStatus, string> = {
-  open: '#10B981',
-  in_progress: '#F59E0B',
-  fulfilled: '#6B7280',
-  cancelled: '#EF4444',
-};
+function relativeLabel(key: string) {
+  const today = localDateKey();
+  if (key === today) return 'Today';
+  if (key === addDays(today, 1)) return 'Tomorrow';
+  if (key === addDays(today, -1)) return 'Yesterday';
+  return dateFromKey(key).toLocaleDateString('en-US', { weekday: 'long' });
+}
 
-const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
-  open: "Open",
-  in_progress: "In Progress",
-  fulfilled: "Fulfilled",
-  cancelled: "Cancelled",
-};
+// ═════════════════════════════════════════════════════════════════════════════
+// Calendar: week strip that expands into a month grid
+// ═════════════════════════════════════════════════════════════════════════════
+function DatePicker({ selected, onSelect, marked, colors }: {
+  selected: string; onSelect: (k: string) => void; marked: Set<string>; colors: any;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const d = dateFromKey(selected);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+  const today = localDateKey();
 
-const ACCENT_COLORS = {
-  coral: "#FF6B6B",
-  teal: "#4ECDC4",
-  gold: "#FFD93D",
-  purple: "#6C5CE7",
-};
+  const weekStart = useMemo(() => {
+    const d = dateFromKey(selected);
+    d.setDate(d.getDate() - d.getDay());
+    return localDateKey(d);
+  }, [selected]);
+  const week = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
-const PLAN_CATEGORIES = [
-  { key: 'coffee', label: 'Coffee', icon: Coffee, color: '#D97706' },
-  { key: 'coworking', label: 'Work', icon: Briefcase, color: '#7C3AED' },
-  { key: 'fitness', label: 'Fitness', icon: Dumbbell, color: '#EF4444' },
-  { key: 'social', label: 'Social', icon: Users, color: '#3B82F6' },
-  { key: 'wellness', label: 'Wellness', icon: Heart, color: '#10B981' },
-  { key: 'travel', label: 'Travel', icon: Car, color: '#8B5CF6' },
-];
+  const monthCells = useMemo(() => {
+    const first = new Date(monthCursor.y, monthCursor.m, 1);
+    const days = new Date(monthCursor.y, monthCursor.m + 1, 0).getDate();
+    const cells: (string | null)[] = Array(first.getDay()).fill(null);
+    for (let i = 1; i <= days; i++) cells.push(localDateKey(new Date(monthCursor.y, monthCursor.m, i)));
+    while (cells.length % 7) cells.push(null);
+    return cells;
+  }, [monthCursor]);
 
-function CreateRequestModal({
-  visible, onClose, onCreate, colors, selectedDate,
-}: { visible: boolean; onClose: () => void; onCreate: (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number; image?: string }) => void; colors: any; selectedDate: string }) {
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<ServiceCategory>('photography');
-  const [location, setLocation] = useState('');
-  const [time, setTime] = useState('12:00 PM');
-  const [budgetMin, setBudgetMin] = useState('');
-  const [budgetMax, setBudgetMax] = useState('');
-  const [description, setDescription] = useState('');
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const select = (k: string) => {
+    haptic('select');
+    onSelect(k);
+    const d = dateFromKey(k);
+    setMonthCursor({ y: d.getFullYear(), m: d.getMonth() });
+  };
 
-  const pickThumbnail = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      allowsEditing: true,
-      aspect: [16, 9],
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      setThumbnail(result.assets[0].uri);
+  const shift = (dir: 1 | -1) => {
+    haptic('select');
+    if (expanded) {
+      setMonthCursor((c) => {
+        const m = c.m + dir;
+        return m < 0 ? { y: c.y - 1, m: 11 } : m > 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m };
+      });
+    } else {
+      select(addDays(selected, dir * 7));
     }
   };
 
-  const handleCreate = () => {
-    if (!title.trim()) return;
-    if (Platform.OS !== 'web') {
-      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
-    }
-    onCreate({
-      title: title.trim(),
-      description: description.trim(),
-      category,
-      location: location.trim(),
-      date: selectedDate,
-      time,
-      budgetMin: parseInt(budgetMin, 10) || 0,
-      budgetMax: parseInt(budgetMax, 10) || 0,
-      image: thumbnail || undefined,
-    });
-    setTitle(''); setDescription(''); setCategory('photography'); setLocation('');
-    setTime('12:00 PM'); setBudgetMin(''); setBudgetMax(''); setThumbnail(null);
-    onClose();
-  };
-
-  const canSubmit = title.trim().length > 0;
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.qpModal, { backgroundColor: colors.background }]}>
-        <View style={[styles.qpHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
-          <Text style={[styles.qpTitle, { color: colors.text }]}>Post Request</Text>
-          <TouchableOpacity
-            style={[styles.qpSaveBtn, { backgroundColor: canSubmit ? '#F59E0B' : colors.surface, opacity: canSubmit ? 1 : 0.5 }]}
-            onPress={handleCreate} disabled={!canSubmit}
-          >
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Post</Text>
-          </TouchableOpacity>
+  const renderDay = (k: string) => {
+    const isSel = k === selected;
+    const isToday = k === today;
+    const d = dateFromKey(k);
+    return (
+      <TouchableOpacity key={k} style={styles.dayCell} onPress={() => select(k)} accessibilityLabel={d.toDateString()} accessibilityState={{ selected: isSel }}>
+        <View style={[styles.dayBubble, isSel && { backgroundColor: colors.text }, !isSel && isToday && { borderWidth: 1.5, borderColor: colors.accent }]}>
+          <Text style={[styles.dayNum, { color: isSel ? colors.background : isToday ? colors.accent : colors.text }]}>{d.getDate()}</Text>
         </View>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>What do you need?</Text>
-            <TextInput
-              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="e.g. DJ for Friday night party" placeholderTextColor={colors.textTertiary}
-              value={title} onChangeText={setTitle}
-            />
-          </View>
-          {/* Thumbnail */}
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Thumbnail (optional)</Text>
-            <TouchableOpacity
-              onPress={pickThumbnail}
-              style={[styles.thumbnailPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            >
-              {thumbnail ? (
-                <View style={styles.thumbnailPreviewWrap}>
-                  <Image source={{ uri: thumbnail }} style={styles.thumbnailPreview} />
-                  <View style={[styles.thumbnailOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                    <Text style={styles.thumbnailOverlayText}>Change</Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.thumbnailPlaceholder}>
-                  <Camera size={20} color={colors.textSecondary} />
-                  <Text style={[styles.thumbnailText, { color: colors.textSecondary }]}>Add Image</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.qpCatGrid}>
-                {SERVICE_CATEGORIES.map((cat) => {
-                  const active = category === cat.key;
-                  return (
-                    <TouchableOpacity key={cat.key}
-                      style={[styles.qpCatBtn, { backgroundColor: active ? '#F59E0B15' : colors.surface, borderColor: active ? '#F59E0B' : colors.border }]}
-                      onPress={() => setCategory(cat.key)}
-                    >
-                      <Text style={{ fontSize: 16 }}>{cat.icon}</Text>
-                      <Text style={[styles.qpCatText, { color: active ? '#F59E0B' : colors.textSecondary }]}>{cat.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Location</Text>
-            <TextInput
-              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="e.g. Williamsburg, Brooklyn" placeholderTextColor={colors.textTertiary}
-              value={location} onChangeText={setLocation}
-            />
-          </View>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Date</Text>
-              <View style={[styles.qpInput, { backgroundColor: colors.surface, borderColor: colors.border, justifyContent: 'center' }]}>
-                <Text style={{ color: colors.text, fontSize: 15 }}>{getDateLabel(selectedDate)}</Text>
-              </View>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Time</Text>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                {['9:00 AM', '12:00 PM', '3:00 PM', '6:00 PM', '8:00 PM', '10:00 PM'].map((t) => {
-                  const active = time === t;
-                  return (
-                    <TouchableOpacity key={t}
-                      style={[styles.qpTimeBtn, { backgroundColor: active ? '#F59E0B' : colors.surface, borderColor: active ? '#F59E0B' : colors.border }]}
-                      onPress={() => setTime(t)}
-                    >
-                      <Text style={[styles.qpTimeText, { color: active ? '#FFF' : colors.textSecondary }]}>{t}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Budget Min ($)</Text>
-              <TextInput
-                style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                placeholder="50" placeholderTextColor={colors.textTertiary}
-                value={budgetMin} onChangeText={setBudgetMin} keyboardType="numeric"
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Budget Max ($)</Text>
-              <TextInput
-                style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                placeholder="200" placeholderTextColor={colors.textTertiary}
-                value={budgetMax} onChangeText={setBudgetMax} keyboardType="numeric"
-              />
-            </View>
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Description (optional)</Text>
-            <TextInput
-              style={[styles.qpInput, styles.qpNotes, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Details about what you need..." placeholderTextColor={colors.textTertiary}
-              value={description} onChangeText={setDescription} multiline textAlignVertical="top"
-            />
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
-function QuickPlanModal({
-  visible, onClose, onSave, colors,
-}: { visible: boolean; onClose: () => void; onSave: (plan: { title: string; date: string; time: string; category: string; notes: string }) => void; colors: any }) {
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('coffee');
-  const [time, setTime] = useState('12:00 PM');
-  const [notes, setNotes] = useState('');
-
-  const handleSave = () => {
-    if (!title.trim()) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onSave({ title: title.trim(), date: formatDate(new Date()), time, category, notes: notes.trim() });
-    setTitle(''); setNotes(''); setCategory('coffee'); setTime('12:00 PM');
-    onClose();
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.qpModal, { backgroundColor: colors.background }]}>
-        <View style={[styles.qpHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose}><X size={22} color={colors.text} /></TouchableOpacity>
-          <Text style={[styles.qpTitle, { color: colors.text }]}>Quick Plan</Text>
-          <TouchableOpacity
-            style={[styles.qpSaveBtn, { backgroundColor: title.trim() ? colors.accent : colors.surface, opacity: title.trim() ? 1 : 0.5 }]}
-            onPress={handleSave} disabled={!title.trim()}
-          >
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>What?</Text>
-            <TextInput
-              style={[styles.qpInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Plan title..." placeholderTextColor={colors.textTertiary}
-              value={title} onChangeText={setTitle}
-            />
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Time</Text>
-            <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
-              {['9:00 AM', '12:00 PM', '3:00 PM', '6:00 PM', '8:00 PM'].map((t) => {
-                const active = time === t;
-                return (
-                  <TouchableOpacity key={t}
-                    style={[styles.qpTimeBtn, { backgroundColor: active ? colors.accent : colors.surface, borderColor: active ? colors.accent : colors.border }]}
-                    onPress={() => setTime(t)}
-                  >
-                    <Text style={[styles.qpTimeText, { color: active ? '#FFF' : colors.textSecondary }]}>{t}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Category</Text>
-            <View style={styles.qpCatGrid}>
-              {PLAN_CATEGORIES.map((cat) => {
-                const CatIcon = cat.icon;
-                const active = category === cat.key;
-                return (
-                  <TouchableOpacity key={cat.key}
-                    style={[styles.qpCatBtn, { backgroundColor: active ? cat.color + '15' : colors.surface, borderColor: active ? cat.color : colors.border }]}
-                    onPress={() => setCategory(cat.key)}
-                  >
-                    <CatIcon size={16} color={cat.color} />
-                    <Text style={[styles.qpCatText, { color: active ? cat.color : colors.textSecondary }]}>{cat.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-          <View>
-            <Text style={[styles.qpLabel, { color: colors.textSecondary }]}>Notes (optional)</Text>
-            <TextInput
-              style={[styles.qpInput, styles.qpNotes, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-              placeholder="Details..." placeholderTextColor={colors.textTertiary}
-              value={notes} onChangeText={setNotes} multiline textAlignVertical="top"
-            />
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
-function MonthCalendar({ selectedDate, onSelectDate, datesWithPlans, colors }: CalendarProps) {
-  const [viewDate, setViewDate] = useState(() => {
-    const d = new Date(selectedDate + 'T12:00:00');
-    return { year: d.getFullYear(), month: d.getMonth() };
-  });
-
-  const monthDays = useMemo(
-    () => getMonthDays(viewDate.year, viewDate.month),
-    [viewDate.year, viewDate.month]
-  );
-
-  const todayStr = formatDate(new Date());
-  const monthName = new Date(viewDate.year, viewDate.month).toLocaleDateString('en-US', {
-    month: 'long',
-    year: 'numeric',
-  });
-
-  const goToPrev = () => {
-    if (Platform.OS !== 'web') Haptics.selectionAsync();
-    setViewDate(prev => prev.month === 0 
-      ? { year: prev.year - 1, month: 11 } 
-      : { year: prev.year, month: prev.month - 1 }
+        <View style={[styles.dot, { backgroundColor: marked.has(k) ? (isSel ? colors.text : colors.accent) : 'transparent' }]} />
+      </TouchableOpacity>
     );
   };
 
-  const goToNext = () => {
-    if (Platform.OS !== 'web') Haptics.selectionAsync();
-    setViewDate(prev => prev.month === 11 
-      ? { year: prev.year + 1, month: 0 } 
-      : { year: prev.year, month: prev.month + 1 }
-    );
-  };
-
-  const goToToday = () => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const today = new Date();
-    setViewDate({ year: today.getFullYear(), month: today.getMonth() });
-    onSelectDate(formatDate(today));
-  };
-
-  const rows: (Date | null)[][] = [];
-  for (let i = 0; i < monthDays.length; i += 7) {
-    rows.push(monthDays.slice(i, i + 7));
-  }
+  const title = expanded
+    ? new Date(monthCursor.y, monthCursor.m).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : dateFromKey(weekStart).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   return (
-    <View style={[styles.calendar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <View style={styles.calendarHeader}>
-        <TouchableOpacity onPress={goToPrev} style={styles.navBtn}>
-          <ChevronLeft size={22} color={colors.text} />
+    <View style={[styles.calCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.calHeader}>
+        <TouchableOpacity onPress={() => shift(-1)} hitSlop={10} accessibilityLabel={expanded ? 'Previous month' : 'Previous week'}>
+          <ChevronLeft size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={goToToday}>
-          <Text style={[styles.monthTitle, { color: colors.text }]}>{monthName}</Text>
+        <TouchableOpacity style={styles.calTitleBtn} onPress={() => { haptic('select'); setExpanded((e) => !e); }} accessibilityLabel={expanded ? 'Show week' : 'Show month'}>
+          <Text style={[styles.calTitle, { color: colors.text }]}>{title}</Text>
+          {expanded ? <ChevronUp size={16} color={colors.textSecondary} /> : <ChevronDown size={16} color={colors.textSecondary} />}
         </TouchableOpacity>
-        <TouchableOpacity onPress={goToNext} style={styles.navBtn}>
-          <ChevronRight size={22} color={colors.text} />
+        <TouchableOpacity onPress={() => shift(1)} hitSlop={10} accessibilityLabel={expanded ? 'Next month' : 'Next week'}>
+          <ChevronRight size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
-
-      <View style={styles.weekdayRow}>
-        {WEEKDAYS.map(day => (
-          <View key={day} style={styles.weekdayCell}>
-            <Text style={[styles.weekdayText, { color: colors.textTertiary }]}>{day}</Text>
+      <View style={styles.weekRow}>
+        {WEEKDAYS.map((w, i) => <Text key={i} style={[styles.weekday, { color: colors.textTertiary }]}>{w}</Text>)}
+      </View>
+      {expanded ? (
+        Array.from({ length: monthCells.length / 7 }, (_, r) => (
+          <View key={r} style={styles.weekRow}>
+            {monthCells.slice(r * 7, r * 7 + 7).map((k, i) => (k ? renderDay(k) : <View key={`e${i}`} style={styles.dayCell} />))}
           </View>
-        ))}
-      </View>
-
-      {rows.map((row, rowIdx) => (
-        <View key={rowIdx} style={styles.calendarRow}>
-          {row.map((date, cellIdx) => {
-            if (!date) return <View key={`empty-${cellIdx}`} style={styles.dayCell} />;
-
-            const dateStr = formatDate(date);
-            const isSelected = dateStr === selectedDate;
-            const isToday = dateStr === todayStr;
-            const hasPlan = datesWithPlans.has(dateStr);
-
-            return (
-              <TouchableOpacity
-                key={dateStr}
-                style={[
-                  styles.dayCell,
-                  isSelected && [styles.dayCellSelected, { backgroundColor: colors.accent }],
-                ]}
-                onPress={() => {
-                  if (Platform.OS !== 'web') Haptics.selectionAsync();
-                  onSelectDate(dateStr);
-                }}
-              >
-                <Text style={[
-                  styles.dayText,
-                  { color: colors.text },
-                  isToday && !isSelected && { color: colors.accent, fontWeight: '700' as const },
-                  isSelected && { color: '#FFF', fontWeight: '700' as const },
-                ]}>
-                  {date.getDate()}
-                </Text>
-                {hasPlan && (
-                  <View style={[
-                    styles.planDot,
-                    { backgroundColor: isSelected ? '#FFF' : colors.accent },
-                  ]} />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ))}
+        ))
+      ) : (
+        <View style={styles.weekRow}>{week.map((k) => renderDay(k))}</View>
+      )}
     </View>
   );
 }
 
-interface PlanCardProps {
-  plan: Plan;
-  onPress: () => void;
-  onDelete: () => void;
-  colors: any;
-}
-
-function PlanCard({ plan, onPress, onDelete, colors }: PlanCardProps) {
-  const locationLabels: Record<string, string> = {
-    home: 'Home',
-    hotel: 'Hotel',
-    airbnb: 'Airbnb',
-    coffee: 'Coffee Shop',
-    coworking: 'Co-working',
-  };
-
-  const transportLabels: Record<string, string> = {
-    none: 'No transport',
-    chauffeur: 'Chauffeur service',
-  };
-
-  const BLOCK_CATEGORY_ICONS: Record<string, any> = {
-    work: Briefcase,
-    personal: Heart,
-    health: Dumbbell,
-    learning: Book,
-    social: Users,
-    errands: ShoppingCart,
-    calls: Phone,
-    focus: Zap,
-    break: Coffee,
-    other: Star,
-  };
-
-  const planDetails = plan.plan;
-  const locationType = planDetails?.location_type || plan.location_type || 'home';
-  const transport = planDetails?.transport || plan.transport || 'none';
-  const assistance = planDetails?.assistance || [];
-  const payment = planDetails?.payment || 'cash';
-  const customBlock = planDetails?.custom_block;
-  const importedJob = planDetails?.imported_job;
-
-  const getAssistanceIcon = (type: string) => {
-    switch (type) {
-      case 'va': return Users;
-      case 'delivery': return Package;
-      case 'errands': return Truck;
-      default: return HelpCircle;
-    }
-  };
-
-  const assistanceLabels: Record<string, string> = {
-    va: 'Virtual Assistant',
-    delivery: 'Delivery',
-    errands: 'Errands',
-    other: 'Other',
-  };
-
-  const handleDelete = () => {
-    if (Platform.OS === 'web') {
-      if (window.confirm('Delete this plan?')) {
-        onDelete();
-      }
-    } else {
-      Alert.alert(
-        'Delete Plan',
-        'Are you sure you want to delete this plan?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: onDelete },
-        ]
-      );
-    }
-  };
-
-  const accentColor = customBlock?.category_color || (importedJob ? '#10B981' : colors.accent);
-  const BlockIcon = customBlock ? BLOCK_CATEGORY_ICONS[customBlock.category] || Star : null;
-
+// ═════════════════════════════════════════════════════════════════════════════
+// One plan row on the day timeline
+// ═════════════════════════════════════════════════════════════════════════════
+function PlanRow({ plan, summary, colors, onOpen, onToggleDone, onLongPress, showDate }: {
+  plan: Plan; summary: PlanSummary; colors: any; onOpen: () => void; onToggleDone: () => void; onLongPress: () => void; showDate?: boolean;
+}) {
+  const done = plan.status === 'completed';
+  const cancelled = plan.status === 'cancelled';
   return (
     <TouchableOpacity
-      style={[styles.planCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      onPress={onPress}
-      activeOpacity={0.7}
+      style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      onPress={onOpen}
+      onLongPress={() => { haptic(); onLongPress(); }}
+      activeOpacity={0.75}
     >
-      <View style={[styles.planAccent, { backgroundColor: accentColor }]} />
-      <View style={styles.planContent}>
-        <View style={styles.planHeader}>
-          <View style={[styles.planBadge, { backgroundColor: accentColor + '15' }]}>
-            {customBlock && BlockIcon ? (
-              <BlockIcon size={14} color={accentColor} />
-            ) : importedJob ? (
-              <Briefcase size={14} color={accentColor} />
-            ) : (
-              <Calendar size={14} color={accentColor} />
-            )}
-            <Text style={[styles.planBadgeText, { color: accentColor }]}>
-              {customBlock ? customBlock.category_label : importedJob ? 'Accepted Job' : getDateLabel(plan.date)}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              handleDelete();
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Trash2 size={18} color={colors.textTertiary} />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={[styles.planTitle, { color: colors.text }]}>
-          {plan.date_label || `Plan for ${getDateLabel(plan.date)}`}
+      <View style={styles.rowTime}>
+        {showDate ? (
+          <>
+            <Text style={[styles.rowTimeMain, { color: colors.text }]}>{dateFromKey(plan.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+            <Text style={[styles.rowTimeSub, { color: colors.textTertiary }]}>{summary.startMins !== null ? formatMinutes(summary.startMins) : dateFromKey(plan.date).toLocaleDateString('en-US', { weekday: 'short' })}</Text>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.rowTimeMain, { color: colors.text }]}>{summary.startMins !== null ? formatMinutes(summary.startMins) : 'All day'}</Text>
+            {summary.durationMins ? <Text style={[styles.rowTimeSub, { color: colors.textTertiary }]}>{formatDuration(summary.durationMins)}</Text> : null}
+          </>
+        )}
+      </View>
+      <View style={[styles.rowBar, { backgroundColor: summary.color, opacity: done || cancelled ? 0.35 : 1 }]} />
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowTitle, { color: colors.text }, (done || cancelled) && styles.rowTitleDone, (done || cancelled) && { color: colors.textTertiary }]} numberOfLines={1}>
+          {summary.title}
         </Text>
-
-        {customBlock && (
-          <View style={styles.planMeta}>
-            <View style={styles.planMetaRow}>
-              <Clock size={14} color={colors.textSecondary} />
-              <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-                {customBlock.start_time ? formatTime12(customBlock.start_time) : ''} • {customBlock.duration_minutes}min
-              </Text>
-            </View>
-            {customBlock.location && (
-              <View style={styles.planMetaRow}>
-                <MapPin size={14} color={colors.textSecondary} />
-                <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-                  {customBlock.location}
-                </Text>
-              </View>
-            )}
-            {customBlock.description && (
-              <Text style={[styles.planMetaText, { color: colors.textTertiary, marginTop: 4 }]} numberOfLines={2}>
-                {customBlock.description}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {importedJob && (
-          <View style={styles.planMeta}>
-            <View style={styles.planMetaRow}>
-              <Briefcase size={14} color={colors.textSecondary} />
-              <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-                {importedJob.title || `${importedJob.type} job`}
-              </Text>
-            </View>
-            {importedJob.pickup_location && (
-              <View style={styles.planMetaRow}>
-                <MapPin size={14} color={colors.textSecondary} />
-                <Text style={[styles.planMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {importedJob.pickup_location}
-                </Text>
-              </View>
-            )}
-            {importedJob.pickup_time && (
-              <View style={styles.planMetaRow}>
-                <Clock size={14} color={colors.textSecondary} />
-                <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-                  {importedJob.pickup_time}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {!customBlock && !importedJob && <View style={styles.planMeta}>
-          <View style={styles.planMetaRow}>
-            <MapPin size={14} color={colors.textSecondary} />
-            <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-              {locationLabels[locationType] || locationType}
-            </Text>
-          </View>
-
-          {transport !== 'none' && (
-            <View style={styles.planMetaRow}>
-              <Car size={14} color={colors.textSecondary} />
-              <Text style={[styles.planMetaText, { color: colors.textSecondary }]}>
-                {transportLabels[transport] || transport}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.planMetaRow}>
-            <CreditCard size={14} color={colors.textSecondary} />
-            <Text style={[styles.planMetaText, { color: colors.textSecondary, textTransform: 'capitalize' }]}>
-              {payment}
-            </Text>
-          </View>
-        </View>}
-
-        {assistance && assistance.length > 0 && (
-          <View style={styles.assistanceTags}>
-            {assistance.map((item, idx) => {
-              const Icon = getAssistanceIcon(item);
-              return (
-                <View key={idx} style={[styles.assistanceTag, { backgroundColor: '#7B61FF15' }]}>
-                  <Icon size={12} color="#7B61FF" />
-                  <Text style={[styles.assistanceTagText, { color: '#7B61FF' }]}>
-                    {assistanceLabels[item] || item}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        <View style={styles.planFooter}>
-          <Clock size={12} color={colors.textTertiary} />
-          <Text style={[styles.planTime, { color: colors.textTertiary }]}>
-            {new Date(plan.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-          <View style={[styles.statusBadge, { backgroundColor: plan.status === 'active' ? '#10B98115' : plan.status === 'completed' ? '#6B728015' : '#F59E0B15' }]}>
-            <Text style={[styles.statusText, { color: plan.status === 'active' ? '#10B981' : plan.status === 'completed' ? '#6B7280' : '#F59E0B' }]}>
-              {plan.status}
-            </Text>
-          </View>
+        <View style={styles.rowMetaLine}>
+          <Text style={[styles.rowLabel, { color: summary.color }]}>{cancelled ? 'Cancelled' : summary.label}</Text>
+          {summary.subtitle ? <Text style={[styles.rowSub, { color: colors.textSecondary }]} numberOfLines={1}>· {summary.subtitle}</Text> : null}
         </View>
       </View>
-      <ChevronRight size={20} color={colors.textTertiary} style={styles.planChevron} />
+      {!cancelled ? (
+        <TouchableOpacity
+          onPress={() => { haptic(done ? 'light' : 'success'); onToggleDone(); }}
+          hitSlop={10}
+          style={[styles.check, { borderColor: done ? summary.color : colors.border, backgroundColor: done ? summary.color : 'transparent' }]}
+          accessibilityLabel={done ? 'Mark not done' : 'Mark done'}
+          accessibilityState={{ checked: done }}
+        >
+          {done ? <Check size={14} color="#FFF" strokeWidth={3} /> : null}
+        </TouchableOpacity>
+      ) : null}
     </TouchableOpacity>
   );
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Quick add sheet (saves a time block on the selected day)
+// ═════════════════════════════════════════════════════════════════════════════
+function QuickAddSheet({ visible, date, onClose, colors }: { visible: boolean; date: string; onClose: () => void; colors: any }) {
+  const { createPlan } = usePlanner();
+  const [title, setTitle] = useState('');
+  const [start, setStart] = useState(9 * 60);
+  const [duration, setDuration] = useState(60);
+  const [category, setCategory] = useState<string>('work');
+  const [location, setLocation] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setTitle(''); setStart(9 * 60); setDuration(60); setCategory('work'); setLocation(''); };
+
+  const save = async () => {
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    const cat = BLOCK_CATEGORIES.find((c) => c.id === category) || BLOCK_CATEGORIES[BLOCK_CATEGORIES.length - 1];
+    const hh = String(Math.floor(start / 60)).padStart(2, '0');
+    const mm = String(start % 60).padStart(2, '0');
+    const res = await createPlan({
+      date,
+      date_label: title.trim(),
+      location_type: 'home',
+      transport: 'none',
+      plan_details: {
+        location_type: 'home',
+        transport: 'none',
+        assistance: [],
+        payment: 'cash',
+        custom_block: {
+          title: title.trim(),
+          description: '',
+          category: cat.id,
+          category_label: cat.label,
+          category_color: cat.color,
+          start_time: `${hh}:${mm}`,
+          duration_minutes: duration,
+          location: location.trim(),
+          priority: 'medium',
+        },
+      },
+    });
+    setSaving(false);
+    if (res) {
+      haptic('success');
+      reset();
+      onClose();
+    } else {
+      Alert.alert('Plan not saved', 'Check your connection and try again.');
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} hitSlop={10}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>New plan · {relativeLabel(date)}</Text>
+          <TouchableOpacity onPress={save} disabled={!title.trim() || saving} style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: title.trim() && !saving ? 1 : 0.4 }]}>
+            <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save'}</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 22 }} keyboardShouldPersistTaps="handled">
+          <TextInput
+            style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
+            placeholder="What are you doing?"
+            placeholderTextColor={colors.textTertiary}
+            value={title}
+            onChangeText={setTitle}
+            autoFocus
+            returnKeyType="done"
+          />
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Starts</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {TIME_OPTIONS.map((t) => {
+                const on = t === start;
+                return (
+                  <TouchableOpacity key={t} onPress={() => { haptic('select'); setStart(t); }} style={[styles.chip, { borderColor: on ? colors.text : colors.border, backgroundColor: on ? colors.text : colors.surface }]}>
+                    <Text style={[styles.chipText, { color: on ? colors.background : colors.text }]}>{formatMinutes(t)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>How long</Text>
+            <View style={styles.wrap}>
+              {DURATIONS.map((d) => {
+                const on = d === duration;
+                return (
+                  <TouchableOpacity key={d} onPress={() => { haptic('select'); setDuration(d); }} style={[styles.chip, { borderColor: on ? colors.text : colors.border, backgroundColor: on ? colors.text : colors.surface }]}>
+                    <Text style={[styles.chipText, { color: on ? colors.background : colors.text }]}>{formatDuration(d)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Type</Text>
+            <View style={styles.wrap}>
+              {BLOCK_CATEGORIES.map((c) => {
+                const on = c.id === category;
+                return (
+                  <TouchableOpacity key={c.id} onPress={() => { haptic('select'); setCategory(c.id); }} style={[styles.chip, { borderColor: on ? c.color : colors.border, backgroundColor: on ? c.color + '1F' : colors.surface }]}>
+                    <View style={[styles.catDot, { backgroundColor: c.color }]} />
+                    <Text style={[styles.chipText, { color: on ? c.color : colors.text }]}>{c.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Where (optional)</Text>
+            <View style={[styles.inputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <MapPin size={16} color={colors.textTertiary} />
+              <TextInput style={[styles.input, { color: colors.text }]} placeholder="Add a place" placeholderTextColor={colors.textTertiary} value={location} onChangeText={setLocation} />
+            </View>
+          </View>
+          <Text style={[styles.hint, { color: colors.textTertiary }]}>
+            {formatMinutes(start)} – {formatMinutes(start + duration)} on {dateFromKey(date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Post-a-request sheet
+// ═════════════════════════════════════════════════════════════════════════════
+function RequestSheet({ visible, date, onClose, onCreate, colors }: {
+  visible: boolean; date: string; onClose: () => void; colors: any;
+  onCreate: (r: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number; image?: string }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<ServiceCategory>('photography');
+  const [location, setLocation] = useState('');
+  const [time, setTime] = useState(18 * 60);
+  const [budgetMin, setBudgetMin] = useState('');
+  const [budgetMax, setBudgetMax] = useState('');
+  const [description, setDescription] = useState('');
+  const [image, setImage] = useState<string | null>(null);
+
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [16, 9] });
+    if (!r.canceled && r.assets?.[0]) setImage(r.assets[0].uri);
+  };
+
+  const submit = () => {
+    if (!title.trim()) return;
+    const min = parseInt(budgetMin, 10) || 0;
+    const max = parseInt(budgetMax, 10) || 0;
+    if (max && min > max) { Alert.alert('Check your budget', 'The minimum is higher than the maximum.'); return; }
+    haptic('success');
+    onCreate({ title: title.trim(), description: description.trim(), category, location: location.trim(), date, time: formatMinutes(time), budgetMin: min, budgetMax: max, image: image || undefined });
+    setTitle(''); setDescription(''); setLocation(''); setBudgetMin(''); setBudgetMax(''); setImage(null); setCategory('photography');
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} hitSlop={10}><X size={22} color={colors.text} /></TouchableOpacity>
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>Ask for help</Text>
+          <TouchableOpacity onPress={submit} disabled={!title.trim()} style={[styles.saveBtn, { backgroundColor: '#F59E0B', opacity: title.trim() ? 1 : 0.4 }]}>
+            <Text style={styles.saveText}>Post</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 20 }} keyboardShouldPersistTaps="handled">
+          <TextInput
+            style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
+            placeholder="What do you need? e.g. DJ for Friday"
+            placeholderTextColor={colors.textTertiary}
+            value={title}
+            onChangeText={setTitle}
+            autoFocus
+          />
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Category</Text>
+            <View style={styles.wrap}>
+              {SERVICE_CATEGORIES.map((c) => {
+                const on = c.key === category;
+                return (
+                  <TouchableOpacity key={c.key} onPress={() => { haptic('select'); setCategory(c.key); }} style={[styles.chip, { borderColor: on ? '#F59E0B' : colors.border, backgroundColor: on ? '#F59E0B1F' : colors.surface }]}>
+                    <Text style={{ fontSize: 14 }}>{c.icon}</Text>
+                    <Text style={[styles.chipText, { color: on ? '#D97706' : colors.text }]}>{c.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>When · {relativeLabel(date)}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {TIME_OPTIONS.filter((t) => t % 60 === 0).map((t) => {
+                const on = t === time;
+                return (
+                  <TouchableOpacity key={t} onPress={() => { haptic('select'); setTime(t); }} style={[styles.chip, { borderColor: on ? colors.text : colors.border, backgroundColor: on ? colors.text : colors.surface }]}>
+                    <Text style={[styles.chipText, { color: on ? colors.background : colors.text }]}>{formatMinutes(t)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Where</Text>
+            <View style={[styles.inputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <MapPin size={16} color={colors.textTertiary} />
+              <TextInput style={[styles.input, { color: colors.text }]} placeholder="Neighborhood or address" placeholderTextColor={colors.textTertiary} value={location} onChangeText={setLocation} />
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Budget</Text>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <View style={[styles.inputRow, { flex: 1, borderColor: colors.border, backgroundColor: colors.surface }]}>
+                <DollarSign size={15} color={colors.textTertiary} />
+                <TextInput style={[styles.input, { color: colors.text }]} placeholder="Min" placeholderTextColor={colors.textTertiary} value={budgetMin} onChangeText={setBudgetMin} keyboardType="number-pad" />
+              </View>
+              <Text style={{ color: colors.textTertiary }}>–</Text>
+              <View style={[styles.inputRow, { flex: 1, borderColor: colors.border, backgroundColor: colors.surface }]}>
+                <DollarSign size={15} color={colors.textTertiary} />
+                <TextInput style={[styles.input, { color: colors.text }]} placeholder="Max" placeholderTextColor={colors.textTertiary} value={budgetMax} onChangeText={setBudgetMax} keyboardType="number-pad" />
+              </View>
+            </View>
+          </View>
+          <View>
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Details (optional)</Text>
+            <TextInput
+              style={[styles.notes, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              placeholder="Anything a helper should know"
+              placeholderTextColor={colors.textTertiary}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              textAlignVertical="top"
+            />
+          </View>
+          <TouchableOpacity onPress={pickImage} style={[styles.photoPick, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            {image ? (
+              <Image source={{ uri: image }} style={styles.photoPreview} />
+            ) : (
+              <>
+                <Camera size={18} color={colors.textSecondary} />
+                <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Add a photo (optional)</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Screen
+// ═════════════════════════════════════════════════════════════════════════════
 export default function PlannerScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user } = useAuth();
-  const { plans, deletePlan, createPlan, getPlansByDate, refetch } = usePlanner();
-
-  const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
-  const [refreshing, setRefreshing] = useState(false);
-  const [showQuickPlan, setShowQuickPlan] = useState(false);
-  const [mode, setMode] = useState<'mydays' | 'requests' | 'allplans'>('mydays');
-  const [showCreateRequest, setShowCreateRequest] = useState(false);
-
-  const { requests, createRequest, deleteRequest, getRequestsByDate } = useServiceRequests();
+  const { plans, isLoading, deletePlan, setPlanStatus, updatePlan, refetch } = usePlanner();
+  const { requests, createRequest, deleteRequest, updateRequestStatus } = useServiceRequests();
   const { pendingCount: pendingOrders } = useOrders();
 
-  const datesWithPlans = useMemo(() => {
-    const dates = new Set<string>();
-    plans.forEach(p => dates.add(p.date));
-    return dates;
-  }, [plans]);
+  const [tab, setTab] = useState<'schedule' | 'requests'>('schedule');
+  const [selected, setSelected] = useState(localDateKey());
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showRequest, setShowRequest] = useState(false);
 
-  const datePlans = useMemo(() => getPlansByDate(selectedDate), [getPlansByDate, selectedDate]);
-  const dateRequests = useMemo(() => getRequestsByDate(selectedDate), [getRequestsByDate, selectedDate]);
-  const allRequests = useMemo(() => requests, [requests]);
+  const today = localDateKey();
+  const marked = useMemo(() => new Set(plans.filter((p) => p.status !== 'cancelled').map((p) => p.date)), [plans]);
 
-  const onRefresh = useCallback(() => {
+  const dayItems = useMemo(
+    () => plans.filter((p) => p.date === selected).map((p) => ({ plan: p, summary: summarizePlan(p) })).sort(sortByTime),
+    [plans, selected],
+  );
+  const doneCount = dayItems.filter((i) => i.plan.status === 'completed').length;
+
+  const upcoming = useMemo(() => {
+    const from = selected >= today ? selected : today;
+    return plans
+      .filter((p) => p.date > from && p.status !== 'cancelled' && p.status !== 'completed')
+      .map((p) => ({ plan: p, summary: summarizePlan(p) }))
+      .sort((a, b) => (a.plan.date === b.plan.date ? sortByTime(a, b) : a.plan.date.localeCompare(b.plan.date)))
+      .slice(0, 5);
+  }, [plans, selected, today]);
+
+  const myRequests = useMemo(() => requests.filter((r) => r.creatorId && r.creatorId === user?.id), [requests, user?.id]);
+  const openRequests = myRequests.filter((r) => r.status === 'open').length;
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    refetch();
-    setTimeout(() => setRefreshing(false), 800);
+    await refetch();
+    setRefreshing(false);
   }, [refetch]);
 
-  const handleDeletePlan = useCallback(async (id: string) => {
-    try {
-      await deletePlan(id);
-      console.log('[Planner] Plan deleted:', id);
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    } catch (e) {
-      console.error('[Planner] Delete failed:', e);
-      Alert.alert('Error', 'Failed to delete plan. Please try again.');
-    }
-  }, [deletePlan]);
+  const openPlan = (p: Plan) => router.push(`/planner/${p.id}` as any);
 
-  const handleCreateRequest = useCallback(async (req: { title: string; description: string; category: ServiceCategory; location: string; date: string; time: string; budgetMin: number; budgetMax: number; image?: string }) => {
-    try {
-      const cat = SERVICE_CATEGORIES.find((c) => c.key === req.category);
-      createRequest({
-        title: req.title,
-        description: req.description,
-        category: req.category,
-        location: req.location,
-        date: req.date,
-        time: req.time,
-        budgetMin: req.budgetMin,
-        budgetMax: req.budgetMax,
-        tags: cat ? [cat.label] : [],
-        image: req.image,
-        creatorId: user?.id || '',
-        createdBy: { name: 'You', avatar: '' },
-      });
-      setMode('requests');
-      console.log('[Planner] Service request created:', req.title);
-    } catch (e: any) {
-      console.error('[Planner] Create request failed:', e);
-      Alert.alert('Error', 'Failed to create request: ' + (e?.message || 'Please try again.'));
-    }
-  }, [createRequest]);
+  const toggleDone = async (p: Plan) => {
+    const ok = await setPlanStatus(p.id, p.status === 'completed' ? 'pending' : 'completed');
+    if (!ok) Alert.alert('Not updated', 'Check your connection and try again.');
+  };
 
-  const handleQuickCreate = useCallback(async (plan: { title: string; date: string; time: string; category: string; notes: string }) => {
-    try {
-      const planLocation = plan.category === 'coworking' ? 'coworking' : plan.category === 'coffee' ? 'coffee' : 'home';
-      await createPlan({
-        date: plan.date,
-        date_label: `${plan.time} — ${plan.title}`,
-        location_type: planLocation,
-        transport: 'none',
-        plan_details: {
-          location_type: planLocation,
-          transport: 'none',
-          assistance: [],
-          payment: 'cash',
-          notes: plan.notes || undefined,
+  const planActions = (p: Plan) => {
+    Alert.alert(summarizePlan(p).title, undefined, [
+      { text: p.status === 'completed' ? 'Mark not done' : 'Mark done', onPress: () => toggleDone(p) },
+      ...(p.date !== today ? [{ text: 'Move to today', onPress: () => moveToToday(p) }] : []),
+      {
+        text: 'Delete', style: 'destructive' as const,
+        onPress: async () => {
+          try { await deletePlan(p.id); haptic('success'); } catch { Alert.alert('Not deleted', 'Please try again.'); }
         },
-      });
-      console.log('[Planner] Quick plan created:', plan.title);
-      Alert.alert('Plan Created', `"${plan.title}" has been added to your planner.`);
-    } catch (e: any) {
-      console.error('[Planner] Quick create failed:', e);
-      Alert.alert('Error', 'Failed to create plan: ' + (e?.message || 'Please try again.'));
-    }
-  }, [createPlan]);
+      },
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
 
-  const totalPlansCount = plans.length;
-  const upcomingPlans = plans.filter(p => new Date(p.date) >= new Date(formatDate(new Date()))).length;
-  const activePlans = plans.filter(p => p.status === 'active').length;
-  const completedPlans = plans.filter(p => p.status === 'completed').length;
+  const moveToToday = async (p: Plan) => {
+    const res = await updatePlan(p.id, { date: today });
+    if (!res) Alert.alert('Not moved', 'Please try again.');
+    else setSelected(today);
+  };
 
-  // Group all plans by date for activity timeline
-  const plansByDate = useMemo(() => {
-    const grouped: Record<string, Plan[]> = {};
-    [...plans].sort((a, b) => b.date.localeCompare(a.date)).forEach(p => {
-      if (!grouped[p.date]) grouped[p.date] = [];
-      grouped[p.date].push(p);
-    });
-    return Object.entries(grouped);
-  }, [plans]);
+  const dateTitle = relativeLabel(selected);
+  const dateSub = dateFromKey(selected).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -854,23 +565,15 @@ export default function PlannerScreen() {
         options={{
           title: 'Planner',
           headerLeft: () => (
-            <TouchableOpacity
-              onPress={() => {
-                if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push('/(tabs)/live' as any);
-              }}
-              style={[styles.headerBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-            >
+            <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/live' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Live rooms">
               <Radio size={18} color={colors.text} />
             </TouchableOpacity>
           ),
           headerRight: () => (
             <TouchableOpacity
-              onPress={() => {
-                if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowQuickPlan(true);
-              }}
-              style={[styles.headerBtn, { backgroundColor: colors.accent }]}
+              onPress={() => { haptic(); if (tab === 'requests') setShowRequest(true); else setShowAdd(true); }}
+              style={[styles.headerBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+              accessibilityLabel={tab === 'requests' ? 'Post a request' : 'Add a plan'}
             >
               <Plus size={20} color="#FFF" />
             </TouchableOpacity>
@@ -878,759 +581,290 @@ export default function PlannerScreen() {
         }}
       />
 
-      <View style={styles.actionCards}>
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => {
-            if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push('/planner/plan-day' as any);
-          }}
-          activeOpacity={0.9}
-        >
-          <LinearGradient
-            colors={['#7B61FF', '#A78BFA']}
-            style={styles.actionGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Wand2 size={20} color="#FFF" />
-            <Text style={styles.actionText}>Plan Day</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => {
-            if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push('/planner/add-block' as any);
-          }}
-          activeOpacity={0.9}
-        >
-          <LinearGradient
-            colors={['#8B5CF6', '#7C3AED']}
-            style={styles.actionGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <LayoutGrid size={20} color="#FFF" />
-            <Text style={styles.actionText}>Add Block</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-
-        {mode === 'requests' && (
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => {
-              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/(tabs)/manage' as any);
-            }}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={['#0095F6', '#0084D6']}
-              style={styles.actionGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <Package size={20} color="#FFF" />
-              <Text style={styles.actionText}>My Bundles</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => {
-            if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            if (mode === 'requests') {
-              setShowCreateRequest(true);
-            } else {
-              router.push('/planner/browse-jobs' as any);
-            }
-          }}
-          activeOpacity={0.9}
-        >
-          <LinearGradient
-            colors={mode === 'requests' ? ['#F59E0B', '#D97706'] : ['#10B981', '#059669']}
-            style={styles.actionGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            {mode === 'requests' ? <Plus size={20} color="#FFF" /> : <Briefcase size={20} color="#FFF" />}
-            <Text style={styles.actionText}>{mode === 'requests' ? 'Post Request' : 'Browse Jobs'}</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+      {/* Segmented control */}
+      <View style={[styles.segment, { backgroundColor: colors.surfaceHighlight }]}>
+        {([
+          { key: 'schedule', label: 'Schedule' },
+          { key: 'requests', label: 'Requests' },
+        ] as const).map((s) => {
+          const on = tab === s.key;
+          return (
+            <TouchableOpacity key={s.key} style={[styles.segBtn, on && { backgroundColor: colors.background }]} onPress={() => { haptic('select'); setTab(s.key); }} accessibilityState={{ selected: on }}>
+              <Text style={[styles.segText, { color: on ? colors.text : colors.textSecondary }]}>{s.label}</Text>
+              {s.key === 'requests' && (openRequests > 0 || pendingOrders > 0) ? (
+                <View style={[styles.segBadge, { backgroundColor: pendingOrders > 0 ? '#F59E0B' : colors.accent }]}>
+                  <Text style={styles.segBadgeText}>{pendingOrders > 0 ? pendingOrders : openRequests}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
       </View>
-
-      {/* Mode Toggle */}
-      <View style={[styles.modeToggle, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <TouchableOpacity
-          style={[styles.modeBtn, mode === 'mydays' && { backgroundColor: colors.accent }]}
-          onPress={() => { setMode('mydays'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
-        >
-          <Calendar size={16} color={mode === 'mydays' ? '#FFF' : colors.textSecondary} />
-          <Text style={[styles.modeBtnText, { color: mode === 'mydays' ? '#FFF' : colors.textSecondary }]}>My Day</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.modeBtn, mode === 'allplans' && { backgroundColor: colors.accent }]}
-          onPress={() => { setMode('allplans'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
-        >
-          <LayoutGrid size={16} color={mode === 'allplans' ? '#FFF' : colors.textSecondary} />
-          <Text style={[styles.modeBtnText, { color: mode === 'allplans' ? '#FFF' : colors.textSecondary }]}>My Plans</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.modeBtn, mode === 'requests' && { backgroundColor: colors.accent }]}
-          onPress={() => { setMode('requests'); if (Platform.OS !== 'web') Haptics.selectionAsync(); }}
-        >
-          <Search size={16} color={mode === 'requests' ? '#FFF' : colors.textSecondary} />
-          <Text style={[styles.modeBtnText, { color: mode === 'requests' ? '#FFF' : colors.textSecondary }]}>Requests</Text>
-          {allRequests.filter(r => r.status === 'open').length > 0 && (
-            <View style={styles.modeBadge}>
-              <Text style={styles.modeBadgeText}>{allRequests.filter(r => r.status === 'open').length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {(mode === 'mydays' || mode === 'allplans') && totalPlansCount > 0 && (
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: colors.accent }]}>{totalPlansCount}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.statNumber, { color: '#10B981' }]}>{upcomingPlans}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Upcoming</Text>
-          </View>
-          {mode === 'allplans' && (
-            <>
-              <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.statNumber, { color: '#3B82F6' }]}>{activePlans}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Active</Text>
-              </View>
-              <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.statNumber, { color: '#6366F1' }]}>{completedPlans}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Done</Text>
-              </View>
-            </>
-          )}
-        </View>
-      )}
 
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textTertiary} />}
       >
-        {mode !== 'allplans' && (
-          <MonthCalendar
-            selectedDate={selectedDate}
-            onSelectDate={setSelectedDate}
-            datesWithPlans={datesWithPlans}
-            colors={colors}
-          />
-        )}
+        {tab === 'schedule' ? (
+          <>
+            <DatePicker selected={selected} onSelect={setSelected} marked={marked} colors={colors} />
 
-        {mode === 'allplans' ? (
-          <View style={styles.plansList}>
-            {plansByDate.length === 0 ? (
-              <View style={styles.emptyState}>
-                <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-                  <LayoutGrid size={40} color={colors.textTertiary} />
-                </View>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>No plans yet</Text>
-                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                  Tap + to create your first plan
+            {/* Day header */}
+            <View style={styles.dayHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dayTitle, { color: colors.text }]}>{dateTitle}</Text>
+                <Text style={[styles.daySub, { color: colors.textSecondary }]}>
+                  {dateSub}{dayItems.length ? ` · ${dayItems.length} plan${dayItems.length === 1 ? '' : 's'}${doneCount ? `, ${doneCount} done` : ''}` : ''}
                 </Text>
               </View>
-            ) : (
-              plansByDate.map(([date, datePlanList]) => (
-                <View key={date} style={{ marginBottom: 20 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingHorizontal: 4 }}>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{getDateLabel(date)}</Text>
-                    <View style={{ height: 1, flex: 1, marginHorizontal: 10, backgroundColor: colors.border }} />
-                    <Text style={{ fontSize: 12, color: colors.textTertiary }}>{datePlanList.length} plan{datePlanList.length !== 1 ? 's' : ''}</Text>
-                  </View>
-                  {datePlanList.map(plan => {
-                    const statusColor = plan.status === 'completed' ? '#6366F1' : plan.status === 'active' ? '#10B981' : plan.status === 'cancelled' ? '#EF4444' : '#F59E0B';
-                    return (
-                      <TouchableOpacity
-                        key={plan.id}
-                        style={{ flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 6, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}
-                        onPress={() => router.push(`/planner/${plan.id}` as any)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColor, marginRight: 12 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }} numberOfLines={1}>{plan.date_label || 'Plan'}</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                            {plan.location_type ? (
-                              <Text style={{ fontSize: 12, color: colors.textSecondary }}>{plan.location_type.charAt(0).toUpperCase() + plan.location_type.slice(1)}</Text>
-                            ) : null}
-                            {plan.transport && plan.transport !== 'none' ? (
-                              <Text style={{ fontSize: 11, color: colors.textTertiary }}>· {plan.transport}</Text>
-                            ) : null}
-                          </View>
-                        </View>
-                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: statusColor + '18' }}>
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: statusColor }}>{plan.status}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ))
-            )}
-          </View>
-        ) : mode === 'requests' ? (
-          <View style={styles.plansList}>
-            {allRequests.length === 0 ? (
-              <View style={styles.emptyState}>
-                <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-                  <Search size={40} color={colors.textTertiary} />
-                </View>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>No service requests yet</Text>
-                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                  Tap Post Request to create your first request
-                </Text>
-              </View>
-            ) : (
-              <>
-                {pendingOrders > 0 && (
-                  <TouchableOpacity
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 8,
-                      padding: 12, marginBottom: 12, borderRadius: 12,
-                      backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B55',
-                    }}
-                    onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); router.push('/(tabs)/manage' as any); }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B26' }}>
-                      <BellRing size={17} color="#D97706" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#B45309' }}>
-                        {pendingOrders} helper{pendingOrders > 1 ? 's' : ''} waiting
-                      </Text>
-                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>Someone offered to help your request — review & accept</Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {allRequests.length} request{allRequests.length > 1 ? 's' : ''}
-                </Text>
-                {allRequests.map((req) => {
-                  const cat = SERVICE_CATEGORIES.find((c) => c.key === req.category);
-                  const statusColor = REQUEST_STATUS_COLORS[req.status];
-                  const statusLabel = REQUEST_STATUS_LABELS[req.status];
-                  return (
-                    <TouchableOpacity
-                      key={req.id}
-                      style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.requestCardHeader}>
-                        <View style={[styles.requestIcon, { backgroundColor: '#F59E0B15' }]}>
-                          <Text style={{ fontSize: 22 }}>{cat?.icon || '✨'}</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.requestTitle, { color: colors.text }]}>{req.title}</Text>
-                          <Text style={[styles.requestLocation, { color: colors.textSecondary }]}>
-                            {req.location || 'No location'}
-                          </Text>
-                        </View>
-                        <View style={[styles.statusBadge, { backgroundColor: statusColor + '15' }]}>
-                          <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.requestMeta}>
-                        <View style={styles.requestMetaRow}>
-                          <DollarSign size={13} color={colors.textSecondary} />
-                          <Text style={[styles.requestMetaText, { color: colors.textSecondary }]}>
-                            ${req.budgetMin}–${req.budgetMax}
-                          </Text>
-                        </View>
-                        <View style={styles.requestMetaRow}>
-                          <Clock size={13} color={colors.textSecondary} />
-                          <Text style={[styles.requestMetaText, { color: colors.textSecondary }]}>
-                            {getDateLabel(req.date)}{req.time ? ` · ${formatTime12(req.time)}` : ''}
-                          </Text>
-                        </View>
-                        {req.responders > 0 && (
-                          <View style={styles.requestMetaRow}>
-                            <MessageSquare size={13} color={colors.accent} />
-                            <Text style={[styles.requestMetaText, { color: colors.accent }]}>
-                              {req.responders} responder{req.responders > 1 ? 's' : ''}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      {req.description ? (
-                        <Text style={[styles.requestDescription, { color: colors.textTertiary }]} numberOfLines={2}>
-                          {req.description}
-                        </Text>
-                      ) : null}
-                      {req.image && (
-                        <Image source={{ uri: req.image }} style={styles.requestThumb} resizeMode="cover" />
-                      )}
-                      {req.tags.length > 0 && (
-                        <View style={styles.assistanceTags}>
-                          {req.tags.map((tag) => (
-                            <View key={tag} style={[styles.assistanceTag, { backgroundColor: colors.accent + '15' }]}>
-                              <Tag size={10} color={colors.accent} />
-                              <Text style={[styles.assistanceTagText, { color: colors.accent }]}>{tag}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                      <View style={styles.requestCardActions}>
-                        <TouchableOpacity
-                          style={[styles.requestDeleteBtn, { borderColor: colors.border }]}
-                          onPress={() => {
-                            Alert.alert(
-                              'Delete Request?',
-                              `Are you sure you want to delete \"${req.title}\"?`,
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Delete', style: 'destructive', onPress: () => deleteRequest(req.id) },
-                              ]
-                            );
-                          }}
-                        >
-                          <X size={14} color={ACCENT_COLORS.coral} />
-                          <Text style={[styles.requestDeleteText, { color: ACCENT_COLORS.coral }]}>Delete</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </>
-            )}
-          </View>
-        ) : datePlans.length === 0 ? (
-          <View style={styles.emptyState}>
-            <View style={[styles.emptyIcon, { backgroundColor: colors.surface }]}>
-              <Calendar size={40} color={colors.textTertiary} />
+              {selected !== today ? (
+                <TouchableOpacity onPress={() => { haptic('select'); setSelected(today); }} style={[styles.todayPill, { borderColor: colors.border }]}>
+                  <Text style={[styles.todayText, { color: colors.text }]}>Today</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No plans for {getDateLabel(selectedDate)}</Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              Tap + to add a quick plan
-            </Text>
-          </View>
+
+            {dayItems.length > 0 ? (
+              <View style={[styles.progressTrack, { backgroundColor: colors.surfaceHighlight }]}>
+                <View style={[styles.progressFill, { width: `${Math.round((doneCount / dayItems.length) * 100)}%`, backgroundColor: '#10B981' }]} />
+              </View>
+            ) : null}
+
+            {/* Quick actions */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
+              <ActionChip icon={<Plus size={16} color={colors.accent} />} label="Quick plan" colors={colors} onPress={() => setShowAdd(true)} />
+              <ActionChip icon={<LayoutGrid size={16} color="#8B5CF6" />} label="Time block" colors={colors} onPress={() => router.push({ pathname: '/planner/add-block', params: { date: selected } } as any)} />
+              <ActionChip icon={<Wand2 size={16} color="#7B61FF" />} label="Plan my day" colors={colors} onPress={() => router.push({ pathname: '/planner/plan-day', params: { date: selected } } as any)} />
+              <ActionChip icon={<Briefcase size={16} color="#10B981" />} label="Find jobs" colors={colors} onPress={() => router.push('/planner/browse-jobs' as any)} />
+            </ScrollView>
+
+            {/* Day list */}
+            {isLoading && plans.length === 0 ? (
+              <Text style={[styles.muted, { color: colors.textTertiary }]}>Loading your plans…</Text>
+            ) : dayItems.length === 0 ? (
+              <TouchableOpacity style={[styles.empty, { borderColor: colors.border }]} onPress={() => setShowAdd(true)} activeOpacity={0.8}>
+                <CalendarDays size={26} color={colors.textTertiary} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>Nothing planned {selected === today ? 'today' : 'yet'}</Text>
+                <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Tap to add something for {dateTitle === 'Today' || dateTitle === 'Tomorrow' ? dateTitle.toLowerCase() : dateSub}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {dayItems.map(({ plan, summary }) => (
+                  <PlanRow key={plan.id} plan={plan} summary={summary} colors={colors} onOpen={() => openPlan(plan)} onToggleDone={() => toggleDone(plan)} onLongPress={() => planActions(plan)} />
+                ))}
+                <Text style={[styles.tip, { color: colors.textTertiary }]}>Tap the circle to check off · hold a plan for more options</Text>
+              </View>
+            )}
+
+            {/* Coming up */}
+            {upcoming.length > 0 ? (
+              <View style={{ marginTop: 26 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Coming up</Text>
+                <View style={{ gap: 8 }}>
+                  {upcoming.map(({ plan, summary }) => (
+                    <PlanRow key={plan.id} plan={plan} summary={summary} colors={colors} showDate onOpen={() => openPlan(plan)} onToggleDone={() => toggleDone(plan)} onLongPress={() => planActions(plan)} />
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </>
         ) : (
-          <View style={styles.plansList}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {datePlans.length} plan{datePlans.length > 1 ? 's' : ''} for {getDateLabel(selectedDate)}
-            </Text>
-            {datePlans.map(plan => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                onPress={() => router.push(`/planner/${plan.id}` as any)}
-                onDelete={() => handleDeletePlan(plan.id)}
-                colors={colors}
-              />
-            ))}
-          </View>
+          <>
+            {pendingOrders > 0 ? (
+              <TouchableOpacity style={styles.banner} onPress={() => router.push('/(tabs)/manage' as any)} activeOpacity={0.8}>
+                <BellRing size={18} color="#D97706" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.bannerTitle}>{pendingOrders} helper{pendingOrders > 1 ? 's' : ''} waiting</Text>
+                  <Text style={[styles.bannerSub, { color: colors.textSecondary }]}>Review and accept offers</Text>
+                </View>
+                <ChevronRight size={18} color="#D97706" />
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={[styles.postBtn, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={() => setShowRequest(true)}>
+              <View style={styles.postIcon}><Search size={18} color="#D97706" /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.postTitle, { color: colors.text }]}>Need a hand?</Text>
+                <Text style={[styles.postSub, { color: colors.textSecondary }]}>Post a request and let helpers come to you</Text>
+              </View>
+              <Plus size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 22 }]}>Your requests</Text>
+            {myRequests.length === 0 ? (
+              <Text style={[styles.muted, { color: colors.textTertiary }]}>You haven&apos;t posted any requests yet.</Text>
+            ) : myRequests.map((r) => {
+              const cat = SERVICE_CATEGORIES.find((c) => c.key === r.category);
+              const st = REQUEST_STATUS[r.status] || REQUEST_STATUS.open;
+              const budget = r.budgetMin && r.budgetMax ? `$${r.budgetMin}–$${r.budgetMax}` : r.budgetMax || r.budgetMin ? `$${r.budgetMax || r.budgetMin}` : null;
+              return (
+                <View key={r.id} style={[styles.reqCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.reqTop}>
+                    <Text style={{ fontSize: 22 }}>{cat?.icon || '✨'}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.reqTitle, { color: colors.text }]} numberOfLines={2}>{r.title}</Text>
+                      <Text style={[styles.reqMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {[r.date ? relativeLabel(r.date) : null, r.time ? formatTime12(r.time) : null, r.location || null, budget].filter(Boolean).join(' · ') || cat?.label}
+                      </Text>
+                    </View>
+                    <View style={[styles.status, { backgroundColor: st.color + '1F' }]}>
+                      <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
+                    </View>
+                  </View>
+                  {r.image ? <Image source={{ uri: r.image }} style={styles.reqImage} /> : null}
+                  {r.responders > 0 ? (
+                    <View style={styles.reqResp}>
+                      <MessageSquare size={13} color={colors.accent} />
+                      <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600' }}>{r.responders} offer{r.responders > 1 ? 's' : ''}</Text>
+                    </View>
+                  ) : null}
+                  <View style={[styles.reqActions, { borderTopColor: colors.border }]}>
+                    {r.status === 'open' || r.status === 'in_progress' ? (
+                      <TouchableOpacity onPress={() => { haptic('success'); updateRequestStatus(r.id, 'fulfilled'); }} style={styles.reqAction}>
+                        <Check size={15} color="#10B981" />
+                        <Text style={[styles.reqActionText, { color: '#10B981' }]}>Mark fulfilled</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => updateRequestStatus(r.id, 'open')} style={styles.reqAction}>
+                        <Clock size={15} color={colors.textSecondary} />
+                        <Text style={[styles.reqActionText, { color: colors.textSecondary }]}>Reopen</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      onPress={() => Alert.alert('Delete request?', `"${r.title}" will be removed.`, [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => deleteRequest(r.id) },
+                      ])}
+                      style={styles.reqAction}
+                    >
+                      <X size={15} color="#EF4444" />
+                      <Text style={[styles.reqActionText, { color: '#EF4444' }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </>
         )}
-        <View style={styles.bottomSpacer} />
       </ScrollView>
 
-      {/* Quick Plan Modal */}
-      <QuickPlanModal
-        visible={showQuickPlan}
-        onClose={() => setShowQuickPlan(false)}
-        onSave={handleQuickCreate}
+      <QuickAddSheet visible={showAdd} date={selected} onClose={() => setShowAdd(false)} colors={colors} />
+      <RequestSheet
+        visible={showRequest}
+        date={selected}
+        onClose={() => setShowRequest(false)}
         colors={colors}
-      />
-
-      {/* Create Request Modal */}
-      <CreateRequestModal
-        visible={showCreateRequest}
-        onClose={() => setShowCreateRequest(false)}
-        onCreate={handleCreateRequest}
-        colors={colors}
-        selectedDate={selectedDate}
+        onCreate={(r) => {
+          const cat = SERVICE_CATEGORIES.find((c) => c.key === r.category);
+          createRequest({
+            ...r,
+            tags: cat ? [cat.label] : [],
+            creatorId: user?.id || '',
+            createdBy: { name: user?.fullName || user?.username || 'You', avatar: user?.avatar || '' },
+          });
+          setTab('requests');
+        }}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  headerBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionCards: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 8,
-    gap: 10,
-  },
-  actionCard: {
-    flex: 1,
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  actionGradient: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 6,
-  },
-  actionText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-    color: '#FFF',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  statCard: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: '700' as const,
-  },
-  statLabel: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  calendar: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 12,
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  navBtn: {
-    padding: 8,
-  },
-  monthTitle: {
-    fontSize: 17,
-    fontWeight: '700' as const,
-  },
-  weekdayRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  weekdayCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  weekdayText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-  },
-  calendarRow: {
-    flexDirection: 'row',
-  },
-  dayCell: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    minHeight: 40,
-  },
-  dayCellSelected: {
-    borderRadius: 10,
-    margin: 2,
-  },
-  dayText: {
-    fontSize: 15,
-    fontWeight: '500' as const,
-  },
-  planDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    marginTop: 3,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: 16,
-    paddingBottom: 100,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingTop: 40,
-    paddingHorizontal: 32,
-  },
-  emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 15,
-    textAlign: 'center',
-  },
-  plansList: {
-    paddingHorizontal: 16,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700' as const,
-    marginBottom: 12,
-  },
-  planCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  planAccent: {
-    width: 4,
-    alignSelf: 'stretch',
-  },
-  planContent: {
-    flex: 1,
-    padding: 14,
-  },
-  planHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  planBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 6,
-  },
-  planBadgeText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-  },
-  planTitle: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    marginBottom: 10,
-  },
-  planMeta: {
-    gap: 6,
-  },
-  planMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  planMetaText: {
-    fontSize: 13,
-  },
-  assistanceTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
-  },
-  assistanceTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    gap: 4,
-  },
-  assistanceTagText: {
-    fontSize: 11,
-    fontWeight: '600' as const,
-  },
-  planFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 10,
-  },
-  planTime: {
-    fontSize: 11,
-    flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '600' as const,
-    textTransform: 'capitalize',
-  },
-  planChevron: {
-    marginRight: 12,
-  },
-  bottomSpacer: {
-    height: 40,
-  },
-  // ── Quick Plan Modal ──
-  qpModal: { flex: 1 },
-  qpHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
-  qpTitle: { fontSize: 17, fontWeight: '700' },
-  qpSaveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
-  qpLabel: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  qpInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  qpNotes: { minHeight: 80 },
-  thumbnailPicker: { borderRadius: 12, borderWidth: 1, overflow: 'hidden', marginBottom: 4 },
-  thumbnailPreviewWrap: { position: 'relative' },
-  thumbnailPreview: { width: '100%', height: 120, resizeMode: 'cover' },
-  thumbnailOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, alignItems: 'center' },
-  thumbnailOverlayText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  thumbnailPlaceholder: { height: 80, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  thumbnailText: { fontSize: 14 },
-  qpTimeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
-  qpTimeText: { fontSize: 13, fontWeight: '600' },
-  qpCatGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  qpCatBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
-  qpCatText: { fontSize: 13, fontWeight: '600' },
-  // ── Mode Toggle ──
-  modeToggle: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 4,
-    gap: 4,
-  },
-  modeBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  modeBtnText: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-  },
-  modeBadge: {
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  modeBadgeText: {
-    fontSize: 11,
-    fontWeight: '700' as const,
-    color: '#FFF',
-  },
-  // ── Request Cards ──
-  requestCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 14,
-  },
-  requestCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  requestIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestTitle: {
-    fontSize: 15,
-    fontWeight: '700' as const,
-    marginBottom: 2,
-  },
-  requestLocation: {
-    fontSize: 12,
-  },
-  requestMeta: {
-    gap: 4,
-    marginBottom: 6,
-  },
-  requestMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  requestMetaText: {
-    fontSize: 12,
-    fontWeight: '500' as const,
-  },
-  requestDescription: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 8,
-  },
+function ActionChip({ icon, label, onPress, colors }: { icon: React.ReactNode; label: string; onPress: () => void; colors: any }) {
+  return (
+    <TouchableOpacity style={[styles.action, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { haptic(); onPress(); }}>
+      {icon}
+      <Text style={[styles.actionText, { color: colors.text }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
-  requestThumb: {
-    width: '100%',
-    height: 160,
-    borderRadius: 10,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  requestCardActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    paddingTop: 8,
-  },
-  requestDeleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  requestDeleteText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  headerBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+
+  segment: { flexDirection: 'row', marginHorizontal: 16, marginTop: 6, marginBottom: 12, padding: 3, borderRadius: 11 },
+  segBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 9 },
+  segText: { fontSize: 14, fontWeight: '700' },
+  segBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  segBadgeText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+
+  calCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 },
+  calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8, marginBottom: 8 },
+  calTitleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  calTitle: { fontSize: 15, fontWeight: '700' },
+  weekRow: { flexDirection: 'row' },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  dayCell: { flex: 1, alignItems: 'center', paddingVertical: 3 },
+  dayBubble: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  dayNum: { fontSize: 15, fontWeight: '600' },
+  dot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
+
+  dayHeader: { flexDirection: 'row', alignItems: 'center', marginTop: 20 },
+  dayTitle: { fontSize: 24, fontWeight: '800', letterSpacing: -0.4 },
+  daySub: { fontSize: 14, marginTop: 2 },
+  todayPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, borderWidth: 1 },
+  todayText: { fontSize: 13, fontWeight: '700' },
+  progressTrack: { height: 4, borderRadius: 2, marginTop: 12, overflow: 'hidden' },
+  progressFill: { height: 4, borderRadius: 2 },
+
+  actions: { gap: 8, paddingVertical: 14 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 36, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth },
+  actionText: { fontSize: 13, fontWeight: '700' },
+
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
+  rowTime: { width: 62 },
+  rowTimeMain: { fontSize: 13, fontWeight: '700' },
+  rowTimeSub: { fontSize: 11, marginTop: 2 },
+  rowBar: { width: 4, alignSelf: 'stretch', borderRadius: 2 },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTitle: { fontSize: 15, fontWeight: '700' },
+  rowTitleDone: { textDecorationLine: 'line-through' },
+  rowMetaLine: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  rowLabel: { fontSize: 12, fontWeight: '700' },
+  rowSub: { fontSize: 12, flexShrink: 1 },
+  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  tip: { fontSize: 12, textAlign: 'center', marginTop: 6 },
+
+  sectionTitle: { fontSize: 17, fontWeight: '800', marginBottom: 10 },
+  muted: { fontSize: 14, paddingVertical: 16, textAlign: 'center' },
+  empty: { alignItems: 'center', gap: 6, paddingVertical: 28, borderRadius: 16, borderWidth: 1, borderStyle: 'dashed' },
+  emptyTitle: { fontSize: 16, fontWeight: '700', marginTop: 4 },
+  emptySub: { fontSize: 13 },
+
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: '#F59E0B14', borderWidth: 1, borderColor: '#F59E0B55', marginBottom: 12 },
+  bannerTitle: { fontSize: 14, fontWeight: '800', color: '#B45309' },
+  bannerSub: { fontSize: 12, marginTop: 1 },
+  postBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
+  postIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F59E0B1F', alignItems: 'center', justifyContent: 'center' },
+  postTitle: { fontSize: 15, fontWeight: '800' },
+  postSub: { fontSize: 13, marginTop: 2 },
+  reqCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10, overflow: 'hidden' },
+  reqTop: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  reqTitle: { fontSize: 15, fontWeight: '700' },
+  reqMeta: { fontSize: 12, marginTop: 3 },
+  reqImage: { height: 120, marginHorizontal: 14, borderRadius: 10, marginBottom: 10 },
+  reqResp: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingBottom: 10 },
+  reqActions: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth },
+  reqAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11 },
+  reqActionText: { fontSize: 13, fontWeight: '700' },
+  status: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  statusText: { fontSize: 11, fontWeight: '800' },
+
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  sheetTitle: { fontSize: 16, fontWeight: '700' },
+  saveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 },
+  saveText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
+  titleInput: { fontSize: 22, fontWeight: '700', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  fieldLabel: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, borderWidth: 1 },
+  chipText: { fontSize: 13, fontWeight: '700' },
+  catDot: { width: 8, height: 8, borderRadius: 4 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46 },
+  input: { flex: 1, fontSize: 15 },
+  notes: { minHeight: 90, borderWidth: 1, borderRadius: 12, padding: 12, fontSize: 15 },
+  photoPick: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 64, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', overflow: 'hidden' },
+  photoPreview: { width: '100%', height: '100%' },
+  hint: { fontSize: 13, textAlign: 'center' },
 });

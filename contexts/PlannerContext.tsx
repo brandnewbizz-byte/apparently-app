@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import * as localApi from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
 
@@ -113,7 +112,31 @@ interface PlannerState {
   deletePlan: (id: string) => Promise<void>;
   getPlansByDate: (date: string) => Plan[];
   getPlanById: (id: string) => Plan | undefined;
-  refetch: () => void;
+  /** Mark a plan pending / active / completed / cancelled. */
+  setPlanStatus: (id: string, status: Plan['status']) => Promise<boolean>;
+  refetch: () => Promise<void>;
+}
+
+function mapRow(row: any): Plan {
+  return {
+    id: String(row.id),
+    user_id: row.user_id,
+    date: row.date,
+    date_label: row.date_label ?? undefined,
+    location_type: row.location_type ?? undefined,
+    custom_location: row.custom_location ?? undefined,
+    transport: row.transport ?? undefined,
+    pickup_zip: row.pickup_zip ?? undefined,
+    pickup_city: row.pickup_city ?? undefined,
+    pickup_state: row.pickup_state ?? undefined,
+    dropoff_zip: row.dropoff_zip ?? undefined,
+    dropoff_city: row.dropoff_city ?? undefined,
+    dropoff_state: row.dropoff_state ?? undefined,
+    plan: row.plan ?? undefined,
+    status: row.status || 'pending',
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? undefined,
+  };
 }
 
 export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() => {
@@ -128,156 +151,59 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      logger.info('Planner', 'Fetching plans...');
-      
-      // Try Supabase first
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data, error } = await supabase
-            .from('plans')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
-
-          if (!error && data) {
-            logger.info('Planner', 'Fetched plans from Supabase', { length: data.length });
-            return (data ?? []).map((row: any) => ({
-              id: String(row.id),
-              user_id: row.user_id,
-              date: row.date,
-              date_label: row.date_label,
-              location_type: row.location_type,
-              custom_location: row.custom_location,
-              transport: row.transport,
-              pickup_zip: row.pickup_zip,
-              pickup_city: row.pickup_city,
-              pickup_state: row.pickup_state,
-              dropoff_zip: row.dropoff_zip,
-              dropoff_city: row.dropoff_city,
-              dropoff_state: row.dropoff_state,
-              plan: row.plan,
-              status: row.status || 'pending',
-              created_at: row.created_at,
-              updated_at: row.updated_at,
-            })) as Plan[];
-          }
-        }
-      } catch (e) {
-        logger.info('Planner', 'Supabase unavailable, trying local API...');
+      const userId = session?.user?.id;
+      if (!userId) return [] as Plan[];
+      const { data, error } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('user_id', userId)
+        .order('date', { ascending: true });
+      if (error) {
+        logger.warn('Planner', 'Fetch plans failed', { message: error.message });
+        throw error;
       }
-
-      // Fall back to local API
-      try {
-        const authId = await supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
-        const localPlans = await localApi.getPlans(authId);
-        if (localPlans && localPlans.length > 0) {
-          logger.info('Planner', 'Fetched plans from local API', { length: localPlans.length });
-          return localPlans.map((row: any) => ({
-            id: String(row.id),
-            user_id: row.user_id || authId,
-            date: row.date,
-            date_label: row.date_label,
-            location_type: row.location_type,
-            custom_location: row.custom_location,
-            transport: row.transport,
-            pickup_zip: row.pickup_zip,
-            pickup_city: row.pickup_city,
-            pickup_state: row.pickup_state,
-            dropoff_zip: row.dropoff_zip,
-            dropoff_city: row.dropoff_city,
-            dropoff_state: row.dropoff_state,
-            plan: row.plan || row.plan_details,
-            status: row.status || 'pending',
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-          })) as Plan[];
-        }
-      } catch (e2) {
-        logger.info('Planner', 'Local API also unavailable');
-      }
-
-      return [] as Plan[];
+      return (data ?? []).map(mapRow);
     },
     staleTime: 1000 * 30,
   });
 
   React.useEffect(() => {
-    if (plansQuery.data) {
-      setPlans(plansQuery.data);
-    }
+    if (plansQuery.data) setPlans(plansQuery.data);
   }, [plansQuery.data]);
+
+  // Never show the previous account's plans after signing out / switching.
+  React.useEffect(() => {
+    if (!session?.user) setPlans([]);
+  }, [session?.user]);
 
   const { mutateAsync: createPlanMutation } = useMutation({
     mutationFn: async (input: CreatePlanInput) => {
-      logger.info('Planner', 'Creating plan', { input });
-
-      // Try Supabase first
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const payload = {
-            user_id: user.id,
-            date: input.date,
-            date_label: input.date_label || null,
-            location_type: input.location_type,
-            custom_location: input.custom_location || null,
-            transport: input.transport,
-            pickup_zip: input.pickup_zip || null,
-            pickup_city: input.pickup_city || null,
-            pickup_state: input.pickup_state || null,
-            dropoff_zip: input.dropoff_zip || null,
-            dropoff_city: input.dropoff_city || null,
-            dropoff_state: input.dropoff_state || null,
-            plan: input.plan_details,
-            status: input.status || 'pending',
-          };
-
-          const { data, error } = await supabase
-            .from('plans')
-            .insert(payload)
-            .select('*')
-            .single();
-
-          if (!error && data) {
-            logger.info('Planner', 'Created plan in Supabase', { data });
-            return data as Plan;
-          }
-        }
-      } catch (e) {
-        logger.info('Planner', 'Supabase create failed, trying local API...');
+      const userId = session?.user?.id;
+      if (!userId) throw new Error('You need to be signed in to save plans.');
+      const payload = {
+        user_id: userId,
+        date: input.date,
+        date_label: input.date_label || null,
+        location_type: input.location_type,
+        custom_location: input.custom_location || null,
+        transport: input.transport,
+        pickup_zip: input.pickup_zip || null,
+        pickup_city: input.pickup_city || null,
+        pickup_state: input.pickup_state || null,
+        dropoff_zip: input.dropoff_zip || null,
+        dropoff_city: input.dropoff_city || null,
+        dropoff_state: input.dropoff_state || null,
+        plan: input.plan_details,
+        status: input.status || 'pending',
+      };
+      const { data, error } = await supabase.from('plans').insert(payload).select('*').single();
+      if (error || !data) {
+        logger.error('Planner', 'Create plan failed', { message: error?.message });
+        throw error || new Error('Plan was not saved');
       }
-
-      // Fall back to local API
-      try {
-        const authId = await supabase.auth.getUser().then(({data}: any) => data?.user?.id || null);
-        const localPlan = {
-          user_id: authId,
-          title: input.date_label || `Plan for ${input.date}`,
-          date: input.date,
-          start_time: '',
-          duration_minutes: 60,
-          category: input.location_type,
-          location_type: input.location_type,
-          location: input.custom_location || '',
-          transport: input.transport,
-          assistance: input.plan_details?.assistance || [],
-          payment: input.plan_details?.payment || 'cash',
-          priority: 'medium',
-        };
-        const result = await localApi.createPlan(localPlan);
-        logger.info('Planner', 'Created plan in local API', { result });
-        return {
-          id: result?.id || `local-${Date.now()}`,
-          user_id: authId || 'unknown',
-          date: input.date,
-          status: input.status || 'pending',
-          created_at: new Date().toISOString(),
-        } as Plan;
-      } catch (e2) {
-        logger.error('Planner', 'Local API create also failed', { e2 });
-        throw new Error('Could not create plan - all backends unavailable');
-      }
+      const created = mapRow(data);
+      setPlans((prev) => [...prev, created]);
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -288,15 +214,16 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<CreatePlanInput> }) => {
       logger.info('Planner', 'Updating plan', { id, updates });
 
-      const payload: any = {};
-      if (updates.date) payload.date = updates.date;
-      if (updates.date_label) payload.date_label = updates.date_label;
-      if (updates.location_type) payload.location_type = updates.location_type;
-      if (updates.custom_location) payload.custom_location = updates.custom_location;
-      if (updates.transport) payload.transport = updates.transport;
-      if (updates.pickup_zip) payload.pickup_zip = updates.pickup_zip;
-      if (updates.dropoff_zip) payload.dropoff_zip = updates.dropoff_zip;
-      if (updates.plan_details) payload.plan = updates.plan_details;
+      const payload: any = { updated_at: new Date().toISOString() };
+      if (updates.date !== undefined) payload.date = updates.date;
+      if (updates.date_label !== undefined) payload.date_label = updates.date_label;
+      if (updates.location_type !== undefined) payload.location_type = updates.location_type;
+      if (updates.custom_location !== undefined) payload.custom_location = updates.custom_location;
+      if (updates.transport !== undefined) payload.transport = updates.transport;
+      if (updates.pickup_zip !== undefined) payload.pickup_zip = updates.pickup_zip;
+      if (updates.dropoff_zip !== undefined) payload.dropoff_zip = updates.dropoff_zip;
+      if (updates.plan_details !== undefined) payload.plan = updates.plan_details;
+      if (updates.status !== undefined) payload.status = updates.status;
 
       const { data, error } = await supabase
         .from('plans')
@@ -310,8 +237,9 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         throw error;
       }
 
-      logger.info('Planner', 'Updated plan', { data });
-      return data as Plan;
+      const updated = mapRow(data);
+      setPlans((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      return updated;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -331,6 +259,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
         logger.error('Planner', 'Delete error', { message: error.message });
         throw error;
       }
+      setPlans((prev) => prev.filter((p) => p.id !== id));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -361,6 +290,15 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     await deletePlanMutation(id);
   }, [deletePlanMutation]);
 
+  const setPlanStatus = useCallback(async (id: string, status: Plan['status']): Promise<boolean> => {
+    // Optimistic so the check-off feels instant; rolled back on failure.
+    const before = plans.find((p) => p.id === id);
+    setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
+    const res = await updatePlan(id, { status });
+    if (!res && before) setPlans((prev) => prev.map((p) => (p.id === id ? before : p)));
+    return !!res;
+  }, [plans, updatePlan]);
+
   const getPlansByDate = useCallback((date: string) => {
     return plans.filter(p => p.date === date);
   }, [plans]);
@@ -369,8 +307,8 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     return plans.find(p => p.id === id);
   }, [plans]);
 
-  const refetch = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['plans'] });
+  const refetch = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['plans'] });
   }, [queryClient]);
 
   return {
@@ -381,6 +319,7 @@ export const [PlannerProvider, usePlanner] = createContextHook<PlannerState>(() 
     deletePlan,
     getPlansByDate,
     getPlanById,
+    setPlanStatus,
     refetch,
   };
 });
