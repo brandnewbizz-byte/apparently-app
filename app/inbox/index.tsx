@@ -43,8 +43,9 @@ function summarize(m: Message | undefined, myId: string): string {
   let body = (m.text || m.content || '').trim();
   if (meta.image) body = mine ? 'You sent a photo' : 'Sent a photo';
   else if (meta.voice_note) body = mine ? 'You sent a voice message' : 'Sent a voice message';
-  else if (meta.bundle_card) body = mine ? 'You sent a bundle' : 'Sent a bundle';
-  else if (meta.skill_card) body = mine ? 'You sent a skill' : 'Sent a skill';
+  else if (meta.bundle_card) body = mine ? `You grabbed "${meta.bundle_card.title}"` : `Grabbed your bundle "${meta.bundle_card.title}"`;
+  else if (meta.skill_card) body = mine ? `You grabbed "${meta.skill_card.title}"` : `Grabbed your skill "${meta.skill_card.title}"`;
+  else if (meta.request_card) body = mine ? `You offered help: "${meta.request_card.title}"` : `Can help with "${meta.request_card.title}"`;
   else if (m.sharedPost) body = mine ? 'You shared a post' : 'Shared a post';
   else if (mine) body = `You: ${body}`;
   return body;

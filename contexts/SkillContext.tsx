@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useRef, createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
@@ -34,11 +34,13 @@ export interface UserSkill {
 }
 
 interface SkillContextValue {
+  /** Re-fetch from the server. */
+  reload: () => Promise<void>;
   skills: UserSkill[];
   mySkills: UserSkill[];
   createSkill: (skill: Omit<UserSkill, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
   updateSkill: (id: string, patch: Partial<UserSkill>) => void;
-  grabSkill: (id: string) => void;
+  grabSkill: (id: string) => Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'error' }>;
   deleteSkill: (id: string) => void;
 }
 
@@ -59,8 +61,10 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const { user } = useAuth();
 
-  useEffect(() => {
-    let cancelled = false;
+  const reloadRef = useRef(0);
+  const reload = useCallback(async () => {
+    const run = ++reloadRef.current;
+    const cancelledNow = () => run !== reloadRef.current;
     const mapRow = (row: any): UserSkill => ({
       id: row.id,
       title: row.service || '',
@@ -102,16 +106,29 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           if (!error && data?.length) liveSkills = data.map(mapRow);
         }
 
-        if (cancelled) return;
+        if (cancelledNow()) return;
 
         if (liveSkills.length === 0) {
           const stored = await AsyncStorage.getItem(STORAGE_KEY);
           if (stored) {
             const cached = JSON.parse(stored);
             setSkills(cached);
-            setMySkills(cached);
+            const { data: { user: cu } } = await supabase.auth.getUser();
+            setMySkills(cached.filter((x: any) => x.creatorId === (cu?.id || '')));
           }
         } else {
+          // Rows don't carry the creator's name/avatar — look them up.
+          try {
+            const ids = [...new Set(liveSkills.map((x) => x.creatorId).filter(Boolean))];
+            if (ids.length) {
+              const { data: profs } = await supabase.from('profiles').select('id, full_name, username, avatar').in('id', ids);
+              const byId = new Map((profs || []).map((p: any) => [p.id, p]));
+              for (const x of liveSkills) {
+                const pr: any = byId.get(x.creatorId || '');
+                if (pr) x.creator = { ...x.creator, name: x.creator?.name && x.creator.name !== 'Unknown' ? x.creator.name : (pr.full_name || pr.username || 'Someone'), avatar: x.creator?.avatar || pr.avatar || '' };
+              }
+            }
+          } catch { /* names are optional */ }
           setSkills(liveSkills);
           const { data: { user: authUser } } = await supabase.auth.getUser();
           setMySkills(liveSkills.filter((s) => s.creatorId === (authUser?.id || '')));
@@ -124,12 +141,14 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           if (stored) setSkills(JSON.parse(stored));
         } catch {}
       } finally {
-        if (!cancelled) setIsLoaded(true);
+        if (!cancelledNow()) setIsLoaded(true);
       }
     };
-    loadSkills();
-    return () => { cancelled = true; };
+    await loadSkills();
   }, []);
+
+  // Load on start and again when the signed-in account changes.
+  useEffect(() => { reload(); }, [reload, user?.id]);
 
   const saveSkills = useCallback(async (updatedSkills: UserSkill[]) => {
     try {
@@ -194,112 +213,72 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     });
   }, [isLoaded, saveSkills]);
 
-  const grabSkill = useCallback((id: string) => {
+  /** Book a skill. Resolves once the booking is recorded. */
+  const grabSkill = useCallback(async (id: string): Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'error' }> => {
     const skill = skills.find((s) => s.id === id);
-    if (skill && user?.id && skill.creatorId === user.id) {
-      logger.warn('SkillContext', 'Cannot grab own skill');
-      return;
+    if (!skill) return { ok: false, reason: 'not_found' };
+    if (!user?.id || user.id.startsWith('u-')) return { ok: false, reason: 'not_signed_in' };
+    if (!skill.creatorId || skill.creatorId.startsWith('u-')) return { ok: false, reason: 'not_found' };
+    if (skill.creatorId === user.id) return { ok: false, reason: 'own' };
+
+    // 1. Record the booking (one per person per skill).
+    const now = new Date().toISOString();
+    const { error: grabErr } = await supabase.from('user_grabs').insert({
+      user_id: user.id,
+      provider_id: skill.creatorId,
+      item_id: skill.id,
+      item_type: 'deal', // user_grabs.item_type: bundle | deal | job | listing
+      title: skill.title,
+      price: Number(skill.price || 0),
+      status: 'pending',
+      provider_name: skill.creator?.name || '',
+      provider_avatar: skill.creator?.avatar || '',
+      created_at: now,
+      updated_at: now,
+      booked_at: now,
+    });
+    if (grabErr) {
+      if (grabErr.code === '23505') return { ok: false, reason: 'already_grabbed' };
+      logger.warn('SkillContext', 'user_grabs insert failed', { error: grabErr });
+      return { ok: false, reason: 'error' };
     }
+
+    // Skills can be booked by many people: only bump the shared counter
+    // (marking the shared row 'grabbed' would hide it from everyone).
     setSkills((prev) => {
-      const updated = prev.map((s) =>
-        s.id === id ? { ...s, status: 'grabbed' as const, grabCount: s.grabCount + 1 } : s
-      );
+      const updated = prev.map((s) => (s.id === id ? { ...s, grabCount: s.grabCount + 1 } : s));
       if (isLoaded) saveSkills(updated);
       return updated;
     });
-    // Sync to Supabase
-    // Skills can be booked by many people: only bump the shared counter
-    // (marking the shared row 'grabbed' would hide it from everyone).
     supabase.rpc('increment_deal_stat', { p_kind: 'skill', p_id: id, p_column: 'grabs' }).then(({ error }) => {
       if (error) logger.warn('SkillContext', 'Grab counter update failed', { error });
     });
-    // Create inbox notification + auto-create DM for the skill owner
-    if (skill?.creatorId && user?.id && skill.creatorId !== user.id) {
-      const grabMessage = `👋 I'm interested in your skill "${skill.title}" — let's chat!`;
-      // 1. Persist the grab as a user_grabs row (responder's "grabbed" list).
-      (async () => {
-        try {
-          const now = new Date().toISOString();
-          const { error } = await supabase.from('user_grabs').insert({
-            user_id: user.id,
-            provider_id: skill.creatorId,
-            item_id: skill.id,
-            item_type: 'skill',
-            title: skill.title,
-            price: Number(skill.price || 0),
-            status: 'pending',
-            provider_name: skill.creator?.name || '',
-            created_at: now,
-            updated_at: now,
-            booked_at: now,
-          });
-          if (error) logger.warn('SkillContext', 'user_grabs insert failed', { error });
-        } catch (e) {
-          logger.warn('SkillContext', 'user_grabs insert exception', { e });
-        }
-      })();
-      // 2. Notification (DB columns: user_id, actor_id, actor_name, actor_avatar, data)
-      const actorName = user.fullName || user.username || 'Someone';
-      const actorAvatar = (user as any)?.avatarUrl || '';
-      supabase.from('notifications').insert({
-        user_id: skill.creatorId,
-        actor_id: user.id,
-        actor_name: actorName,
-        actor_avatar: actorAvatar,
-        type: 'skill_grab',
-        title: `${actorName} grabbed your skill "${skill.title}"`,
-        body: `grabbed your skill "${skill.title}"`,
-        data: {
-          skill_id: id,
-          skill_title: skill.title,
-          skill_image: skill.imageUrl || '',
-          skill_price: Number(skill.price || 0),
-        },
-        read: false,
-        created_at: new Date().toISOString(),
-      }).then(({ error }) => {
-        if (error) logger.warn('SkillContext', 'Notification insert failed', { error });
-      });
-      // 2. Find or create a conversation between these two users
-      (async () => {
-        const [a, b] = [user.id, skill.creatorId].sort();
-        // Look for existing conversation
-        const { data: existing } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('participant_one', a)
-          .eq('participant_two', b)
-          .maybeSingle();
-        let conversationId = existing?.id;
-        if (!conversationId) {
-          // Create new conversation
-          const { data: created, error: createErr } = await supabase
-            .from('conversations')
-            .insert({
-              participant_one: a,
-              participant_two: b,
-            })
-            .select('id')
-            .single();
-          if (createErr) {
-            logger.warn('SkillContext', 'Conversation create failed', { error: createErr });
-            return;
-          }
-          conversationId = created.id;
-        }
-        // 3. Insert the grab message into the conversation with skill card metadata
-        const { error: msgErr } = await supabase.from('messages').insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          receiver_id: skill.creatorId,
-          content: grabMessage,
-          created_at: new Date().toISOString(),
-          read: false,
-        });
-        if (msgErr) logger.warn('SkillContext', 'Grab DM message insert failed', { error: msgErr });
-      })();
-    }
-  }, [isLoaded, saveSkills, user?.id, user?.fullName, user?.username, skills]);
+
+    // 2. Tell the owner — this is what shows in their Manage → Orders.
+    const actorName = user.fullName || user.username || 'Someone';
+    supabase.from('notifications').insert({
+      user_id: skill.creatorId,
+      actor_id: user.id,
+      actor_name: actorName,
+      actor_avatar: user.avatar || '',
+      type: 'skill_grab',
+      title: `${actorName} grabbed your skill "${skill.title}"`,
+      body: `grabbed your skill "${skill.title}"`,
+      data: {
+        skill_id: id,
+        skill_title: skill.title,
+        skill_image: skill.imageUrl || '',
+        skill_price: Number(skill.price || 0),
+        price: Number(skill.price || 0),
+      },
+      read: false,
+      created_at: now,
+    }).then(({ error }) => {
+      if (error) logger.warn('SkillContext', 'Notification insert failed', { error });
+    });
+    // The chat message (with the skill card) is sent by the caller.
+    return { ok: true };
+  }, [isLoaded, saveSkills, user, skills]);
 
   const deleteSkill = useCallback((id: string) => {
     setSkills((prev) => {
@@ -315,8 +294,8 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveSkills]);
 
   const value = useMemo(
-    () => ({ skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill }),
-    [skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill]
+    () => ({ reload, skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill }),
+    [reload, skills, mySkills, createSkill, updateSkill, grabSkill, deleteSkill]
   );
 
   return <SkillContext.Provider value={value}>{children}</SkillContext.Provider>;

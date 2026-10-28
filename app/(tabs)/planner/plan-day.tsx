@@ -132,6 +132,8 @@ interface PlanForm {
 }
 
 const formatDate = (date: Date): string => localDateKey(date);
+// Stored titles must not say "Today" — they're read on other days too.
+const absDate = (key: string): string => new Date(key + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
 const getDateLabel = (dateStr: string): string => {
   const date = new Date(dateStr + 'T12:00:00');
@@ -486,7 +488,7 @@ export default function PlanDayScreen() {
       const planPayload = {
         user_id: user.id,
         date: form.date,
-        date_label: getDateLabel(form.date),
+        date_label: absDate(form.date),
         location_type: form.locationType,
         transport: form.transport,
         pickup_zip: form.chauffeur.pickupZip || null,
@@ -524,7 +526,7 @@ export default function PlanDayScreen() {
           plan_id: planId,
           type: 'chauffeur',
           status: 'pending',
-          title: `Chauffeur - ${getDateLabel(form.date)}`,
+          title: `Chauffeur - ${absDate(form.date)}`,
           description: form.chauffeur.notes || 'Chauffeur service request',
           pickup_zip: form.chauffeur.pickupZip,
           pickup_location: form.chauffeur.pickupAddress,
@@ -573,7 +575,7 @@ export default function PlanDayScreen() {
           plan_id: planId,
           type: 'errands',
           status: 'pending',
-          title: `Errands - ${getDateLabel(form.date)}`,
+          title: `Errands - ${absDate(form.date)}`,
           description: form.errandsDetails.description || 'Errands request',
           payment_method: form.payment,
           tasks: { 
@@ -591,7 +593,7 @@ export default function PlanDayScreen() {
           plan_id: planId,
           type: 'driver',
           status: 'pending',
-          title: `Delivery - ${getDateLabel(form.date)}`,
+          title: `Delivery - ${absDate(form.date)}`,
           description: form.deliveryDetails.items || 'Delivery request',
           pickup_location: form.deliveryDetails.pickupAddress,
           dropoff_location: form.deliveryDetails.dropoffAddress,
@@ -608,7 +610,7 @@ export default function PlanDayScreen() {
           plan_id: planId,
           type: 'other',
           status: 'pending',
-          title: `Assistance - ${getDateLabel(form.date)}`,
+          title: `Assistance - ${absDate(form.date)}`,
           description: form.otherDetails.description || 'Custom request',
           payment_method: form.payment,
           tasks: { date: form.date },

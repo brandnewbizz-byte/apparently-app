@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useRef, createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
@@ -49,6 +49,8 @@ export interface UserBundle {
 }
 
 interface BundleContextValue {
+  /** Re-fetch from the server. */
+  reload: () => Promise<void>;
   bundles: UserBundle[];
   myBundles: UserBundle[];
   createBundle: (bundle: Omit<UserBundle, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
@@ -87,8 +89,10 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
   // Load bundles: backend API (bypasses RLS) → Supabase → AsyncStorage
-  useEffect(() => {
-    let cancelled = false;
+  const reloadRef = useRef(0);
+  const reload = useCallback(async () => {
+    const run = ++reloadRef.current;
+    const cancelledNow = () => run !== reloadRef.current;
     const mapRow = (row: any): UserBundle => {
       const rawImage = row.image || row.cover_image || '';
       const isVideo = isVideoUrl(rawImage);
@@ -140,7 +144,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           if (!error && data?.length) liveBundles = data.map(mapRow);
         }
 
-        if (cancelled) return;
+        if (cancelledNow()) return;
 
         // 3. Final fallback: AsyncStorage
         if (liveBundles.length === 0) {
@@ -148,9 +152,22 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           if (stored) {
             const cached = JSON.parse(stored);
             setBundles(cached);
-            setMyBundles(cached);
+            const { data: { user: cu } } = await supabase.auth.getUser();
+            setMyBundles(cached.filter((x: any) => x.creatorId === (cu?.id || '')));
           }
         } else {
+          // Rows don't carry the creator's name/avatar — look them up.
+          try {
+            const ids = [...new Set(liveBundles.map((x) => x.creatorId).filter(Boolean))];
+            if (ids.length) {
+              const { data: profs } = await supabase.from('profiles').select('id, full_name, username, avatar').in('id', ids);
+              const byId = new Map((profs || []).map((p: any) => [p.id, p]));
+              for (const x of liveBundles) {
+                const pr: any = byId.get(x.creatorId || '');
+                if (pr) x.creator = { ...x.creator, name: x.creator?.name && x.creator.name !== 'Unknown' ? x.creator.name : (pr.full_name || pr.username || 'Someone'), avatar: x.creator?.avatar || pr.avatar || '' };
+              }
+            }
+          } catch { /* names are optional */ }
           setBundles(liveBundles);
           const { data: { user: authUser } } = await supabase.auth.getUser();
           setMyBundles(liveBundles.filter((b) => b.creatorId === (authUser?.id || '')));
@@ -163,12 +180,14 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           if (stored) setBundles(JSON.parse(stored));
         } catch {}
       } finally {
-        if (!cancelled) setIsLoaded(true);
+        if (!cancelledNow()) setIsLoaded(true);
       }
     };
-    loadBundles();
-    return () => { cancelled = true; };
+    await loadBundles();
   }, []);
+
+  // Load on start and again when the signed-in account changes.
+  useEffect(() => { reload(); }, [reload, user?.id]);
 
   // Save bundles to AsyncStorage whenever they change (after initial load)
   const saveBundles = useCallback(async (updatedBundles: UserBundle[]) => {
@@ -310,7 +329,6 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
 
     // Create inbox notification AND auto-create DM for the bundle owner
     if (bundle?.creatorId && user?.id && bundle.creatorId !== user.id) {
-      const grabMessage = `👋 I'm interested in your bundle "${bundle.title}" — let's chat!`;
       // 1. Persist the grab as a user_grabs row (responder's "grabbed" list).
       (async () => {
         try {
@@ -324,6 +342,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
             price: Number(bundle.price || 0),
             status: 'pending',
             provider_name: bundle.creator?.name || '',
+            provider_avatar: bundle.creator?.avatar || '',
             created_at: now,
             updated_at: now,
             booked_at: now,
@@ -349,51 +368,15 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
           bundle_title: bundle.title,
           bundle_image: bundle.imageUrl || '',
           bundle_price: Number(bundle.price || 0),
+          price: Number(bundle.price || 0),
         },
         read: false,
         created_at: new Date().toISOString(),
       }).then(({ error }) => {
         if (error) logger.warn('BundleContext', 'Notification insert failed', { error });
       });
-      // 2. Find or create a conversation between these two users
-      (async () => {
-        const [a, b] = [user.id, bundle.creatorId].sort();
-        // Look for existing conversation
-        const { data: existing } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('participant_one', a)
-          .eq('participant_two', b)
-          .maybeSingle();
-        let conversationId = existing?.id;
-        if (!conversationId) {
-          // Create new conversation
-          const { data: created, error: createErr } = await supabase
-            .from('conversations')
-            .insert({
-              participant_one: a,
-              participant_two: b,
-            })
-            .select('id')
-            .single();
-          if (createErr) {
-            logger.warn('BundleContext', 'Conversation create failed', { error: createErr });
-            return;
-          }
-          conversationId = created.id;
-        }
-        // 3. Insert the grab message into the conversation with bundle card metadata
-        const { error: msgErr } = await supabase.from('messages').insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          // receiver_id lets the owner get this DM live + counted as unread.
-          receiver_id: bundle.creatorId,
-          content: grabMessage,
-          created_at: new Date().toISOString(),
-          read: false,
-        });
-        if (msgErr) logger.warn('BundleContext', 'Grab DM message insert failed', { error: msgErr });
-      })();
+      // The chat message (with the bundle card) is sent by the caller, which
+      // then opens the conversation.
     }
     return { ok: true, spotsLeft: Math.max(capacity - newGrabCount, 0) };
   }, [isLoaded, saveBundles, user?.id, user?.fullName, user?.username, user?.avatar, bundles]);
@@ -412,8 +395,8 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveBundles]);
 
   const value = useMemo(
-    () => ({ bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle }),
-    [bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle]
+    () => ({ reload, bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle }),
+    [reload, bundles, myBundles, createBundle, updateBundle, grabBundle, deleteBundle]
   );
 
   return <BundleContext.Provider value={value}>{children}</BundleContext.Provider>;

@@ -96,6 +96,7 @@ export default function BrowseJobsScreen() {
         .from('job_requests')
         .select('*')
         .eq('status', 'pending')
+        .is('accepted_by', null)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -122,17 +123,23 @@ export default function BrowseJobsScreen() {
       const job = jobsQuery.data?.find(j => j.id === jobId);
       if (!job) throw new Error('Job not found');
 
-      const { error: updateError } = await supabase
-        .from('job_requests')
-        .update({ 
-          status: 'accepted',
-          accepted_by: user.id,
-        })
-        .eq('id', jobId);
-
-      if (updateError) {
-        console.error('[BrowseJobs] Error accepting job:', updateError);
-        throw updateError;
+      // Atomic accept — only one helper can take a job.
+      const { data: acc, error: accErr } = await supabase.rpc('accept_job_request', { p_job: jobId });
+      if (accErr) {
+        const { data: rows, error: updateError } = await supabase
+          .from('job_requests')
+          .update({ status: 'accepted', accepted_by: user.id })
+          .eq('id', jobId)
+          .eq('status', 'pending')
+          .is('accepted_by', null)
+          .select('id');
+        if (updateError || !rows?.length) {
+          console.error('[BrowseJobs] Error accepting job:', updateError || accErr);
+          throw new Error('Could not take this job. It may have just been taken.');
+        }
+      } else if (!(acc as any)?.ok) {
+        const reason = (acc as any)?.reason;
+        throw new Error(reason === 'taken' ? 'Someone already took this job.' : reason === 'own_request' ? "That's your own request." : 'Could not take this job.');
       }
 
       // Notify the owner that their service request was grabbed
@@ -151,10 +158,10 @@ export default function BrowseJobsScreen() {
             actor_id: user.id,
             actor_name: grabberName,
             actor_avatar: grabberAvatar,
-            type: 'job_grabbed',
+            type: 'service_response',
             title: `${grabberName} grabbed your ${typeLabel}`,
             body: `grabbed your ${typeLabel}${job.title ? ' "' + job.title + '"' : ''}`,
-            data: { job_id: job.id, job_type: job.type, plan_id: job.plan_id, job_title: job.title || '', job_label: typeLabel },
+            data: { job_id: job.id, job_type: job.type, plan_id: job.plan_id, job_title: job.title || '', job_label: typeLabel, request_id: job.id, request_title: job.title || typeLabel, item_id: job.id, item_title: job.title || typeLabel, source: 'job' },
             read: false,
             created_at: new Date().toISOString(),
           });

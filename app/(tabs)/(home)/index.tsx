@@ -50,7 +50,7 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePlanner } from '@/contexts/PlannerContext';
-import { localDateKey } from '@/lib/dates';
+import { localDateKey, formatTime12 } from '@/lib/dates';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -61,7 +61,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAbortError, logAbort, withAbortSignal } from '@/lib/abort';
 import { useBundles, type UserBundle } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
-import { useServiceRequests, type ServiceRequest } from '@/contexts/ServiceRequestContext';
+import { useServiceRequests, SERVICE_CATEGORIES, type ServiceRequest } from '@/contexts/ServiceRequestContext';
+import { useMessaging } from '@/contexts/MessagingContext';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -125,7 +126,8 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     status: b.status === 'grabbed' ? 'grabbed' : 'available',
     creatorId: b.creatorId,
     creator: b.creator,
-    summary: b.items.map((i) => i.name),
+    // items are stored either as names (strings) or as item objects
+    summary: (b.items as any[]).map((i) => (typeof i === 'string' ? i : i?.name)).filter(Boolean),
     description: b.description,
     imageUrl: b.imageUrl,
     videoUrl: b.videoUrl,
@@ -274,8 +276,8 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, colors }: Swipeable
     if (!currentBundle) return;
 
     // Track analytics
-    if (action === 'grab') localApi.trackDealStat('bundle', currentBundle.id, 'grab');
-    else if (action === 'skip') localApi.trackDealStat('bundle', currentBundle.id, 'skip');
+    // Grabs are counted by the grab itself (grab_bundle) — counting here too doubled them.
+    if (action === 'skip') localApi.trackDealStat('bundle', currentBundle.id, 'skip');
 
     if (action === 'save') {
       onSave(currentBundle);
@@ -650,6 +652,7 @@ function SwipeBundleCardContent({ bundle, colors }: SwipeBundleCardContentProps)
 
 interface GrabbedBundle {
   id: string;
+  item_id?: string;
   title: string;
   price: number;
   pickup_time: string | null;
@@ -755,8 +758,8 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, colors }: SwipeableSk
   const completeAction = useCallback((action: 'skip' | 'save' | 'grab') => {
     if (!currentSkill) return;
 
-    if (action === 'grab') localApi.trackDealStat('skill', currentSkill.id, 'grab');
-    else if (action === 'skip') localApi.trackDealStat('skill', currentSkill.id, 'skip');
+    // Grabs are counted by grabSkill — counting here too doubled them.
+    if (action === 'skip') localApi.trackDealStat('skill', currentSkill.id, 'skip');
 
     if (action === 'save') {
       onSave(currentSkill);
@@ -1199,7 +1202,21 @@ function ServiceRequestCard({ request, colors }: { request: ServiceRequest; colo
       )}
       <View style={styles.serviceRequestContent}>
         <Text style={[styles.serviceRequestTitle, { color: colors.text }]}>{request.title}</Text>
-        <Text style={[styles.serviceRequestDesc, { color: colors.textSecondary }]} numberOfLines={2}>{request.description}</Text>
+        {request.date || request.time || request.location ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <Clock size={13} color={colors.textTertiary} />
+            <Text style={{ color: colors.textSecondary, fontSize: 13, flexShrink: 1 }} numberOfLines={1}>
+              {[
+                request.date ? new Date(`${request.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '',
+                request.time ? formatTime12(request.time) : '',
+                request.location || '',
+              ].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
+        ) : null}
+        {request.description ? (
+          <Text style={[styles.serviceRequestDesc, { color: colors.textSecondary }]} numberOfLines={2}>{request.description}</Text>
+        ) : null}
         <View style={styles.serviceRequestRequester}>
           <Image source={{ uri: creator.avatar || undefined }} style={styles.requesterAvatar} defaultSource={require('@/assets/images/icon.png')} />
           <View style={styles.requesterInfo}>
@@ -1256,7 +1273,8 @@ function ConfettiModal({ visible, amount, onClose }: ConfettiModalProps) {
             <Trophy size={60} color="#7B61FF" />
           </Animated.View>
           <Text style={styles.confettiTitle}>🎉 GRABBED!</Text>
-          <Text style={styles.confettiAmount}>+${amount} value</Text>
+          {amount > 0 ? <Text style={styles.confettiAmount}>+${amount} value</Text> : null}
+          <Text style={[styles.confettiAmount, { fontSize: 14, opacity: 0.8 }]}>Opening your chat…</Text>
         </Animated.View>
       </View>
     </Modal>
@@ -1271,6 +1289,7 @@ export default function HomeScreen() {
   const queryClient = useQueryClient();
   const { handleScroll: handleTabBarScroll } = useTabBar();
   const { plans } = usePlanner();
+  const [grabbing, setGrabbing] = useState(false);
   // Count what's actually on today's schedule (the old label counted every
   // plan ever made, done or not).
   const todayPlanLabel = useMemo(() => {
@@ -1280,9 +1299,11 @@ export default function HomeScreen() {
     const upcoming = plans.filter((p) => p.date > today && p.status !== 'completed' && p.status !== 'cancelled').length;
     return upcoming > 0 ? `Nothing today · ${upcoming} coming up` : 'Nothing planned yet — tap to start';
   }, [plans]);
-  const { bundles: contextBundles, grabBundle } = useBundles();
-  const { skills: contextSkills, grabSkill } = useSkills();
-  const { requests: serviceRequests, grabRequest } = useServiceRequests();
+  const { bundles: contextBundles, grabBundle, reload: reloadBundles } = useBundles();
+  const { skills: contextSkills, grabSkill, reload: reloadSkills } = useSkills();
+  const { requests: serviceRequests, grabRequest, reload: reloadRequests } = useServiceRequests();
+  const { sendMessage } = useMessaging();
+  const { createPlan } = usePlanner();
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -1365,7 +1386,7 @@ export default function HomeScreen() {
             // The old query asked job_requests for columns it doesn't have,
             // so this list was always empty.
             .from('user_grabs')
-            .select('id, title, price, pickup_time, status, booked_at')
+            .select('id, item_id, title, price, pickup_time, status, booked_at')
             .eq('user_id', user.id)
             .eq('item_type', 'bundle')
             .order('booked_at', { ascending: false })
@@ -1420,33 +1441,73 @@ export default function HomeScreen() {
 
   const currentUpdate = LIVE_UPDATES.length > 0 ? LIVE_UPDATES[liveUpdateIndex] : null;
 
-  const handleGrabBundle = useCallback((bundle: BundlePlan) => {
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-    console.log('Card action:', 'grab_bundle', bundle.id);
-    // Can only grab a bundle whose creator is known — never DM a synthetic user.
+  /**
+   * After a successful grab: send the lister one message with the item card
+   * ("Hey, I've grabbed your bundle…") and open that chat so the two of you
+   * can decide how it's delivered. Uses the normal messaging path, so the
+   * conversation is found-or-created and shows up live for the lister.
+   */
+  const openGrabChat = useCallback(async (
+    ownerId: string,
+    text: (firstName: string) => string,
+    metadata: Record<string, any>,
+  ) => {
+    let info: { name?: string; avatar?: string; username?: string } | undefined;
+    try {
+      const { data } = await supabase.from('profiles').select('full_name, username, avatar').eq('id', ownerId).maybeSingle();
+      if (data) info = { name: data.full_name || data.username || undefined, avatar: data.avatar || undefined, username: data.username || undefined };
+    } catch { /* name is optional */ }
+    const first = (info?.name || '').trim().split(/\s+/)[0] || 'there';
+    sendMessage(ownerId, text(first), info, metadata as any);
+    setShowConfetti(true);
+    setTimeout(() => {
+      setShowConfetti(false);
+      router.push(`/inbox/conversation/${ownerId}` as any);
+    }, 1100);
+  }, [sendMessage, router]);
+
+  const grabFailed = (title: string, reason?: string) => {
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    const msg =
+      reason === 'full' ? 'All spots have been grabbed.'
+      : reason === 'already_grabbed' ? "You've already grabbed this."
+      : reason === 'own' || reason === 'own_bundle' ? "That's your own listing."
+      : reason === 'taken' ? 'Someone else just took this one.'
+      : reason === 'not_signed_in' ? 'Sign in to grab this.'
+      : 'Something went wrong. Please try again.';
+    Alert.alert(title, msg);
+  };
+
+  const money = (n?: number) => (n ? `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '');
+
+  const handleGrabBundle = useCallback(async (bundle: BundlePlan) => {
+    if (grabbing) return;
     const creatorId = bundle.creatorId || (bundle as any).creator_id || '';
-    if (!creatorId || creatorId.startsWith('u-')) {
-      console.warn('Card action: skip grab_bundle (no real creator)', bundle.id);
-      return;
-    }
-    // grabBundle() claims a spot, then creates the conversation + notification
-    // + one DM with the real owner (sort-pair dedupe). No extra sendMessage here.
-    grabBundle(bundle.id).then((res) => {
-      if (res.ok) {
-        setConfettiAmount(bundle.price);
-        setShowConfetti(true);
-        return;
-      }
-      const msg =
-        res.reason === 'full' ? 'All spots for this bundle have been grabbed.'
-        : res.reason === 'already_grabbed' ? "You've already grabbed this bundle."
-        : res.reason === 'own_bundle' ? "You can't grab your own bundle."
-        : 'Could not grab this bundle. Please try again.';
-      Alert.alert('Bundle unavailable', msg);
-    });
-  }, [grabBundle]);
+    if (!creatorId || creatorId.startsWith('u-')) { grabFailed('Bundle unavailable'); return; }
+    setGrabbing(true);
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const res = await grabBundle(bundle.id);
+    setGrabbing(false);
+    if (!res.ok) { grabFailed('Bundle unavailable', res.reason); return; }
+    setConfettiAmount(bundle.price);
+    queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] });
+    openGrabChat(
+      creatorId,
+      (first) => `Hey ${first}! 👋 I just grabbed your bundle "${bundle.title}". How would you like to handle delivery — what times and place work for you?`,
+      {
+        bundle_card: {
+          type: 'bundle_card',
+          id: bundle.id,
+          title: bundle.title,
+          description: bundle.description || (bundle.summary || []).join(' · '),
+          category: bundle.category,
+          price: money(bundle.price),
+          image_url: bundle.imageUrl || bundle.image || '',
+          creator_name: bundle.creatorName || bundle.creator?.name || '',
+        },
+      },
+    );
+  }, [grabBundle, grabbing, openGrabChat, queryClient]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {
     console.log('Card action:', 'skip_bundle', bundle.id);
@@ -1460,23 +1521,33 @@ export default function HomeScreen() {
     setSavedBundles(prev => [...prev, bundle]);
   }, []);
 
-  const handleGrabSkill = useCallback((skill: SkillDeal) => {
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-    console.log('Card action:', 'grab_skill', skill.id);
-    // Can only grab a skill whose creator is known — never DM a synthetic user.
+  const handleGrabSkill = useCallback(async (skill: SkillDeal) => {
+    if (grabbing) return;
     const creatorId = skill.creatorId || (skill as any).creator_id || '';
-    if (!creatorId || creatorId.startsWith('u-')) {
-      console.warn('Card action: skip grab_skill (no real creator)', skill.id);
-      return;
-    }
+    if (!creatorId || creatorId.startsWith('u-')) { grabFailed('Skill unavailable'); return; }
+    setGrabbing(true);
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const res = await grabSkill(skill.id);
+    setGrabbing(false);
+    if (!res.ok) { grabFailed('Skill unavailable', res.reason); return; }
     setConfettiAmount(skill.price);
-    setShowConfetti(true);
-    // grabSkill() internally creates the conversation + notification + one DM
-    // with the real owner (sort-pair dedupe). No extra sendMessage here.
-    grabSkill(skill.id);
-  }, [grabSkill]);
+    openGrabChat(
+      creatorId,
+      (first) => `Hey ${first}! 👋 I just grabbed your skill "${skill.title}". When are you free, and how would you like to deliver it?`,
+      {
+        skill_card: {
+          type: 'skill_card',
+          id: skill.id,
+          title: skill.title,
+          description: skill.description || '',
+          category: skill.category,
+          price: money(skill.price),
+          image_url: skill.imageUrl || skill.image || '',
+          creator_name: skill.creatorName || skill.provider?.name || '',
+        },
+      },
+    );
+  }, [grabSkill, grabbing, openGrabChat]);
 
   const handleSkipSkill = useCallback((skill: SkillDeal) => {
     console.log('Card action:', 'skip_skill', skill.id);
@@ -1490,25 +1561,73 @@ export default function HomeScreen() {
     setSavedSkills(prev => [...prev, skill]);
   }, []);
 
-  const handleGrabRequest = useCallback((request: ServiceRequest) => {
+  const handleGrabRequest = useCallback(async (request: ServiceRequest) => {
+    if (grabbing) return;
+    const requesterId = request.creatorId || '';
+    if (!requesterId || requesterId.startsWith('u-')) { grabFailed('Request unavailable'); return; }
+    setGrabbing(true);
     if (Platform.OS !== 'web') {
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
     }
-    console.log('Card action:', 'grab_request', request.id);
-    // Can only grab a request whose requester is known — never DM a synthetic user
-    // and never re-use the old dead raw job_requests insert (P0.1). The context's
-    // grabRequest() persists the grab, notifies the requester, and sends ONE DM
-    // via the deduped conversation path so it can flow into Orders for fulfillment.
-    const requesterId = request.creatorId || '';
-    if (!requesterId || requesterId.startsWith('u-')) {
-      console.warn('Card action: skip grab_request (no real requester)', request.id);
-      return;
+    const res = await grabRequest(request.id);
+    setGrabbing(false);
+    if (!res.ok) { grabFailed('Request unavailable', res.reason); return; }
+
+    const budget = request.budgetMin && request.budgetMax
+      ? `${money(request.budgetMin)}–${money(request.budgetMax)}`
+      : money(request.budgetMax || request.budgetMin);
+    const when = [request.date ? new Date(`${request.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '', request.time ? formatTime12(request.time) : ''].filter(Boolean).join(' · ');
+    setConfettiAmount(request.budgetMax || request.budgetMin || 0);
+
+    // A planner job you take also goes onto YOUR planner for that day.
+    if (request.source === 'job') {
+      createPlan({
+        date: request.date || localDateKey(),
+        date_label: request.title,
+        location_type: 'home',
+        transport: request.jobType === 'chauffeur' ? 'chauffeur' : 'none',
+        plan_details: {
+          location_type: 'home',
+          transport: request.jobType === 'chauffeur' ? 'chauffeur' : 'none',
+          assistance: [],
+          payment: (request.paymentMethod as any) || 'cash',
+          imported_job: {
+            id: request.id,
+            type: request.jobType || 'other',
+            title: request.title,
+            description: request.description || null,
+            pickup_location: request.pickupLocation || null,
+            dropoff_location: request.dropoffLocation || null,
+            pickup_time: request.time || null,
+            hours: null,
+          },
+        },
+        status: 'active',
+      });
     }
-    const budgetAmount = request.budgetMax || request.budgetMin || 0;
-    setConfettiAmount(budgetAmount);
-    setShowConfetti(true);
-    grabRequest(request.id);
-  }, [grabRequest]);
+
+    const cat = SERVICE_CATEGORIES.find((c) => c.key === request.category);
+    openGrabChat(
+      requesterId,
+      (first) => request.source === 'job'
+        ? `Hey ${first}! 👋 I've taken your request "${request.title}"${when ? ` for ${when}` : ''}. Let's confirm the details here — how would you like it done?`
+        : `Hey ${first}! 👋 I'd love to help with "${request.title}". How would you like the service delivered — when and where works for you?`,
+      {
+        request_card: {
+          type: 'request_card',
+          id: request.id,
+          title: request.title,
+          description: request.description || '',
+          category: cat?.label || request.category,
+          price: budget,
+          image_url: request.image || '',
+          when,
+          location: request.location || '',
+          source: request.source || 'request',
+        },
+      },
+    );
+  }, [grabRequest, grabbing, openGrabChat, createPlan]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
     console.log('Card action:', 'skip_request', request.id);
@@ -1529,7 +1648,12 @@ export default function HomeScreen() {
     }
     try {
       // Await the query invalidation so we know data is refetching
-      await queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['grabbedBundles'] }),
+        reloadBundles(),
+        reloadSkills(),
+        reloadRequests(),
+      ]);
       // Toggle refreshKey to force context-driven sections (bundles, skills, requests)
       // to re-fetch their data from Supabase
       setRefreshKey(k => k + 1);
@@ -1537,7 +1661,7 @@ export default function HomeScreen() {
       // Safety: always stop the spinner, even if invalidation hangs
       setRefreshing(false);
     }
-  }, [queryClient]);
+  }, [queryClient, reloadBundles, reloadSkills, reloadRequests]);
 
   const handleScroll = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
     handleTabBarScroll(event.nativeEvent.contentOffset.y);
@@ -1550,26 +1674,14 @@ export default function HomeScreen() {
     router.push(route as never);
   };
 
-  const myGrabbedBundles: BundlePlan[] = useMemo(() => {
-    if (!grabbedBundles?.length) return [];
-    return grabbedBundles.map(b => ({
-      id: b.id,
-      title: b.title,
-      price: Number(b.price || 0),
-      items: 1,
-      type: 'grabbed',
-      image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
-      distance: 0,
-      status: 'grabbed' as const,
-      bookedAt: b.booked_at,
-      pickupTime: b.pickup_time || undefined,
-    }));
-  }, [grabbedBundles]);
 
   const allBundles = useMemo(() => {
     const seen = new Set<string>();
     const deduped: BundlePlan[] = [];
-    for (const source of [discoveryBundles, myGrabbedBundles, createdBundles]) {
+    // Only bundles you can still grab. (Your own past grabs used to be mixed in
+    // here as new cards, keyed by the grab row's id, so they looked grabbable.)
+    const grabbedIds = new Set((grabbedBundles || []).map((g: any) => g.item_id).filter(Boolean));
+    for (const source of [discoveryBundles.filter((b) => !grabbedIds.has(b.id)), createdBundles]) {
       for (const b of source) {
         if (!seen.has(b.id)) {
           seen.add(b.id);
@@ -1583,7 +1695,7 @@ export default function HomeScreen() {
       const cid = b.creatorId || (b as any).creator_id || '';
       return cid !== uid;
     }) : deduped;
-  }, [discoveryBundles, myGrabbedBundles, createdBundles, user?.id]);
+  }, [discoveryBundles, grabbedBundles, createdBundles, user?.id]);
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])

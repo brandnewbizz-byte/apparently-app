@@ -558,20 +558,26 @@ export default function ConversationScreen() {
     );
   };
 
-  const renderOfferCard = (card: any) => (
-    <View style={[styles.card, { backgroundColor: theirBubble }]}>
-      {card.image_url ? <Image source={{ uri: card.image_url }} style={styles.cardImage} resizeMode="cover" /> : null}
-      <View style={{ padding: 12, gap: 3 }}>
-        <View style={styles.offerTag}>
-          <Tag size={12} color={colors.accent} />
-          <Text style={[styles.offerTagText, { color: colors.accent }]}>{card.type === 'skill_card' ? 'Skill' : 'Bundle'}</Text>
+  const renderOfferCard = (card: any) => {
+    const label = card.type === 'skill_card' ? 'Skill' : card.type === 'request_card' ? (card.source === 'job' ? 'Help request' : 'Service request') : 'Bundle';
+    return (
+      <View style={[styles.card, { backgroundColor: theirBubble }]}>
+        {card.image_url ? <Image source={{ uri: card.image_url }} style={styles.cardImage} resizeMode="cover" /> : null}
+        <View style={{ padding: 12, gap: 3 }}>
+          <View style={styles.offerTag}>
+            <Tag size={12} color={colors.accent} />
+            <Text style={[styles.offerTagText, { color: colors.accent }]}>{label}{card.category ? ` · ${card.category}` : ''}</Text>
+          </View>
+          <Text style={[styles.offerTitle, { color: colors.text }]} numberOfLines={2}>{card.title}</Text>
+          {!!card.price && <Text style={[styles.offerPrice, { color: colors.text }]}>{card.price}</Text>}
+          {!!(card.when || card.location) && (
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={1}>{[card.when, card.location].filter(Boolean).join(' · ')}</Text>
+          )}
+          {!!card.description && <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={2}>{card.description}</Text>}
         </View>
-        <Text style={[styles.offerTitle, { color: colors.text }]} numberOfLines={2}>{card.title}</Text>
-        {!!card.price && <Text style={[styles.offerPrice, { color: colors.text }]}>{card.price}</Text>}
-        {!!card.description && <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={2}>{card.description}</Text>}
       </View>
-    </View>
-  );
+    );
+  };
 
   const WAVE = [6, 12, 18, 10, 22, 14, 8, 20, 16, 10, 24, 12, 18, 8, 14, 20, 10, 16, 6, 12];
   const renderVoice = (voice: any, message: Message, isMe: boolean) => {
@@ -620,7 +626,7 @@ export default function ConversationScreen() {
     const nextSeparates = !next || ts(next) - ts(message) > SEPARATOR_GAP_MS;
     const joinedBelow = !!next && !nextSeparates && next.senderId === message.senderId && ts(next) - ts(message) < GROUP_GAP_MS;
     const meta: any = (message as any).metadata || {};
-    const offer = meta.bundle_card || meta.skill_card;
+    const offer = meta.bundle_card || meta.skill_card || meta.request_card;
     const text = (message.text || '').trim();
     const pending = String(message.id || '').startsWith('pending-');
 

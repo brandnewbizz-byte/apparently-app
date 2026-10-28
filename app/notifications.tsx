@@ -67,7 +67,10 @@ function describe(n: AppNotification): string {
       const p = priceLabel(d.skill_price);
       return `booked your skill${d.skill_title ? ` "${d.skill_title}"` : ''}${p ? ` · ${p}` : ''}.`;
     }
-    case 'service_grab': return `offered to help with${d.request_title ? ` "${d.request_title}"` : ' your request'}.`;
+    case 'service_grab':
+    case 'service_response': return d.source === 'job'
+      ? `took your request${d.request_title ? ` "${d.request_title}"` : ''}.`
+      : `offered to help with${d.request_title ? ` "${d.request_title}"` : ' your request'}.`;
     case 'job_grabbed': return `grabbed your ${d.job_label || 'job'}${d.job_title ? ` "${d.job_title}"` : ''}.`;
     case 'call_request': return 'is calling you.';
     case 'room_invite': return 'invited you to a live room.';
@@ -176,7 +179,7 @@ export default function NotificationsScreen() {
   const openNotification = (n: AppNotification) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (!n.read) markRead(n.id);
-    if (n.type === 'bundle_grab' || n.type === 'skill_grab' || n.type === 'service_grab') {
+    if (n.type === 'bundle_grab' || n.type === 'skill_grab' || n.type === 'service_grab' || n.type === 'service_response') {
       if (n.actorId) router.push(`/inbox/conversation/${n.actorId}` as any);
       return;
     }

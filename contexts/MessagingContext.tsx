@@ -46,6 +46,19 @@ export interface Message {
       image_url?: string;
       creator_name?: string;
     };
+    /** A service request / planner help request that was grabbed. */
+    request_card?: {
+      type: string;
+      id: string;
+      title: string;
+      description?: string;
+      category?: string;
+      price?: string;
+      image_url?: string;
+      when?: string;
+      location?: string;
+      source?: string;
+    };
     voice_note?: { url?: string; path?: string; duration: number };
     image?: { url?: string; path?: string; width?: number; height?: number };
   };

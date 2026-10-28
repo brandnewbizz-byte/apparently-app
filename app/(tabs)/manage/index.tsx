@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import {
@@ -89,9 +89,16 @@ export default function ManageScreen() {
   const insets = useSafeAreaInsets();
 
   const { orders, pendingCount, loading, refresh, acceptOrder, fulfillOrder, declineOrder } = useOrders();
-  const { mySkills, deleteSkill, updateSkill } = useSkills();
-  const { myBundles, deleteBundle, updateBundle } = useBundles();
-  const { plans, deletePlan } = usePlanner();
+  const { mySkills, deleteSkill, updateSkill, reload: reloadSkills } = useSkills();
+  const { myBundles, deleteBundle, updateBundle, reload: reloadBundles } = useBundles();
+  const { plans, deletePlan, refetch: refetchPlans } = usePlanner();
+
+  // Always show fresh orders, listings and plans when you open Manage.
+  // (Latest functions via a ref: their identities change after each load,
+  // which would otherwise re-trigger this and loop.)
+  const reloadAll = React.useRef(() => {});
+  reloadAll.current = () => { refresh(); reloadSkills(); reloadBundles(); refetchPlans(); };
+  useFocusEffect(useCallback(() => { reloadAll.current(); }, []));
 
   const [segment, setSegment] = useState<Segment>('orders');
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
