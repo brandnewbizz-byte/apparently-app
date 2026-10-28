@@ -1,7 +1,8 @@
 // RevenueCat → Supabase subscription sync.
 //
 // Two ways in:
-//  1. RevenueCat webhook  — Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>
+//  1. RevenueCat webhook  — optional Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>.
+//     Without it the call is only a "re-check" ping; state always comes from the RevenueCat API.
 //  2. The app, right after a purchase/restore — Authorization: Bearer <user JWT>,
 //     body {"action":"sync"}.
 // Either way we ask RevenueCat's REST API for the subscriber's real state
@@ -105,6 +106,24 @@ Deno.serve(async (req) => {
         await save(id, state);
       }
       return json({ ok: true, users: ids.length });
+    }
+
+    // 1b. Webhook without the shared secret: treat it only as a "please re-check"
+    //     ping. Nothing in the body is trusted — the state comes from RevenueCat's
+    //     own API, so a forged call can at most trigger a harmless refresh.
+    const looksLikeJwt = auth.split('.').length === 3;
+    if (body && body.event && typeof body.event === 'object' && !looksLikeJwt) {
+      if (!RC_SECRET) return json({ ok: false, reason: 'revenuecat_not_configured' }, 200);
+      const ev = body.event || {};
+      const ids = [ev.app_user_id, ev.original_app_user_id, ...(ev.aliases || []), ...(ev.transferred_to || [])]
+        .filter((x: unknown): x is string => typeof x === 'string' && isUuid(x));
+      for (const id of [...new Set(ids)].slice(0, 5)) {
+        const { data: found } = await admin.auth.admin.getUserById(id);
+        if (!found?.user) continue; // only real Apparently accounts
+        const state = await fromRevenueCat(id);
+        if (state) await save(id, state);
+      }
+      return json({ ok: true, users: ids.length, verified: 'via_api' });
     }
 
     // 2. The app asking to refresh its own subscription
