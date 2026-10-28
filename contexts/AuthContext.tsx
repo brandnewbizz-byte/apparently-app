@@ -390,6 +390,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: userMessage };
       }
 
+      // Supabase doesn't error when the email is already registered (so emails
+      // can't be probed); it returns a user with no identities and sends NO
+      // email. Without this check the app said "check your inbox" and nothing came.
+      if (authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+        const msg = 'An account with this email already exists. Sign in instead, or use "Forgot password" to reset it.';
+        setAuthError(msg);
+        return { success: false, error: msg };
+      }
+
       if (authData.user) {
         const { error: profileError } = await supabase
           .from('profiles')

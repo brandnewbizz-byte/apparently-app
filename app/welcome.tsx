@@ -293,8 +293,8 @@ export default function WelcomeScreen() {
                       <AlertCircle size={16} color={Colors.dark.warning} />
                       <Text style={styles.emailBannerTitle}>Confirm your email first</Text>
                     </View>
-                    <Text style={styles.emailBannerSubtitle} numberOfLines={2}>
-                      We sent a verification link to {pendingVerificationEmail}.
+                    <Text style={styles.emailBannerSubtitle} numberOfLines={3}>
+                      We sent a verification link to {pendingVerificationEmail}. It can take a minute — check your spam or junk folder too.
                     </Text>
                     <TouchableOpacity
                       style={[styles.resendButton, isResendingVerification && styles.resendButtonDisabled]}
