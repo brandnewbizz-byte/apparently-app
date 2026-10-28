@@ -43,6 +43,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isDealLive } from '@/lib/dealStatus';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -1416,7 +1417,7 @@ export default function HomeScreen() {
 
   // Discovery bundles (all available bundles, default order)
   const discoveryBundles = useMemo(() => {
-    const availableBundles = contextBundles.filter((b) => b.status === 'available' || b.status === 'active' || b.status === 'draft' || b.status === 'published');
+    const availableBundles = contextBundles.filter((b) => isDealLive(b.status));
     return availableBundles.map(userBundleToPlan);
   }, [contextBundles]);
 
@@ -1698,7 +1699,7 @@ export default function HomeScreen() {
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])
-      .filter((s) => s?.status === 'available' || s?.status === 'active' || s?.status === 'draft')
+      .filter((s) => isDealLive(s?.status))
       .map((s) => ({
         id: s.id || '',
         title: s.title || '',

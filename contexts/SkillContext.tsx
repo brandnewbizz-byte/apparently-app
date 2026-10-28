@@ -1,5 +1,6 @@
 import React, { useRef, createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fromDbDealStatus, toDbDealStatus } from '@/lib/dealStatus';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
@@ -40,7 +41,7 @@ interface SkillContextValue {
   mySkills: UserSkill[];
   createSkill: (skill: Omit<UserSkill, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
   updateSkill: (id: string, patch: Partial<UserSkill>) => void;
-  grabSkill: (id: string) => Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'error' }>;
+  grabSkill: (id: string) => Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'full' | 'error' }>;
   deleteSkill: (id: string) => void;
 }
 
@@ -77,10 +78,11 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       tags: row.tags || [],
       creatorId: row.user_id || '',
       creator: { name: 'Unknown', avatar: '', rating: 0, reviews: 0 },
-      status: row.status || 'available',
+      status: fromDbDealStatus(row.status, Number(row.grabs) || 0, Math.max(Number(row.available_count) || 20, 1)),
       grabCount: row.grabs || 0,
       createdAt: row.created_at || new Date().toISOString(),
-      availableCount: 1,
+      // How many people can grab it (set by the creator; default 20).
+      availableCount: Math.max(Number(row.available_count) || 20, 1),
     });
 
     const loadSkills = async () => {
@@ -176,19 +178,32 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     });
     setMySkills((prev) => [newSkill, ...prev]);
     // Sync to Supabase (skill_deals table – the real DB table)
-    supabase.from('skill_deals').insert({
+    const skillRow: Record<string, unknown> = {
       id: newSkill.id,
       user_id: newSkill.creatorId || '',
+      creator_id: newSkill.creatorId || null,
       service: newSkill.title,
       description: sanitizeBundleDesc(newSkill.description),
       featured_image: newSkill.imageUrl,
       category: newSkill.category,
       price: newSkill.price,
-      status: newSkill.status,
+      // skill_deals.status only accepts active | paused | deleted
+      status: toDbDealStatus(newSkill.status),
       grabs: 0,
+      available_count: Math.max(Math.floor(newSkill.availableCount || 20), 1),
       created_at: newSkill.createdAt,
-    }).then(({ error }) => {
-      if (error) logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error });
+    };
+    supabase.from('skill_deals').insert(skillRow).then(({ error }) => {
+      if (!error) return;
+      // Database without the grab-limit column yet: save the skill anyway.
+      if (String(error.message || '').includes('available_count')) {
+        const { available_count: _omit, ...rest } = skillRow;
+        supabase.from('skill_deals').insert(rest).then(({ error: retryErr }) => {
+          if (retryErr) logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error: retryErr });
+        });
+        return;
+      }
+      logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error });
     });
     return { success: true };
   }, [isLoaded, saveSkills, mySkills.length]);
@@ -205,7 +220,8 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     if (patch.title !== undefined) dbPatch.service = patch.title;
     if (patch.description !== undefined) dbPatch.description = sanitizeBundleDesc(patch.description);
     if (patch.price !== undefined) dbPatch.price = patch.price;
-    if (patch.status !== undefined) dbPatch.status = patch.status;
+    if (patch.status !== undefined) dbPatch.status = toDbDealStatus(patch.status);
+    if (patch.availableCount !== undefined) dbPatch.available_count = Math.max(Math.floor(patch.availableCount) || 1, 1);
     if (patch.imageUrl !== undefined) dbPatch.featured_image = patch.imageUrl;
     if (patch.category !== undefined) dbPatch.category = patch.category;
     supabase.from('skill_deals').update(dbPatch).eq('id', id).then(({ error }) => {
@@ -214,12 +230,26 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, saveSkills]);
 
   /** Book a skill. Resolves once the booking is recorded. */
-  const grabSkill = useCallback(async (id: string): Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'error' }> => {
+  const grabSkill = useCallback(async (id: string): Promise<{ ok: boolean; reason?: 'own' | 'already_grabbed' | 'not_signed_in' | 'not_found' | 'full' | 'error' }> => {
     const skill = skills.find((s) => s.id === id);
     if (!skill) return { ok: false, reason: 'not_found' };
     if (!user?.id || user.id.startsWith('u-')) return { ok: false, reason: 'not_signed_in' };
     if (!skill.creatorId || skill.creatorId.startsWith('u-')) return { ok: false, reason: 'not_found' };
     if (skill.creatorId === user.id) return { ok: false, reason: 'own' };
+
+    // 0. Claim a spot on the server (respects the creator's grab limit).
+    //    Databases without grab_skill_deal fall back to the old counter path.
+    const { data: claim, error: claimErr } = await supabase.rpc('grab_skill_deal', { p_skill: id });
+    const claimed = !claimErr && claim && (claim as any).ok;
+    if (!claimErr && claim && !(claim as any).ok) {
+      const reason = (claim as any).reason;
+      if (reason === 'full') {
+        setSkills((prev) => prev.map((s) => (s.id === id ? { ...s, status: 'grabbed' } : s)));
+        return { ok: false, reason: 'full' };
+      }
+      if (reason === 'already_grabbed' || reason === 'own' || reason === 'not_found') return { ok: false, reason };
+    }
+    if (!claimed && skill.grabCount >= (skill.availableCount || 20)) return { ok: false, reason: 'full' };
 
     // 1. Record the booking (one per person per skill).
     const now = new Date().toISOString();
@@ -246,13 +276,17 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     // Skills can be booked by many people: only bump the shared counter
     // (marking the shared row 'grabbed' would hide it from everyone).
     setSkills((prev) => {
-      const updated = prev.map((s) => (s.id === id ? { ...s, grabCount: s.grabCount + 1 } : s));
+      const updated = prev.map((s) => (s.id === id
+        ? { ...s, grabCount: s.grabCount + 1, status: s.grabCount + 1 >= (s.availableCount || 20) ? ('grabbed' as const) : s.status }
+        : s));
       if (isLoaded) saveSkills(updated);
       return updated;
     });
-    supabase.rpc('increment_deal_stat', { p_kind: 'skill', p_id: id, p_column: 'grabs' }).then(({ error }) => {
-      if (error) logger.warn('SkillContext', 'Grab counter update failed', { error });
-    });
+    if (!claimed) {
+      supabase.rpc('increment_deal_stat', { p_kind: 'skill', p_id: id, p_column: 'grabs' }).then(({ error }) => {
+        if (error) logger.warn('SkillContext', 'Grab counter update failed', { error });
+      });
+    }
 
     // 2. Tell the owner — this is what shows in their Manage → Orders.
     const actorName = user.fullName || user.username || 'Someone';

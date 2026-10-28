@@ -172,6 +172,7 @@ interface SocialState {
   hidePost: (postId: string) => void;
   /** Block a user: their posts disappear from this user's feed. */
   blockUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  unblockUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
   blockedUserIds: string[];
 }
 
@@ -1075,6 +1076,17 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     return { success: true };
   }, [authUserId]);
 
+  const unblockUser = useCallback(async (userId: string): Promise<{ success: boolean; error?: string }> => {
+    if (!authUserId || authUserId === 'u-dev' || !userId) return { success: false, error: 'Not signed in.' };
+    const { error } = await supabase.from('user_blocks').delete().eq('blocker_id', authUserId).eq('blocked_id', userId);
+    if (error) {
+      logger.warn('SocialContext', 'Unblock user failed', { message: error.message });
+      return { success: false, error: error.message };
+    }
+    setBlockedUserIds(prev => prev.filter((id) => id !== userId));
+    return { success: true };
+  }, [authUserId]);
+
   const getAllPosts = useCallback((): Post[] => {
     const source = (apiPosts && apiPosts.length > 0) ? apiPosts : feedPosts;
     const hidden = new Set(hiddenPostIds);
@@ -1134,6 +1146,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     getSavedPosts,
     hidePost,
     blockUser,
+    unblockUser,
     blockedUserIds,
   };
 });

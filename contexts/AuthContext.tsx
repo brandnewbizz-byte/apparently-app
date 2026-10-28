@@ -7,6 +7,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import { isLocalFileUri } from '@/lib/media';
+import { usernameProblem } from '@/constants/app';
 import { generateUsername, sanitizeBio, sanitizeFullName, sanitizeLocation } from '@/lib/sanitize';
 import { syncUserAvatar } from '@/lib/avatar-sync';
 import type { Session } from '@supabase/supabase-js';
@@ -334,14 +335,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: msg };
       }
 
-      if (trimmedUsername.length < 3) {
-        const msg = 'Username must be at least 3 characters.';
-        setAuthError(msg);
-        return { success: false, error: msg };
-      }
-
-      if (!/^[a-z0-9_]+$/.test(trimmedUsername)) {
-        const msg = 'Username can only contain letters, numbers, and underscores.';
+      const usernameError = usernameProblem(trimmedUsername);
+      if (usernameError) {
+        const msg = `Username: ${usernameError}`;
         setAuthError(msg);
         return { success: false, error: msg };
       }

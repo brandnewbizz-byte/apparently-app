@@ -90,7 +90,7 @@ export default function CallScreen() {
     endCall();
     setTimeout(() => {
       if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)/inbox' as never);
+      else router.replace('/inbox' as never);
     }, 400);
   };
 

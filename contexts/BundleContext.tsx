@@ -1,5 +1,6 @@
 import React, { useRef, createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fromDbDealStatus, toDbDealStatus } from '@/lib/dealStatus';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl, fastFetch } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
@@ -111,7 +112,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         tags: row.tags || [],
         creatorId: row.user_id || row.creator_id || '',
         creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
-        status: row.status || 'available',
+        status: fromDbDealStatus(row.status, Number(row.grabs ?? row.grab_count ?? 0), Math.max(Number(row.available_count) || 1, 1)),
         grabCount: row.grabs ?? row.grab_count ?? 0,
         createdAt: row.created_at || new Date().toISOString(),
         // Number of people who can grab this bundle (set by the creator).
@@ -231,7 +232,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       location: newBundle.location || '',
       provider_name: newBundle.creator?.name || '',
       provider_avatar: newBundle.creator?.avatar || '',
-      status: 'draft',
+      status: 'active',
       grabs: 0,
       available_count: Math.max(Math.floor(newBundle.availableCount || 1), 1),
       created_at: newBundle.createdAt,
@@ -264,7 +265,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     if (patch.title !== undefined) dbPatch.title = patch.title;
     if (patch.description !== undefined) dbPatch.description = sanitizeBundleDesc(patch.description);
     if (patch.price !== undefined) dbPatch.bundle_price = patch.price;
-    if (patch.status !== undefined) dbPatch.status = patch.status;
+    if (patch.status !== undefined) dbPatch.status = toDbDealStatus(patch.status);
     if (patch.imageUrl !== undefined) { dbPatch.image = patch.imageUrl; dbPatch.cover_image = patch.imageUrl; }
     if (patch.videoUrl !== undefined) { dbPatch.image = ''; dbPatch.cover_image = patch.videoUrl; }
     if (patch.category !== undefined) dbPatch.category = patch.category;
@@ -273,7 +274,10 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       dbPatch.available_count = spots;
       // Raising the limit re-opens a full bundle; lowering it can close one.
       const current = bundles.find((b) => b.id === id);
-      if (current) dbPatch.status = (current.grabCount || 0) >= spots ? 'grabbed' : (current.status === 'grabbed' ? 'available' : current.status);
+      if (current) {
+        const next = (current.grabCount || 0) >= spots ? 'grabbed' : (current.status === 'grabbed' ? 'available' : (patch.status ?? current.status));
+        dbPatch.status = toDbDealStatus(next);
+      }
     }
     supabase.from('bundles').update(dbPatch).eq('id', id).then(({ error }) => {
       if (error) logger.error('BundleContext', 'Supabase update failed', { error });
@@ -308,7 +312,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         if (!rpcErr) return;
         supabase
           .from('bundles')
-          .update({ grabs: newGrabCount, ...(newGrabCount >= capacity ? { status: 'grabbed' } : {}) })
+          .update({ grabs: newGrabCount, ...(newGrabCount >= capacity ? { status: 'paused' } : {}) })
           .eq('id', id)
           .then(({ error }) => {
             if (error) logger.error('BundleContext', 'Supabase grab update failed', { error });

@@ -9,7 +9,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { createAudioRelayClient, type AudioRelayClient, type RemoteSpeaker } from '@/lib/audio-relay';
+import { useAudioRecorder } from 'expo-audio';
+import { createAudioRelayClient, RELAY_RECORDING_OPTIONS, type AudioRelayClient, type RemoteSpeaker } from '@/lib/audio-relay';
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -39,6 +40,8 @@ export interface UsePostVoiceRoomResult {
 export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoiceRoomResult {
   const { postId, userId, userName, enabled = true } = options;
   const roomId = postId ? `post-${postId}` : '';
+  // One recorder per post layer, created the same way as voice notes.
+  const recorder = useAudioRecorder(RELAY_RECORDING_OPTIONS);
 
   const clientRef = useRef<AudioRelayClient | null>(null);
   const autoJoinedRef = useRef<string>('');
@@ -96,11 +99,12 @@ export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoice
         peerId: userId,
         peerName: userName || 'User',
         requestMicOnConnect: false,
+        recorder,
         onPeersUpdated: (peers) => setSpeakers(peers),
       });
     }
     return clientRef.current;
-  }, [enabled, roomId, userId, userName]);
+  }, [enabled, roomId, userId, userName, recorder]);
 
   // ── Listen (no mic) ──
   const startListening = useCallback(async () => {

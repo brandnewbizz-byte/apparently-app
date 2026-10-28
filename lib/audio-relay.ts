@@ -1,5 +1,10 @@
 /**
- * AudioRelayClient — push-to-talk audio streaming over Supabase REST polling.
+ * AudioRelayClient — push-to-talk audio streaming over Supabase Realtime broadcast.
+ *
+ * (It used to relay clips through the `live_audio_chunks` table with REST
+ * polling, but that table only allows the anon role, so signed-in users got
+ * 403s and nobody ever heard anything. Clips now go over a broadcast channel,
+ * the same way Spot rooms send voice.)
  *
  * Originally carried audio over Supabase Realtime Broadcast, but Realtime has
  * proven unreliable (platform-wide degradation + free-tier auto-pause). This
@@ -33,6 +38,8 @@ import {
   AudioQuality,
 } from 'expo-audio';
 import type { AudioPlayer, AudioRecorder, RecordingOptions } from 'expo-audio';
+import { Platform } from 'react-native';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 // ── Types ──
@@ -59,6 +66,11 @@ export interface AudioRelayConfig {
   onSpeakerStart?: (peerId: string, peerName: string) => void;
   onSpeakerStop?: (peerId: string, peerName: string) => void;
   onModerationMute?: (muted: boolean) => void;
+  /**
+   * A recorder from expo-audio's `useAudioRecorder(RELAY_RELAY_RECORDING_OPTIONS)`.
+   * Preferred: it's the same path voice notes use and works on every platform.
+   */
+  recorder?: AudioRecorder;
 }
 
 export interface AudioRelayClient {
@@ -73,11 +85,11 @@ export interface AudioRelayClient {
 
 // ── Audio session config ──
 
-const RECORDING_OPTIONS: RecordingOptions = {
+export const RELAY_RECORDING_OPTIONS: RecordingOptions = {
   extension: '.m4a',
   sampleRate: 16000,
   numberOfChannels: 1,
-  bitRate: 64000,
+  bitRate: 32000,
   android: {
     outputFormat: 'mpeg4',
     audioEncoder: 'aac',
@@ -88,7 +100,7 @@ const RECORDING_OPTIONS: RecordingOptions = {
   },
   web: {
     mimeType: 'audio/webm',
-    bitsPerSecond: 64000,
+    bitsPerSecond: 32000,
   },
 };
 
@@ -96,14 +108,6 @@ const RECORDING_OPTIONS: RecordingOptions = {
 // PostgREST payload limits and independently playable.
 const SEGMENT_MS = 2000;
 
-// Poll interval for listeners to pick up newly-posted chunks.
-const POLL_MS = 300;
-
-// Purge stale chunks from the relay table every N poll ticks.
-const CLEANUP_EVERY = 20;
-const CHUNK_TTL_MS = 5 * 60 * 1000;
-
-const CHUNK_TABLE = 'live_audio_chunks';
 
 // ── Factory ──
 
@@ -118,11 +122,8 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   let selfMuted = false;
   let micGranted = false;
 
-  // Polling state: we only play chunks with id > lastSeenId, so each listener
-  // hears audio that arrives after they join (and never their own).
-  let lastSeenId = 0;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let cleanupCounter = 0;
+  // Live channel for this room's audio clips.
+  let channel: RealtimeChannel | null = null;
 
   // Speaker playback pool: one AudioPlayer per remote peer
   const speakerPool = new Map<string, { player: AudioPlayer; peerName: string; lastChunkAt: number }>();
@@ -148,6 +149,15 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   // are unavailable in React Native and would have thrown at runtime on device.
 
   async function readRecordingBase64(uri: string): Promise<string> {
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(uri)).blob();
+      return await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] || '');
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    }
     const { File } = await import('expo-file-system');
     return new File(uri).base64();
   }
@@ -160,6 +170,7 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
   // and hand the file URI to the player.
 
   async function writeAudioToFile(targetPeerId: string, base64Data: string): Promise<string> {
+    if (Platform.OS === 'web') return `data:audio/webm;base64,${base64Data}`;
     const { File, Directory, Paths } = await import('expo-file-system');
     const dir = new Directory(Paths.cache, 'live-audio');
     if (!dir.exists) dir.create({ intermediates: true });
@@ -234,55 +245,23 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
     }, 1000);
   }
 
-  // ── Polling transport ──
+  // ── Broadcast transport ──
 
-  async function seedLastSeenId() {
-    try {
-      const { data } = await supabase
-        .from(CHUNK_TABLE)
-        .select('id')
-        .eq('room_id', roomId)
-        .order('id', { ascending: false })
-        .limit(1);
-      if (data && data.length > 0) lastSeenId = data[0].id;
-    } catch (e) {
-      console.warn('[AudioRelay] Seed failed:', e instanceof Error ? e.message : e);
-    }
-  }
-
-  function startPolling() {
-    pollTimer = setInterval(async () => {
-      if (!connected) return;
-      try {
-        const { data, error } = await supabase
-          .from(CHUNK_TABLE)
-          .select('id, peer_id, peer_name, audio_data')
-          .eq('room_id', roomId)
-          .gt('id', lastSeenId)
-          .order('id', { ascending: true })
-          .limit(100);
-
-        if (error) return;
-
-        for (const row of data ?? []) {
-          lastSeenId = row.id;
-          if (row.peer_id === peerId) continue; // never play our own audio
-          playIncomingAudio(row.peer_id, row.peer_name || 'User', row.audio_data);
-        }
-
-        // Occasionally purge stale chunks so the relay table doesn't grow.
-        cleanupCounter++;
-        if (cleanupCounter >= CLEANUP_EVERY) {
-          cleanupCounter = 0;
-          await supabase
-            .from(CHUNK_TABLE)
-            .delete()
-            .lt('created_at', new Date(Date.now() - CHUNK_TTL_MS).toISOString());
-        }
-      } catch (e) {
-        console.warn('[AudioRelay] Poll error:', e instanceof Error ? e.message : e);
-      }
-    }, POLL_MS);
+  async function joinChannel() {
+    if (channel) return;
+    const ch = supabase.channel(`voice:${roomId}`, { config: { broadcast: { self: false } } });
+    ch.on('broadcast', { event: 'clip' }, ({ payload }) => {
+      if (!connected || !payload?.b64 || payload.peerId === peerId) return;
+      playIncomingAudio(payload.peerId, payload.peerName || 'User', payload.b64);
+    });
+    channel = ch;
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Voice connection timed out')), 10000);
+      ch.subscribe((status) => {
+        if (status === 'SUBSCRIBED') { clearTimeout(t); resolve(); }
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { clearTimeout(t); reject(new Error('Voice connection failed')); }
+      });
+    });
   }
 
   // ── Connect ──
@@ -300,18 +279,21 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       });
     }
 
-    // Start from the newest chunk so we only hear audio after joining.
-    await seedLastSeenId();
-
     connected = true;
+    try {
+      await joinChannel();
+    } catch (e) {
+      connected = false;
+      if (channel) { supabase.removeChannel(channel); channel = null; }
+      throw e;
+    }
     startSilenceCheck();
-    startPolling();
   }
 
   function cleanup() {
     if (silenceCheck) { clearInterval(silenceCheck); silenceCheck = null; }
     if (segmentTimer) { clearInterval(segmentTimer); segmentTimer = null; }
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (channel) { supabase.removeChannel(channel); channel = null; }
     // Remove all speaker players
     for (const [, entry] of speakerPool) {
       try { entry.player.remove(); } catch {}
@@ -337,9 +319,11 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
     // `prepareToRecordAsync` — otherwise the native recorder never sees
     // `outputFormat`/`audioEncoder`/`audioQuality` and records in a mismatched
     // default container (which is why Talk silently produced no usable audio).
-    const rec = new AudioModule.AudioRecorder({});
+    const shared = config.recorder;
+    const rec = shared ?? new AudioModule.AudioRecorder({});
     recording = rec;
-    await rec.prepareToRecordAsync(RECORDING_OPTIONS);
+    if (shared) await rec.prepareToRecordAsync();
+    else await rec.prepareToRecordAsync(RELAY_RECORDING_OPTIONS);
     rec.record();
     isRecording = true;
   }
@@ -356,13 +340,8 @@ export function createAudioRelayClient(config: AudioRelayConfig): AudioRelayClie
       if (uri) {
         base64 = await readRecordingBase64(uri);
       }
-      if (base64 && connected) {
-        await supabase.from(CHUNK_TABLE).insert({
-          room_id: roomId,
-          peer_id: peerId,
-          peer_name: peerName,
-          audio_data: base64,
-        });
+      if (base64 && connected && channel) {
+        await channel.send({ type: 'broadcast', event: 'clip', payload: { peerId, peerName, b64: base64 } });
       }
     } catch (e) {
       console.warn('[AudioRelay] Segment send failed:', e instanceof Error ? e.message : e);

@@ -1,4 +1,6 @@
-import { Sparkles, ArrowRight, User, Lock, AtSign, AlertCircle, Eye, EyeOff, Mail } from 'lucide-react-native';
+import { useUsernameCheck } from '@/hooks/useUsernameCheck';
+import { USERNAME_MAX } from '@/constants/app';
+import { ArrowRight, User, Lock, AtSign, AlertCircle, Eye, EyeOff, Mail } from 'lucide-react-native';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -10,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -91,16 +94,19 @@ export default function WelcomeScreen() {
     return emailRegex.test(username.trim()) && password.length >= 6;
   }, [username, password]);
 
+  // Live "is this username free?" check (only meaningful on the sign-up form).
+  const signupUsername = useUsernameCheck(mode === 'signup' ? username : '');
+
   const isSignupValid = useMemo(() => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return (
       fullName.trim().length >= 2 &&
       emailRegex.test(email.trim()) &&
-      username.trim().length >= 3 &&
-      password.length >= 6 &&
+      signupUsername.state === 'available' &&
+      password.length >= 8 &&
       confirmPassword === password
     );
-  }, [fullName, email, username, password, confirmPassword]);
+  }, [fullName, email, signupUsername.state, password, confirmPassword]);
 
   const isForgotValid = useMemo(() => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -247,14 +253,7 @@ export default function WelcomeScreen() {
               ]}
             >
               <View style={styles.logoContainer}>
-                <LinearGradient
-                  colors={[Colors.dark.gradient1, Colors.dark.gradient2]}
-                  style={styles.logoGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <Sparkles size={48} color="#FFFFFF" strokeWidth={2} />
-                </LinearGradient>
+                <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} accessibilityLabel="Apparently logo" />
               </View>
 
               <Text style={styles.title}>Apparently</Text>
@@ -443,7 +442,8 @@ export default function WelcomeScreen() {
                             placeholder="Username"
                             placeholderTextColor={Colors.dark.textTertiary}
                             value={username}
-                            onChangeText={(t) => setUsername(t.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                            onChangeText={(t) => setUsername(t.toLowerCase().replace(/[^a-z0-9._]/g, ''))}
+                            maxLength={USERNAME_MAX}
                             autoCapitalize="none"
                             autoCorrect={false}
                             textContentType="username"
@@ -451,7 +451,9 @@ export default function WelcomeScreen() {
                             testID="username-input"
                           />
                         </View>
-                        <Text style={styles.helperText}>Letters, numbers, and underscores only</Text>
+                        <Text style={[styles.helperText, signupUsername.state === 'available' ? { color: '#22C55E' } : signupUsername.state === 'taken' || signupUsername.state === 'invalid' ? { color: '#F87171' } : null]}>
+                          {signupUsername.message || 'Letters, numbers, dots and underscores'}
+                        </Text>
                       </View>
                     )}
 
@@ -481,7 +483,7 @@ export default function WelcomeScreen() {
                         </TouchableOpacity>
                       </View>
                       {mode === 'signup' && (
-                        <Text style={styles.helperText}>At least 6 characters</Text>
+                        <Text style={styles.helperText}>At least 8 characters</Text>
                       )}
                     </View>
 
@@ -737,6 +739,7 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     lineHeight: 18,
   },
+  logoImage: { width: 104, height: 104, borderRadius: 24 },
   inputContainer: {
     marginBottom: 14,
   },
@@ -752,6 +755,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minWidth: 0,
     fontSize: 17,
     color: Colors.dark.text,
     paddingVertical: 16,

@@ -99,7 +99,7 @@ export default function ResetPasswordScreen() {
     };
   }, [incomingUrl]);
 
-  const isValid = password.length >= 6 && password === confirmPassword;
+  const isValid = password.length >= 8 && password === confirmPassword;
 
   const handleSubmit = async () => {
     if (isSubmitting || !isValid) return;
@@ -150,7 +150,7 @@ export default function ResetPasswordScreen() {
               <>
                 <Text style={styles.title}>Set a new password</Text>
                 <Text style={styles.subtitle}>
-                  Enter a new password for your account (at least 6 characters).
+                  Enter a new password for your account (at least 8 characters).
                 </Text>
 
                 {hasRecoverySession === false && (
