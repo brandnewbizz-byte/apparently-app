@@ -27,4 +27,4 @@ export function usernameProblem(raw: string): string | null {
  * purchases (the app then shows plans but can't sell them yet).
  */
 export const REVENUECAT_IOS_KEY = '';
-export const REVENUECAT_ANDROID_KEY = '';
+export const REVENUECAT_ANDROID_KEY = 'goog_nRefAfycfUwcZwzbKLuUVNdrdsS';
