@@ -14,7 +14,7 @@ export const VIBES: { key: VibeKey; label: string; icon: string; tag: string; bl
   { key: 'getaway', label: 'Getaways', icon: '✈️', tag: 'Getaway', blurb: 'Weekends away and trips' },
   { key: 'selfcare', label: 'Self-care', icon: '🧖', tag: 'Self care', blurb: 'Spa days and slow mornings' },
   { key: 'food', label: 'Food & drink', icon: '🍽️', tag: 'Food & drink', blurb: 'Dinners, brunch, tastings' },
-  { key: 'family', label: 'Family days', icon: '👨‍👩‍👧', tag: 'Family', blurb: 'Days out with the kids' },
+  { key: 'family', label: 'Family days', icon: '🎡', tag: 'Family', blurb: 'Days out with the kids' },
 ];
 
 export const MAX_PICKS = 4;

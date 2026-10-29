@@ -2424,7 +2424,7 @@ const styles = StyleSheet.create({
   swipeContainer: {
     paddingHorizontal: 20,
     alignItems: 'center',
-    height: 480,
+    minHeight: 480,
   },
   swipeCardWrapper: {
     width: SCREEN_WIDTH - 40,
@@ -2734,7 +2734,7 @@ const styles = StyleSheet.create({
   skillSwipeContainer: {
     paddingHorizontal: 20,
     alignItems: 'center',
-    height: 320,
+    minHeight: 320,
   },
   skillSwipeCardWrapper: {
     width: SCREEN_WIDTH - 40,
