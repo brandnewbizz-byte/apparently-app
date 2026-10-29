@@ -16,6 +16,7 @@ import { BundlePreview } from '@/components/builder/ListingPreview';
 import { pickCover, uploadCover, confirmDiscard, type PickedCover } from '@/lib/coverMedia';
 import { TAG_IDEAS, WHEN_IDEAS, cleanMoneyInput, parseMoney, formatMoney } from '@/lib/listingCategories';
 import { isVideoUrl } from '@/lib/media';
+import { saveListingNotes, useListingNotes } from '@/lib/listingNotes';
 
 const ACCENT = '#8B5CF6';
 const MAX_SERVICES = 10;
@@ -28,8 +29,9 @@ export default function BundleBuilderScreen() {
   const { id: editId } = useLocalSearchParams<{ id?: string }>();
   const { myBundles } = useBundles();
   const editing = editId ? myBundles.find((b) => b.id === editId) : undefined;
-  if (editId && !editing) return <LoadingListing />;
-  return <BundleForm key={editing?.id || 'new'} editing={editing} />;
+  const savedNotes = useListingNotes(editing?.id);
+  if (editId && (!editing || !savedNotes.loaded)) return <LoadingListing />;
+  return <BundleForm key={editing?.id || 'new'} editing={editing} initialNotes={savedNotes.notes} />;
 }
 
 function LoadingListing() {
@@ -52,7 +54,7 @@ function LoadingListing() {
   );
 }
 
-function BundleForm({ editing }: { editing?: UserBundle }) {
+function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNotes?: string }) {
   const router = useRouter();
   // Opened straight from a link (web) there's no screen to go back to.
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/manage'));
@@ -82,7 +84,7 @@ function BundleForm({ editing }: { editing?: UserBundle }) {
   const [location, setLocation] = useState(editing?.location || '');
   const [when, setWhen] = useState(editing?.dateRange || '');
   const [tags, setTags] = useState<string[]>(editing?.tags?.filter((t) => t !== 'Bundle') || []);
-  const [notes, setNotes] = useState(editing?.plannerNotes || '');
+  const [notes, setNotes] = useState(initialNotes || editing?.plannerNotes || '');
   const [saving, setSaving] = useState<null | 'upload' | 'save'>(null);
   const [triedSubmit, setTriedSubmit] = useState(false);
   const dirty = useRef(false);
@@ -163,6 +165,7 @@ function BundleForm({ editing }: { editing?: UserBundle }) {
       plannerNotes: notes.trim() || undefined,
     };
 
+    let savedId = editId;
     if (isEdit && editId) {
       updateBundle(editId, common);
     } else {
@@ -176,7 +179,9 @@ function BundleForm({ editing }: { editing?: UserBundle }) {
         Alert.alert('Can’t post right now', res.error || 'Please try again.');
         return;
       }
+      savedId = res.id;
     }
+    if (savedId && (isEdit || notes.trim())) await saveListingNotes(savedId, 'bundle', notes);
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     dirty.current = false;
     setSaving(null);

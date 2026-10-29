@@ -58,7 +58,7 @@ interface BundleContextValue {
   reload: () => Promise<void>;
   bundles: UserBundle[];
   myBundles: UserBundle[];
-  createBundle: (bundle: Omit<UserBundle, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string };
+  createBundle: (bundle: Omit<UserBundle, 'id' | 'createdAt' | 'status' | 'grabCount'>) => { success: boolean; error?: string; id?: string };
   updateBundle: (id: string, patch: Partial<UserBundle>) => void;
   /** Claims one spot. Fails when the bundle is full, already grabbed by you, or your own. */
   grabBundle: (id: string) => Promise<GrabResult>;
@@ -245,7 +245,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       created_at: newBundle.createdAt,
     };
     writeWithFallback('BundleContext', (row) => supabase.from('bundles').insert(row), bundleRow, NEW_BUNDLE_COLUMNS);
-    return { success: true };
+    return { success: true, id: newBundle.id };
   }, [isLoaded, saveBundles, myBundles.length]);
 
   const updateBundle = useCallback((id: string, patch: Partial<UserBundle>) => {
