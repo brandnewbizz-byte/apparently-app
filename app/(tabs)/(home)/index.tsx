@@ -65,6 +65,7 @@ import { useSkills } from '@/contexts/SkillContext';
 import { useServiceRequests, SERVICE_CATEGORIES, type ServiceRequest } from '@/contexts/ServiceRequestContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
+import AppBanner from '@/components/AppBanner';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1872,6 +1873,8 @@ export default function HomeScreen() {
             <HeaderActivityButtons size={24} />
           </View>
         </View>
+
+        <AppBanner textColor={colors.text} />
 
         {currentUpdate && (
         <Animated.View
