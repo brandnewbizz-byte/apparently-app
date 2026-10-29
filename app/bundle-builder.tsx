@@ -1,563 +1,324 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import { useSubscription } from '@/contexts/SubscriptionContext';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
-import {
-  ChevronLeft,
-  Package,
-  Plus,
-  X,
-  DollarSign,
-  Camera,
-  Tag,
-  MapPin,
-  Calendar,
-  Trash2,
-  Star,
-  Play,
-} from 'lucide-react-native';
+import { ChevronLeft, Plus, Trash2, MapPin, CalendarDays, Package, Lock } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useBundles, type BundleItem } from '@/contexts/BundleContext';
-import { uploadVideoToStorage, persistableImageUri } from '@/lib/storage';
+import { useSubscription } from '@/contexts/SubscriptionContext';
+import { useBundles, type BundleItem, type UserBundle } from '@/contexts/BundleContext';
+import { Section, Field, CategoryGrid, Pills, Stepper, CoverPicker, TagEditor, ReadyList } from '@/components/builder/BuilderKit';
+import { BundlePreview } from '@/components/builder/ListingPreview';
+import { pickCover, uploadCover, confirmDiscard, type PickedCover } from '@/lib/coverMedia';
+import { TAG_IDEAS, WHEN_IDEAS, cleanMoneyInput, parseMoney, formatMoney } from '@/lib/listingCategories';
+import { isVideoUrl } from '@/lib/media';
 
-// ── Categories ───────────────────────────────────────────────────────
+const ACCENT = '#8B5CF6';
+const MAX_SERVICES = 10;
 
-const BUNDLE_CATEGORIES = [
-  { key: 'home', label: 'Home', icon: '🏠' },
-  { key: 'cleaning', label: 'Cleaning', icon: '🧹' },
-  { key: 'dining', label: 'Dining', icon: '🍽️' },
-  { key: 'pets', label: 'Pets', icon: '🐾' },
-  { key: 'fitness', label: 'Fitness', icon: '💪' },
-  { key: 'creative', label: 'Creative', icon: '🎨' },
-  { key: 'tech', label: 'Tech', icon: '💻' },
-  { key: 'education', label: 'Education', icon: '📚' },
-  { key: 'wellness', label: 'Wellness', icon: '🧘' },
-  { key: 'outdoor', label: 'Outdoor', icon: '🌲' },
-  { key: 'events', label: 'Events', icon: '🎉' },
-  { key: 'transport', label: 'Transport', icon: '🚗' },
-  { key: 'beauty', label: 'Beauty', icon: '💄' },
-  { key: 'repair', label: 'Repair', icon: '🔧' },
-  { key: 'other', label: 'Other', icon: '🛠️' },
-];
+interface ServiceDraft { id: string; name: string; details: string; price: string }
+const newRow = (): ServiceDraft => ({ id: `svc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: '', details: '', price: '' });
 
-interface ServiceDraft {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
+/** Waits for the bundle to load when editing, then shows the form filled in. */
+export default function BundleBuilderScreen() {
+  const { id: editId } = useLocalSearchParams<{ id?: string }>();
+  const { myBundles } = useBundles();
+  const editing = editId ? myBundles.find((b) => b.id === editId) : undefined;
+  if (editId && !editing) return <LoadingListing />;
+  return <BundleForm key={editing?.id || 'new'} editing={editing} />;
 }
 
-const newServiceId = () => `svc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-export default function BundleBuilderScreen() {
+function LoadingListing() {
+  const { colors } = useTheme();
   const router = useRouter();
-  // Posting needs a plan (Basic or higher) with a free listing slot.
-  const { requireListing, plan } = useSubscription();
-  React.useEffect(() => { if (plan.loaded) requireListing(); }, [plan.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setSlow(true), 4000); return () => clearTimeout(t); }, []);
+  return (
+    <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
+      <Stack.Screen options={{ headerShown: false }} />
+      {slow ? (
+        <>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Couldn’t find this bundle</Text>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}><Text style={{ color: ACCENT, fontWeight: '700' }}>Go back</Text></TouchableOpacity>
+        </>
+      ) : <ActivityIndicator color={ACCENT} />}
+    </View>
+  );
+}
+
+function BundleForm({ editing }: { editing?: UserBundle }) {
+  const router = useRouter();
+  const editId = editing?.id;
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { createBundle } = useBundles();
   const { user } = useAuth();
+  const { createBundle, updateBundle } = useBundles();
+  const { requireListing, plan } = useSubscription();
+  const isEdit = !!editing;
 
-  const [title, setTitle] = useState('');
-  const [bundlePrice, setBundlePrice] = useState('');
-  const [services, setServices] = useState<ServiceDraft[]>([
-    { id: newServiceId(), name: '', description: '', price: 0 },
-  ]);
-  const [category, setCategory] = useState('');
-  const [location, setLocation] = useState('');
-  const [dateRange, setDateRange] = useState('');
-  // How many people can grab this bundle (one spot by default).
-  const [availableCount, setAvailableCount] = useState('1');
-  const [plannerNotes, setPlannerNotes] = useState('');
-  const [coverImage, setCoverImage] = useState<string | null>(null);
-  const [coverMediaType, setCoverMediaType] = useState<'image' | 'video'>('image');
-  const [publishing, setPublishing] = useState(false);
-  const [tagInput, setTagInput] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
+  // Posting a new bundle needs a plan with a free listing slot (editing doesn't).
+  useEffect(() => { if (!isEdit && plan.loaded) requireListing(); }, [plan.loaded, isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const itemsTotal = services.reduce((sum, s) => sum + (s.price || 0), 0);
-  const finalPrice = bundlePrice ? parseFloat(bundlePrice) : itemsTotal;
-  const hasNamedService = services.some((s) => s.name.trim().length > 0);
+  const [cover, setCover] = useState<PickedCover | null>(() => {
+    const media = editing?.videoUrl || editing?.imageUrl;
+    return media ? { uri: media, type: editing?.videoUrl || isVideoUrl(media) ? 'video' : 'image' } : null;
+  });
+  const [title, setTitle] = useState(editing?.title || '');
+  const [category, setCategory] = useState(editing?.category || '');
+  const [description, setDescription] = useState(editing?.description || '');
+  const [services, setServices] = useState<ServiceDraft[]>(() => (editing?.items?.length
+    ? editing.items.map((i) => ({ ...newRow(), name: i.name || '', details: i.description || '', price: i.price ? String(i.price) : '' }))
+    : [newRow()]));
+  const [price, setPrice] = useState(editing?.price ? String(editing.price) : '');
+  const [spots, setSpots] = useState(Math.max(editing?.availableCount || 1, 1));
+  const [location, setLocation] = useState(editing?.location || '');
+  const [when, setWhen] = useState(editing?.dateRange || '');
+  const [tags, setTags] = useState<string[]>(editing?.tags?.filter((t) => t !== 'Bundle') || []);
+  const [notes, setNotes] = useState(editing?.plannerNotes || '');
+  const [saving, setSaving] = useState<null | 'upload' | 'save'>(null);
+  const [triedSubmit, setTriedSubmit] = useState(false);
+  const dirty = useRef(false);
 
-  const addService = useCallback(() => {
-    setServices((prev) => [...prev, { id: newServiceId(), name: '', description: '', price: 0 }]);
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+  // Fill the form when editing (once the bundle is loaded).
 
-  const updateService = useCallback((id: string, field: keyof ServiceDraft, value: string) => {
-    setServices((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, [field]: field === 'price' ? parseFloat(value) || 0 : value } : s))
-    );
-  }, []);
+  const touch = <T,>(fn: (v: T) => void) => (v: T) => { dirty.current = true; fn(v); };
 
-  const removeService = useCallback((id: string) => {
-    setServices((prev) => (prev.length <= 1 ? prev : prev.filter((s) => s.id !== id)));
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
+  const itemsTotal = useMemo(() => services.reduce((sum, s) => sum + parseMoney(s.price), 0), [services]);
+  const priceNum = parseMoney(price);
+  const named = services.filter((s) => s.name.trim());
+  const save = itemsTotal > priceNum && priceNum > 0 ? Math.round((1 - priceNum / itemsTotal) * 100) : 0;
 
-  const pickImage = useCallback(async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      quality: 0.8,
-      allowsEditing: true,
-      aspect: [16, 9],
-      videoMaxDuration: 60,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      const asset = result.assets[0];
-      if (asset.type === 'video' && asset.duration && asset.duration > 60000) {
-        Alert.alert('Video too long', 'Please select a video under 60 seconds.');
-        return;
-      }
-      setCoverImage(asset.uri);
-      setCoverMediaType(asset.type === 'video' ? 'video' : 'image');
-    }
-  }, []);
+  const problems = {
+    title: title.trim().length < 3 ? 'Give it a title (at least 3 characters).' : null,
+    price: priceNum <= 0 ? 'Set a price.' : null,
+    services: named.length === 0 ? 'Add at least one thing that’s included.' : null,
+  };
+  const ready = !problems.title && !problems.price && !problems.services;
 
-  const addTag = useCallback(() => {
-    const t = tagInput.trim().replace(/^#/, '');
-    if (t && !tags.includes(t) && tags.length < 5) {
-      setTags((prev) => [...prev, t]);
-      setTagInput('');
-    }
-  }, [tagInput, tags]);
+  const setService = (id: string, patch: Partial<ServiceDraft>) => {
+    dirty.current = true;
+    setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
 
-  const removeTag = useCallback((tag: string) => {
-    setTags((prev) => prev.filter((t) => t !== tag));
-  }, []);
+  const chooseCover = async () => {
+    const picked = await pickCover(true);
+    if (picked) { dirty.current = true; setCover(picked); }
+  };
 
-  const canPublish = title.trim().length > 0 && finalPrice > 0;
+  const goBack = useCallback(() => {
+    if (!dirty.current || saving) { router.back(); return; }
+    confirmDiscard(isEdit ? 'Your changes to this bundle will be lost.' : 'This bundle hasn’t been posted yet.', () => router.back());
+  }, [router, saving, isEdit]);
 
-  const handlePublish = async () => {
-    if (!canPublish || publishing) {
-      if (!canPublish) Alert.alert('Missing Info', 'Add a title and price to publish your bundle.');
+  const submit = async () => {
+    setTriedSubmit(true);
+    if (!ready || saving) return;
+    if (!isEdit && !(await requireListing())) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    let media: { imageUrl: string; videoUrl?: string };
+    try {
+      setSaving('upload');
+      media = await uploadCover(cover, `bundles/${user?.id || 'anon'}`);
+    } catch (e) {
+      setSaving(null);
+      Alert.alert('Cover didn’t upload', `${e instanceof Error ? e.message : 'Upload failed.'} Try again, or remove the cover to post without one.`);
       return;
     }
-    if (!(await requireListing())) return;
-    setPublishing(true);
+    setSaving('save');
 
-    let imageUrl = '';
-    let videoUrl: string | undefined;
-    try {
-      if (coverImage) {
-        if (coverMediaType === 'video') {
-          videoUrl = await uploadVideoToStorage(coverImage, 'user-media', `bundles/${user?.id || 'anon'}`);
-        } else {
-          imageUrl = (await persistableImageUri(coverImage, 'user-media', `bundles/${user?.id || 'anon'}`)) || '';
-        }
-      }
-    } catch (e) {
-      console.warn('[bundle-builder] media upload failed', e);
-    }
-
-    const items: BundleItem[] = services.map((s, i) => ({
+    const items: BundleItem[] = named.map((s, i) => ({
       id: `item-${Date.now()}-${i}`,
-      name: s.name.trim() || `Service ${i + 1}`,
-      description: s.description.trim() || undefined,
+      name: s.name.trim(),
+      description: s.details.trim() || undefined,
       category: 'service',
       provider: 'You',
       providerAvatar: '',
       providerLink: undefined,
-      price: s.price || 0,
+      price: parseMoney(s.price),
       icon: '📦',
     }));
-
-    const bundleDescription =
-      services[0]?.description?.trim() ||
-      services.map((s) => s.name.trim()).filter(Boolean).join(', ') ||
-      `${items.length} service${items.length !== 1 ? 's' : ''}`;
-
-    const result = createBundle({
+    const desc = description.trim() || named.map((s) => s.name.trim()).join(', ');
+    const common = {
       title: title.trim(),
-      description: bundleDescription,
-      price: finalPrice,
+      description: desc,
+      price: priceNum,
       items,
-      imageUrl,
-      videoUrl,
-      mediaType: coverMediaType,
+      imageUrl: media.imageUrl,
+      videoUrl: media.videoUrl,
+      mediaType: (media.videoUrl ? 'video' : 'image') as 'video' | 'image',
       category: category || 'other',
       location: location.trim(),
-      dateRange: dateRange.trim(),
-      tags: tags.length ? tags : ['Bundle'],
-      creator: {
-        name: user?.fullName || user?.username || 'You',
-        avatar: user?.avatar || '',
-        rating: 5.0,
-        reviews: 0,
-      },
-      creatorId: user?.id || '',
-      availableCount: Math.max(parseInt(availableCount, 10) || 1, 1),
-      plannerNotes: plannerNotes.trim() || undefined,
-    });
+      dateRange: when.trim(),
+      tags,
+      availableCount: spots,
+      plannerNotes: notes.trim() || undefined,
+    };
 
-    if (!result.success) {
-      setPublishing(false);
-      Alert.alert('Limit Reached', result.error);
-      return;
+    if (isEdit && editId) {
+      updateBundle(editId, common);
+    } else {
+      const res = createBundle({
+        ...common,
+        creator: { name: user?.fullName || user?.username || 'You', avatar: user?.avatar || '', rating: 5.0, reviews: 0 },
+        creatorId: user?.id || '',
+      });
+      if (!res.success) {
+        setSaving(null);
+        Alert.alert('Can’t post right now', res.error || 'Please try again.');
+        return;
+      }
     }
-
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    dirty.current = false;
+    setSaving(null);
     router.back();
   };
 
-  return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <Stack.Screen options={{ headerShown: false }} />
+  const err = (k: keyof typeof problems) => (triedSubmit ? problems[k] : null);
 
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.headerBtn, { backgroundColor: colors.surface }]}>
+  return (
+    <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.backgroundSecondary }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
+
+      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={goBack} style={[styles.headerBtn, { backgroundColor: colors.surfaceHighlight }]} accessibilityLabel="Back" testID="builder-back">
           <ChevronLeft size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Create a Bundle</Text>
-        <TouchableOpacity
-          style={[styles.publishBtnSmall, { backgroundColor: canPublish ? colors.accent : colors.surfaceHighlight }]}
-          onPress={handlePublish}
-          disabled={!canPublish}
-          activeOpacity={0.9}
-        >
-          <Text style={[styles.publishBtnSmallText, { color: canPublish ? '#FFF' : colors.textTertiary }]}>Post</Text>
-        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{isEdit ? 'Edit bundle' : 'New bundle'}</Text>
+          <Text style={[styles.headerSub, { color: colors.textTertiary }]}>Several services, one price</Text>
+        </View>
+        <View style={[styles.kindIcon, { backgroundColor: `${ACCENT}1F` }]}><Package size={18} color={ACCENT} /></View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 100 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Cover Image */}
-        <TouchableOpacity
-          style={[styles.imagePicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={pickImage}
-          activeOpacity={0.7}
-        >
-          {coverImage ? (
-            <View style={styles.imagePreview}>
-              {coverMediaType === 'video' ? (
-                <View style={[styles.coverImage, styles.videoTile]}>
-                  <Play size={28} color="#FFF" fill="#FFF" />
-                </View>
-              ) : (
-                <Image source={{ uri: coverImage }} style={styles.coverImage} />
-              )}
-              <View style={[styles.imageOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                {coverMediaType === 'video' ? <Play size={14} color="#FFF" fill="#FFF" /> : <Camera size={14} color="#FFF" />}
-                <Text style={styles.imageOverlayText}>{coverMediaType === 'video' ? 'Change Video' : 'Change'}</Text>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 170 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <CoverPicker uri={cover?.uri || null} isVideo={cover?.type === 'video'} onPick={chooseCover} onRemove={() => { dirty.current = true; setCover(null); }}
+          accent={ACCENT} colors={colors} label="Add a cover photo or video" sub="Bundles with a cover get far more grabs. Videos up to 60 seconds." />
+
+        <Section n={1} title="The basics" colors={colors}>
+          <Field label="Title" colors={colors} value={title} onChangeText={touch(setTitle)} maxLength={80} counter={{ value: title.length, max: 80 }}
+            placeholder="e.g. Spa day for two" error={err('title')} testID="bundle-title" />
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Category</Text>
+          <CategoryGrid value={category} onChange={touch(setCategory)} accent={ACCENT} colors={colors} />
+          <View style={{ height: 14 }} />
+          <Field label="Description" colors={colors} value={description} onChangeText={touch(setDescription)} maxLength={300} counter={{ value: description.length, max: 300 }}
+            placeholder="What will people get? Who is it for?" multiline testID="bundle-description" />
+        </Section>
+
+        <Section n={2} title="What’s included" hint="List each service. Prices are optional and show buyers the value." colors={colors}
+          right={<Text style={[styles.count, { color: colors.textTertiary }]}>{named.length}/{MAX_SERVICES}</Text>}>
+          {services.map((s, idx) => (
+            <View key={s.id} style={[styles.serviceRow, { borderColor: colors.border, backgroundColor: colors.background }]}>
+              <View style={[styles.serviceNum, { backgroundColor: `${ACCENT}1A` }]}><Text style={{ color: ACCENT, fontWeight: '800', fontSize: 12 }}>{idx + 1}</Text></View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <TextInput value={s.name} onChangeText={(v) => setService(s.id, { name: v })} placeholder="Service name" placeholderTextColor={colors.textTertiary}
+                  style={[styles.serviceName, { color: colors.text }]} maxLength={60} testID={`service-name-${idx}`} />
+                <TextInput value={s.details} onChangeText={(v) => setService(s.id, { details: v })} placeholder="Details (optional)" placeholderTextColor={colors.textTertiary}
+                  style={[styles.serviceDetails, { color: colors.textSecondary }]} maxLength={140} multiline />
               </View>
-            </View>
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Camera size={28} color={colors.textTertiary} />
-              <Text style={[styles.imagePickerText, { color: colors.textSecondary }]}>Add Cover Photo or Video</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        {/* Title */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Bundle Title</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-          placeholder="What's your bundle called?"
-          placeholderTextColor={colors.textTertiary}
-          value={title}
-          onChangeText={setTitle}
-          maxLength={80}
-        />
-
-        {/* Bundle Price + Available */}
-        <View style={styles.row}>
-          <View style={styles.half}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Bundle Price ($)</Text>
-            <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <DollarSign size={18} color={colors.textSecondary} />
-              <TextInput
-                style={[styles.priceField, { color: colors.text }]}
-                placeholder="Set your price"
-                placeholderTextColor={colors.textTertiary}
-                value={bundlePrice}
-                onChangeText={setBundlePrice}
-                keyboardType="decimal-pad"
-              />
-            </View>
-          </View>
-          <View style={styles.half}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Spots (people who can grab)</Text>
-            <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.textSecondary, fontSize: 15, marginRight: 4 }}>×</Text>
-              <TextInput
-                style={[styles.priceField, { color: colors.text }]}
-                placeholder="1"
-                placeholderTextColor={colors.textTertiary}
-                value={availableCount}
-                onChangeText={(t) => setAvailableCount(t.replace(/[^0-9]/g, '').slice(0, 4))}
-                keyboardType="number-pad"
-              />
-            </View>
-          </View>
-        </View>
-        {!bundlePrice && itemsTotal > 0 && (
-          <Text style={[styles.priceHint, { color: colors.textTertiary }]}>
-            Services sum to ${itemsTotal} — set a different bundle price above, or leave blank to use the sum.
-          </Text>
-        )}
-
-        {/* Services */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Services in this bundle</Text>
-        {services.map((s, idx) => (
-          <View key={s.id} style={[styles.serviceCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.serviceHeader}>
-              <Text style={[styles.serviceIndex, { color: colors.textTertiary }]}>Service {idx + 1}</Text>
-              <TouchableOpacity onPress={() => removeService(s.id)} disabled={services.length <= 1} style={services.length <= 1 && { opacity: 0.3 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Trash2 size={16} color={colors.error || '#EF4444'} />
+              <View style={[styles.servicePrice, { borderColor: colors.border }]}>
+                <Text style={{ color: colors.textTertiary, fontWeight: '700' }}>$</Text>
+                <TextInput value={s.price} onChangeText={(v) => setService(s.id, { price: cleanMoneyInput(v) })} placeholder="0" placeholderTextColor={colors.textTertiary}
+                  keyboardType="decimal-pad" style={[styles.servicePriceInput, { color: colors.text }]} />
+              </View>
+              <TouchableOpacity onPress={() => { dirty.current = true; setServices((p) => (p.length <= 1 ? [newRow()] : p.filter((x) => x.id !== s.id))); }}
+                hitSlop={8} style={styles.removeBtn} accessibilityLabel="Remove service">
+                <Trash2 size={16} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
+          ))}
+          {err('services') ? <Text style={[styles.err, { color: colors.error }]}>{err('services')}</Text> : null}
+          {services.length < MAX_SERVICES ? (
+            <TouchableOpacity style={[styles.addRow, { borderColor: ACCENT }]} onPress={() => { dirty.current = true; setServices((p) => [...p, newRow()]); }} testID="add-service">
+              <Plus size={16} color={ACCENT} />
+              <Text style={{ color: ACCENT, fontWeight: '700' }}>Add a service</Text>
+            </TouchableOpacity>
+          ) : null}
+        </Section>
 
-            <TextInput
-              style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-              placeholder="Service name (e.g. Plumbing Inspection)"
-              placeholderTextColor={colors.textTertiary}
-              value={s.name}
-              onChangeText={(v) => updateService(s.id, 'name', v)}
-            />
-
-            <TextInput
-              style={[styles.input, styles.descInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-              placeholder="What's included, delivered, timeline..."
-              placeholderTextColor={colors.textTertiary}
-              value={s.description}
-              onChangeText={(v) => updateService(s.id, 'description', v)}
-              multiline
-              numberOfLines={2}
-              textAlignVertical="top"
-            />
-
-            <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.background, borderColor: colors.border }]}>
-              <DollarSign size={16} color={colors.textSecondary} />
-              <TextInput
-                style={[styles.priceField, { color: colors.text }]}
-                placeholder="Item price (optional)"
-                placeholderTextColor={colors.textTertiary}
-                value={s.price > 0 ? String(s.price) : ''}
-                onChangeText={(v) => updateService(s.id, 'price', v)}
-                keyboardType="decimal-pad"
-              />
+        <Section n={3} title="Price and spots" colors={colors}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Bundle price</Text>
+          <View style={[styles.moneyBox, { borderColor: err('price') ? colors.error : colors.border, backgroundColor: colors.background }]}>
+            <Text style={[styles.moneySign, { color: colors.text }]}>$</Text>
+            <TextInput value={price} onChangeText={(v) => { dirty.current = true; setPrice(cleanMoneyInput(v)); }} placeholder="0" placeholderTextColor={colors.textTertiary}
+              keyboardType="decimal-pad" style={[styles.moneyInput, { color: colors.text }]} testID="bundle-price" />
+          </View>
+          {err('price') ? <Text style={[styles.err, { color: colors.error }]}>{err('price')}</Text> : null}
+          {itemsTotal > 0 ? (
+            <View style={styles.valueRow}>
+              <Text style={[styles.valueText, { color: colors.textSecondary }]}>Items add up to {formatMoney(itemsTotal)}.</Text>
+              {save > 0 ? <View style={styles.saveChip}><Text style={styles.saveChipText}>Buyers save {save}%</Text></View>
+                : priceNum !== itemsTotal ? (
+                  <TouchableOpacity onPress={() => { dirty.current = true; setPrice(String(itemsTotal)); }}><Text style={{ color: ACCENT, fontWeight: '700' }}>Use {formatMoney(itemsTotal)}</Text></TouchableOpacity>
+                ) : null}
             </View>
-          </View>
-        ))}
-
-        <TouchableOpacity style={[styles.addServiceBtn, { borderColor: colors.accent }]} onPress={addService} activeOpacity={0.7}>
-          <Plus size={18} color={colors.accent} />
-          <Text style={[styles.addServiceText, { color: colors.accent }]}>Add Another Service</Text>
-        </TouchableOpacity>
-
-        {/* Category */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Category</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {BUNDLE_CATEGORIES.map((cat) => {
-            const selected = category === cat.key;
-            return (
-              <TouchableOpacity
-                key={cat.key}
-                style={[
-                  styles.categoryPill,
-                  {
-                    backgroundColor: selected ? `${colors.accent}20` : colors.surface,
-                    borderColor: selected ? colors.accent : colors.border,
-                  },
-                ]}
-                onPress={() => setCategory(cat.key)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.categoryEmoji}>{cat.icon}</Text>
-                <Text style={[styles.categoryLabel, { color: selected ? colors.accent : colors.text }]}>{cat.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Location + Date */}
-        <View style={styles.row}>
-          <View style={styles.half}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Location</Text>
-            <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <MapPin size={16} color={colors.textSecondary} />
-              <TextInput
-                style={[styles.priceField, { color: colors.text }]}
-                placeholder="Where"
-                placeholderTextColor={colors.textTertiary}
-                value={location}
-                onChangeText={setLocation}
-              />
+          ) : null}
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          <View style={styles.spotsRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.spotsTitle, { color: colors.text }]}>Spots</Text>
+              <Text style={[styles.spotsHint, { color: colors.textTertiary }]}>How many people can grab it. It closes when full.</Text>
             </View>
+            <Stepper value={spots} onChange={(v) => { dirty.current = true; setSpots(v); }} min={1} max={500} colors={colors} />
           </View>
-          <View style={styles.half}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Date Range</Text>
-            <View style={[styles.input, styles.priceWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Calendar size={16} color={colors.textSecondary} />
-              <TextInput
-                style={[styles.priceField, { color: colors.text }]}
-                placeholder="e.g. Weekends"
-                placeholderTextColor={colors.textTertiary}
-                value={dateRange}
-                onChangeText={setDateRange}
-              />
-            </View>
+          {editing && editing.grabCount > 0 ? (
+            <Text style={[styles.spotsHint, { color: colors.textTertiary, marginTop: 8 }]}>{editing.grabCount} already grabbed · {Math.max(spots - editing.grabCount, 0)} left</Text>
+          ) : null}
+        </Section>
+
+        <Section n={4} title="When and where" hint="Optional, but it helps people decide." colors={colors}>
+          <View style={[styles.iconField, { borderColor: colors.border, backgroundColor: colors.background }]}>
+            <MapPin size={18} color={colors.textTertiary} />
+            <TextInput value={location} onChangeText={touch(setLocation)} placeholder="City, neighborhood or “Online”" placeholderTextColor={colors.textTertiary}
+              style={[styles.iconFieldInput, { color: colors.text }]} maxLength={60} />
           </View>
-        </View>
-
-        {/* Tags */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Tags</Text>
-        <View style={[styles.tagWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Tag size={18} color={colors.textSecondary} />
-          <View style={{ flex: 1 }}>
-            {tags.length > 0 && (
-              <View style={styles.tagsRow}>
-                {tags.map((tag) => (
-                  <TouchableOpacity key={tag} onPress={() => removeTag(tag)} style={[styles.tagPill, { backgroundColor: `${colors.accent}20` }]}>
-                    <Text style={[styles.tagPillText, { color: colors.accent }]}>#{tag}</Text>
-                    <X size={12} color={colors.accent} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            <TextInput
-              style={[styles.tagInput, { color: colors.text }]}
-              placeholder="Add up to 5 tags"
-              placeholderTextColor={colors.textTertiary}
-              value={tagInput}
-              onChangeText={setTagInput}
-              onSubmitEditing={addTag}
-              returnKeyType="done"
-            />
+          <View style={[styles.iconField, { borderColor: colors.border, backgroundColor: colors.background }]}>
+            <CalendarDays size={18} color={colors.textTertiary} />
+            <TextInput value={when} onChangeText={touch(setWhen)} placeholder="When (e.g. Weekends, Nov 1–3)" placeholderTextColor={colors.textTertiary}
+              style={[styles.iconFieldInput, { color: colors.text }]} maxLength={40} />
           </View>
-        </View>
+          <Pills options={WHEN_IDEAS.map((w) => ({ key: w, label: w }))} value={when} onChange={touch(setWhen)} accent={ACCENT} colors={colors} />
+        </Section>
 
-        {/* Planner Notes */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Planner Notes (private)</Text>
-        <TextInput
-          style={[styles.input, styles.descInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-          placeholder="Links, contacts, instructions — for you only"
-          placeholderTextColor={colors.textTertiary}
-          value={plannerNotes}
-          onChangeText={setPlannerNotes}
-          multiline
-          numberOfLines={3}
-          textAlignVertical="top"
-        />
+        <Section n={5} title="Tags" hint="Up to 5. They help people find your bundle." colors={colors}>
+          <TagEditor tags={tags} onChange={touch(setTags)} ideas={TAG_IDEAS[category || 'other']} accent={ACCENT} colors={colors} />
+        </Section>
 
-        {/* Live Preview */}
-        <View style={styles.previewWrapper}>
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Preview</Text>
-          <View style={[styles.previewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {coverImage ? (
-              coverMediaType === 'video' ? (
-                <View style={[styles.previewCover, styles.videoTile]}>
-                  <Play size={28} color="#FFF" fill="#FFF" />
-                </View>
-              ) : (
-                <Image source={{ uri: coverImage }} style={styles.previewCover} />
-              )
-            ) : (
-              <View style={[styles.previewCover, { backgroundColor: colors.surfaceHighlight }]}>
-                <Text style={{ fontSize: 48 }}>📦</Text>
-              </View>
-            )}
-            <View style={styles.previewBody}>
-              <View style={styles.previewHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.previewTitle, { color: colors.text }]} numberOfLines={2}>
-                    {title || 'Untitled Bundle'}
-                  </Text>
-                  <View style={styles.previewMetaRow}>
-                    <Star size={12} color="#F59E0B" fill="#F59E0B" />
-                    <Text style={[styles.previewMetaText, { color: colors.textSecondary }]}>5.0 (0)</Text>
-                    {location ? (
-                      <>
-                        <Text style={[styles.previewMetaText, { color: colors.textTertiary }]}>·</Text>
-                        <MapPin size={12} color={colors.textTertiary} />
-                        <Text style={[styles.previewMetaText, { color: colors.textSecondary }]} numberOfLines={1}>{location}</Text>
-                      </>
-                    ) : null}
-                  </View>
-                </View>
-                <View style={[styles.previewPriceBadge, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.previewPriceText}>${finalPrice || '?'}</Text>
-                </View>
-              </View>
+        <Section title="Private notes" hint="Only you can see these: contacts, links, prep." colors={colors} right={<Lock size={16} color={colors.textTertiary} />}>
+          <Field colors={colors} value={notes} onChangeText={touch(setNotes)} placeholder="Notes for yourself" multiline maxLength={500} />
+        </Section>
 
-              <View style={styles.previewItems}>
-                <Text style={[styles.previewItemsTitle, { color: colors.textSecondary }]}>
-                  {services.length} service{services.length !== 1 ? 's' : ''} included:
-                </Text>
-                {services.map((s) => (
-                  <View key={s.id} style={styles.previewItemRow}>
-                    <Text style={styles.previewItemEmoji}>📦</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.previewItemName, { color: colors.text }]} numberOfLines={1}>
-                        {s.name.trim() || 'Untitled Service'}
-                      </Text>
-                      {s.description.trim() ? (
-                        <Text style={[styles.previewItemDesc, { color: colors.textTertiary }]} numberOfLines={2}>
-                          {s.description.trim()}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {s.price > 0 ? (
-                      <Text style={[styles.previewItemPrice, { color: colors.accent }]}>${s.price}</Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-
-              {tags.length > 0 && (
-                <View style={styles.previewTags}>
-                  {tags.map((tag) => (
-                    <View key={tag} style={[styles.previewTag, { backgroundColor: `${colors.accent}15` }]}>
-                      <Text style={[styles.previewTagText, { color: colors.accent }]}>#{tag}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
+        <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>How it looks on Home</Text>
+        <BundlePreview title={title} price={priceNum} value={itemsTotal} coverUri={cover?.uri || null} isVideo={cover?.type === 'video'} category={category}
+          location={location} when={when} items={services.map((s) => ({ name: s.name, price: parseMoney(s.price) }))} spots={spots} tags={tags}
+          creatorName={user?.fullName || user?.username || 'You'} accent={ACCENT} colors={colors} />
       </ScrollView>
 
-      {/* Bottom publish bar */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.background, borderTopColor: colors.border }]}>
-        <TouchableOpacity
-          style={[styles.publishBtn, { backgroundColor: canPublish ? colors.accent : colors.surfaceHighlight }]}
-          onPress={handlePublish}
-          disabled={!canPublish}
-          activeOpacity={0.9}
-        >
-          <Package size={18} color={canPublish ? '#FFF' : colors.textTertiary} />
-          <Text style={[styles.publishBtnText, { color: canPublish ? '#FFF' : colors.textTertiary }]}>
-            Publish Bundle
-          </Text>
-        </TouchableOpacity>
+        <ReadyList colors={colors} items={[
+          { label: 'Title', done: !problems.title },
+          { label: 'What’s included', done: !problems.services },
+          { label: 'Price', done: !problems.price },
+          { label: 'Cover', done: !!cover },
+        ]} />
+        <View style={styles.bottomRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.bottomPrice, { color: colors.text }]}>{priceNum > 0 ? formatMoney(priceNum) : '—'}</Text>
+            <Text style={[styles.bottomMeta, { color: colors.textTertiary }]}>{named.length} service{named.length === 1 ? '' : 's'} · {spots} spot{spots === 1 ? '' : 's'}</Text>
+          </View>
+          <TouchableOpacity onPress={submit} disabled={!!saving} activeOpacity={0.85} testID="bundle-submit"
+            style={[styles.postBtn, { backgroundColor: ready ? ACCENT : colors.surfaceHighlight }]}>
+            {saving ? <ActivityIndicator color={ready ? '#FFF' : colors.text} /> : null}
+            <Text style={[styles.postText, { color: ready ? '#FFF' : colors.textTertiary }]}>
+              {saving === 'upload' ? 'Uploading cover…' : saving === 'save' ? 'Saving…' : isEdit ? 'Save changes' : 'Post bundle'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -565,97 +326,42 @@ export default function BundleBuilderScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  headerBtn: { padding: 8, borderRadius: 20 },
-  headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', marginLeft: 12 },
-  publishBtnSmall: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  publishBtnSmallText: { fontSize: 14, fontWeight: '700' },
-
-  content: { padding: 16 },
-
-  imagePicker: { borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 4 },
-  imagePreview: { position: 'relative' },
-  coverImage: { height: 160, width: '100%' },
-  videoTile: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0D0D12' },
-  imagePlaceholder: { height: 120, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  imageOverlay: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    padding: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-  },
-  imageOverlayText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  imagePickerText: { fontSize: 14 },
-
-  sectionLabel: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 8 },
-
-  input: {
-    borderRadius: 14, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 14, fontSize: 16,
-  },
-  descInput: { minHeight: 72, lineHeight: 20, textAlignVertical: 'top' },
-
-  row: { flexDirection: 'row', gap: 12 },
-  half: { flex: 1 },
-  priceWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  priceField: { flex: 1, fontSize: 16, fontWeight: '600', padding: 0 },
-  priceHint: { fontSize: 12, marginTop: 8 },
-
-  serviceCard: { borderRadius: 16, borderWidth: 1, padding: 14, marginBottom: 10, gap: 10 },
-  serviceHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  serviceIndex: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  addServiceBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderWidth: 1.5, borderRadius: 14, paddingVertical: 13, borderStyle: 'dashed',
-  },
-  addServiceText: { fontSize: 14, fontWeight: '700' },
-
-  categoryRow: { flexDirection: 'row', gap: 8 },
-  categoryPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1.5,
-  },
-  categoryEmoji: { fontSize: 16 },
-  categoryLabel: { fontSize: 13, fontWeight: '600' },
-
-  tagWrap: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingTop: 12,
-  },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 6 },
-  tagPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  tagPillText: { fontSize: 12, fontWeight: '600' },
-  tagInput: { fontSize: 15, paddingVertical: 8 },
-
-  previewWrapper: { marginTop: 24 },
-  previewCard: { borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
-  previewCover: { height: 140, alignItems: 'center', justifyContent: 'center' },
-  previewBody: { padding: 14 },
-  previewHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  previewTitle: { fontSize: 17, fontWeight: '700' },
-  previewMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  previewMetaText: { fontSize: 12 },
-  previewPriceBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  previewPriceText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
-  previewItems: { marginTop: 12, gap: 8 },
-  previewItemsTitle: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  previewItemRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  previewItemEmoji: { fontSize: 16 },
-  previewItemName: { fontSize: 14, fontWeight: '600' },
-  previewItemDesc: { fontSize: 12, marginTop: 1, lineHeight: 16 },
-  previewItemPrice: { fontSize: 14, fontWeight: '800' },
-  previewTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 12 },
-  previewTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
-  previewTagText: { fontSize: 11, fontWeight: '600' },
-
-  bottomBar: { paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1 },
-  publishBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 16, borderRadius: 16,
-  },
-  publishBtnText: { fontSize: 16, fontWeight: '700' },
+  center: { alignItems: 'center', justifyContent: 'center', padding: 24 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800' },
+  headerSub: { fontSize: 12, marginTop: 1 },
+  kindIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  content: { padding: 16, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  label: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  count: { fontSize: 12, fontWeight: '700', marginTop: 3 },
+  serviceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderWidth: 1, borderRadius: 16, padding: 10, marginBottom: 8 },
+  serviceNum: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  serviceName: { fontSize: 16, fontWeight: '600', paddingVertical: 6 },
+  serviceDetails: { fontSize: 14, paddingVertical: 2, minHeight: 22 },
+  servicePrice: { flexDirection: 'row', alignItems: 'center', gap: 2, borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, height: 38, width: 78, marginTop: 2 },
+  servicePriceInput: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: '700', padding: 0 },
+  removeBtn: { paddingTop: 11 },
+  addRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 14, paddingVertical: 12, marginTop: 4 },
+  err: { fontSize: 12, marginTop: 4, marginBottom: 6 },
+  moneyBox: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 16, paddingHorizontal: 16, height: 62 },
+  moneySign: { fontSize: 26, fontWeight: '800', marginRight: 4 },
+  moneyInput: { flex: 1, minWidth: 0, fontSize: 28, fontWeight: '800', padding: 0 },
+  valueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10, flexWrap: 'wrap' },
+  valueText: { fontSize: 14 },
+  saveChip: { backgroundColor: 'rgba(16,185,129,0.14)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  saveChipText: { color: '#059669', fontWeight: '800', fontSize: 12 },
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: 16 },
+  spotsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  spotsTitle: { fontSize: 15, fontWeight: '700' },
+  spotsHint: { fontSize: 13, marginTop: 2, lineHeight: 18 },
+  iconField: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, marginBottom: 10 },
+  iconFieldInput: { flex: 1, minWidth: 0, fontSize: 16, paddingVertical: 13 },
+  previewLabel: { fontSize: 13, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase', marginTop: 8, marginBottom: 10, marginLeft: 4 },
+  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  bottomRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bottomPrice: { fontSize: 20, fontWeight: '800' },
+  bottomMeta: { fontSize: 12, marginTop: 1 },
+  postBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 22, paddingVertical: 15, borderRadius: 16 },
+  postText: { fontSize: 16, fontWeight: '800' },
 });

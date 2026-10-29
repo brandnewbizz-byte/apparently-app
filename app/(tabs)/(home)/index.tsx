@@ -162,7 +162,9 @@ interface SkillDeal {
   rating: number;
   image: string;
   distance: number;
+  /** Seconds until the deal ends; 0/undefined = no end date. */
   expiresIn: number;
+  spotsLeft?: number;
   creatorId?: string;
   creatorName?: string;
   creatorAvatar?: string;
@@ -955,38 +957,57 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
 }
 
 function SkillDealCard({ skill, colors }: { skill: SkillDeal; colors: any }) {
+  const discounted = skill.originalPrice > skill.price && skill.price > 0;
+  const cover = (
+    <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.skillDealOverlay}>
+      {skill.expiresIn > 0 ? (
+        <View style={styles.skillDealTimer}>
+          <Clock size={12} color="#FFF" />
+          <Text style={styles.skillDealTimerText}>{formatCountdown(skill.expiresIn)}</Text>
+        </View>
+      ) : null}
+    </LinearGradient>
+  );
   return (
     <View style={[styles.skillDealCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <ImageBackground source={{ uri: skill.image }} style={styles.skillDealImage} imageStyle={styles.skillDealImageStyle}>
-        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.skillDealOverlay}>
-          <View style={styles.skillDealTimer}>
-            <Clock size={12} color="#FFF" />
-            <Text style={styles.skillDealTimerText}>{formatCountdown(skill.expiresIn)}</Text>
-          </View>
+      {skill.image ? (
+        <ImageBackground source={{ uri: skill.image }} style={styles.skillDealImage} imageStyle={styles.skillDealImageStyle}>{cover}</ImageBackground>
+      ) : (
+        <LinearGradient colors={['#3B82F6', '#8B5CF6']} style={[styles.skillDealImage, styles.skillDealImageStyle, { alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ fontSize: 56 }}>{skill.icon}</Text>
+          <View style={StyleSheet.absoluteFill}>{cover}</View>
         </LinearGradient>
-      </ImageBackground>
+      )}
       <View style={styles.skillDealContent}>
         <View style={styles.skillDealHeader}>
           <Text style={styles.skillDealIcon}>{skill.icon}</Text>
           <Text style={[styles.skillDealTitle, { color: colors.text }]}>{skill.title}</Text>
         </View>
         <View style={styles.skillDealProvider}>
-          <Image source={{ uri: skill.provider.avatar }} style={styles.skillProviderAvatar} />
+          {skill.provider.avatar ? <Image source={{ uri: skill.provider.avatar }} style={styles.skillProviderAvatar} /> : null}
           <Text style={[styles.skillProviderName, { color: colors.textSecondary }]}>{skill.provider.name}</Text>
-          <View style={styles.skillProviderRating}>
-            <Star size={12} color="#F59E0B" fill="#F59E0B" />
-            <Text style={styles.skillRatingValue}>{skill.rating}</Text>
-          </View>
+          {skill.rating > 0 ? (
+            <View style={styles.skillProviderRating}>
+              <Star size={12} color="#F59E0B" fill="#F59E0B" />
+              <Text style={styles.skillRatingValue}>{skill.rating}</Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.skillDealFooter}>
           <View style={styles.skillDealPricing}>
             <Text style={styles.skillDealPrice}>${skill.price}</Text>
-            <Text style={styles.skillDealOriginal}>${skill.originalPrice}</Text>
+            {discounted ? <Text style={styles.skillDealOriginal}>${skill.originalPrice}</Text> : null}
           </View>
-          <View style={styles.skillDealDistance}>
-            <MapPin size={12} color={colors.textTertiary} />
-            <Text style={[styles.skillDistanceText, { color: colors.textTertiary }]}>{skill.distance} mi</Text>
-          </View>
+          {typeof skill.spotsLeft === 'number' ? (
+            <Text style={[styles.skillDistanceText, { color: skill.spotsLeft <= 3 ? '#F97316' : colors.textTertiary }]}>
+              {skill.spotsLeft} spot{skill.spotsLeft === 1 ? '' : 's'} left
+            </Text>
+          ) : skill.distance > 0 ? (
+            <View style={styles.skillDealDistance}>
+              <MapPin size={12} color={colors.textTertiary} />
+              <Text style={[styles.skillDistanceText, { color: colors.textTertiary }]}>{skill.distance} mi</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     </View>
@@ -1723,7 +1744,8 @@ export default function HomeScreen() {
 
   const allSkills = useMemo(() => {
     const convertedSkills: SkillDeal[] = (contextSkills || [])
-      .filter((s) => isDealLive(s?.status))
+      // Live, and not past the end date the creator set.
+      .filter((s) => isDealLive(s?.status) && !(s.expiresAt && Date.parse(s.expiresAt) <= Date.now()))
       .map((s) => ({
         id: s.id || '',
         title: s.title || '',
@@ -1733,7 +1755,8 @@ export default function HomeScreen() {
         rating: s.creator?.rating || 0,
         image: s.imageUrl || '',
         distance: 0,
-        expiresIn: s.expiresIn || 3600,
+        expiresIn: s.expiresAt ? Math.max(0, Math.floor((Date.parse(s.expiresAt) - Date.now()) / 1000)) : 0,
+        spotsLeft: Math.max((s.availableCount || 0) - (s.grabCount || 0), 0),
         creatorId: s.creatorId,
         creatorName: s.creator?.name || '',
         creatorAvatar: s.creator?.avatar || '',

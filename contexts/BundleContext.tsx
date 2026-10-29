@@ -8,6 +8,10 @@ import { logger } from '@/lib/logger';
 import { sanitizeBundleDesc, sanitizeCaption } from '@/lib/sanitize';
 import { isVideoUrl } from '@/lib/media';
 import { uuid } from '@/lib/uuid';
+import { writeWithFallback } from '@/lib/dbWrite';
+
+/** Columns added after launch; writes retry without them on older databases. */
+const NEW_BUNDLE_COLUMNS = ['tags', 'date_range', 'available_count', 'total_value'];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -108,7 +112,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         mediaType: isVideo ? 'video' : 'image',
         category: row.category || '',
         location: row.location || '',
-        dateRange: row.expires_at || '',
+        dateRange: row.date_range || '',
         tags: row.tags || [],
         creatorId: row.user_id || row.creator_id || '',
         creator: { name: row.provider_name || 'Unknown', avatar: row.provider_avatar || '', rating: 0, reviews: 0 },
@@ -235,21 +239,12 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
       status: 'active',
       grabs: 0,
       available_count: Math.max(Math.floor(newBundle.availableCount || 1), 1),
+      total_value: (newBundle.items || []).reduce((sum, it) => sum + (Number(it.price) || 0), 0) || null,
+      tags: newBundle.tags?.length ? newBundle.tags : null,
+      date_range: newBundle.dateRange || null,
       created_at: newBundle.createdAt,
     };
-    supabase.from('bundles').insert(bundleRow).then(({ error }) => {
-      if (!error) return;
-      // Database without the available_count column yet (migration 020):
-      // save the bundle anyway rather than losing it.
-      if (String(error.message || '').includes('available_count')) {
-        const { available_count: _omit, ...rest } = bundleRow;
-        supabase.from('bundles').insert(rest).then(({ error: retryErr }) => {
-          if (retryErr) logger.error('BundleContext', 'Supabase insert failed', { error: retryErr });
-        });
-        return;
-      }
-      logger.error('BundleContext', 'Supabase insert failed', { error });
-    });
+    writeWithFallback('BundleContext', (row) => supabase.from('bundles').insert(row), bundleRow, NEW_BUNDLE_COLUMNS);
     return { success: true };
   }, [isLoaded, saveBundles, myBundles.length]);
 
@@ -269,6 +264,13 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
     if (patch.imageUrl !== undefined) { dbPatch.image = patch.imageUrl; dbPatch.cover_image = patch.imageUrl; }
     if (patch.videoUrl !== undefined) { dbPatch.image = ''; dbPatch.cover_image = patch.videoUrl; }
     if (patch.category !== undefined) dbPatch.category = patch.category;
+    if (patch.items !== undefined) {
+      dbPatch.items = patch.items;
+      dbPatch.total_value = patch.items.reduce((sum, it) => sum + (Number(it.price) || 0), 0) || null;
+    }
+    if (patch.location !== undefined) dbPatch.location = patch.location;
+    if (patch.tags !== undefined) dbPatch.tags = patch.tags.length ? patch.tags : null;
+    if (patch.dateRange !== undefined) dbPatch.date_range = patch.dateRange || null;
     if (patch.availableCount !== undefined) {
       const spots = Math.max(Math.floor(patch.availableCount) || 1, 1);
       dbPatch.available_count = spots;
@@ -279,9 +281,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
         dbPatch.status = toDbDealStatus(next);
       }
     }
-    supabase.from('bundles').update(dbPatch).eq('id', id).then(({ error }) => {
-      if (error) logger.error('BundleContext', 'Supabase update failed', { error });
-    });
+    writeWithFallback('BundleContext', (row) => supabase.from('bundles').update(row).eq('id', id), dbPatch, NEW_BUNDLE_COLUMNS);
   }, [isLoaded, saveBundles, bundles]);
 
   const grabBundle = useCallback(async (id: string): Promise<GrabResult> => {

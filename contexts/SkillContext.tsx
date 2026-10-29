@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { sanitizeBundleDesc } from '@/lib/sanitize';
 import { useAuth } from '@/contexts/AuthContext';
 import { uuid } from '@/lib/uuid';
+import { writeWithFallback } from '@/lib/dbWrite';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -31,8 +32,14 @@ export interface UserSkill {
   providerLink?: string;
   deliveryNotes?: string;
   resourcesNeeded?: string;
-  expiresIn?: number; // seconds until deal expires
+  expiresIn?: number; // seconds until deal expires (only when the deal has an end)
+  /** When the deal ends (ISO). null/undefined = no end. */
+  expiresAt?: string | null;
 }
+
+/** Columns added after launch; writes retry without them on older databases. */
+const NEW_SKILL_COLUMNS = ['icon', 'tags', 'original_price', 'expires_at', 'available_count'];
+const secondsUntil = (iso?: string | null) => (iso ? Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 1000)) : undefined);
 
 interface SkillContextValue {
   /** Re-fetch from the server. */
@@ -72,7 +79,10 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       description: row.description || '',
       icon: row.icon || '🛠️',
       price: Number(row.price) || 0,
-      originalPrice: Number(row.price) || 0,
+      // Regular price before the deal; equal to price when there's no discount.
+      originalPrice: Number(row.original_price) > Number(row.price) ? Number(row.original_price) : Number(row.price) || 0,
+      expiresAt: row.expires_at || null,
+      expiresIn: secondsUntil(row.expires_at),
       imageUrl: row.featured_image || '',
       category: row.category || '',
       tags: row.tags || [],
@@ -191,24 +201,18 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
       status: toDbDealStatus(newSkill.status),
       grabs: 0,
       available_count: Math.max(Math.floor(newSkill.availableCount || 20), 1),
+      icon: newSkill.icon || null,
+      tags: newSkill.tags?.length ? newSkill.tags : null,
+      original_price: newSkill.originalPrice > newSkill.price ? newSkill.originalPrice : null,
+      expires_at: newSkill.expiresAt || null,
       created_at: newSkill.createdAt,
     };
-    supabase.from('skill_deals').insert(skillRow).then(({ error }) => {
-      if (!error) return;
-      // Database without the grab-limit column yet: save the skill anyway.
-      if (String(error.message || '').includes('available_count')) {
-        const { available_count: _omit, ...rest } = skillRow;
-        supabase.from('skill_deals').insert(rest).then(({ error: retryErr }) => {
-          if (retryErr) logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error: retryErr });
-        });
-        return;
-      }
-      logger.error('SkillContext', 'Supabase insert into skill_deals failed', { error });
-    });
+    writeWithFallback('SkillContext', (row) => supabase.from('skill_deals').insert(row), skillRow, NEW_SKILL_COLUMNS);
     return { success: true };
   }, [isLoaded, saveSkills, mySkills.length]);
 
   const updateSkill = useCallback((id: string, patch: Partial<UserSkill>) => {
+    if (patch.expiresAt !== undefined) patch = { ...patch, expiresIn: secondsUntil(patch.expiresAt) };
     setSkills((prev) => {
       const updated = prev.map((s) => (s.id === id ? { ...s, ...patch } : s));
       if (isLoaded) saveSkills(updated);
@@ -224,9 +228,11 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
     if (patch.availableCount !== undefined) dbPatch.available_count = Math.max(Math.floor(patch.availableCount) || 1, 1);
     if (patch.imageUrl !== undefined) dbPatch.featured_image = patch.imageUrl;
     if (patch.category !== undefined) dbPatch.category = patch.category;
-    supabase.from('skill_deals').update(dbPatch).eq('id', id).then(({ error }) => {
-      if (error) logger.error('SkillContext', 'Supabase update failed', { error });
-    });
+    if (patch.icon !== undefined) dbPatch.icon = patch.icon;
+    if (patch.tags !== undefined) dbPatch.tags = patch.tags.length ? patch.tags : null;
+    if (patch.originalPrice !== undefined) dbPatch.original_price = patch.originalPrice > (patch.price ?? 0) ? patch.originalPrice : null;
+    if (patch.expiresAt !== undefined) dbPatch.expires_at = patch.expiresAt || null;
+    writeWithFallback('SkillContext', (row) => supabase.from('skill_deals').update(row).eq('id', id), dbPatch, NEW_SKILL_COLUMNS);
   }, [isLoaded, saveSkills]);
 
   /** Book a skill. Resolves once the booking is recorded. */
