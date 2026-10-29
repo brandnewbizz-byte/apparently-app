@@ -35,6 +35,7 @@ export default function WelcomeScreen() {
     emailVerificationRequired,
     pendingVerificationEmail,
     resendVerificationEmail,
+    verifyEmailCode,
     isResendingVerification,
     isBlocked,
     resetPassword,
@@ -52,6 +53,9 @@ export default function WelcomeScreen() {
   const [resetSent, setResetSent] = useState<boolean>(false);
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [verifyCode, setVerifyCode] = useState<string>('');
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -293,9 +297,40 @@ export default function WelcomeScreen() {
                       <AlertCircle size={16} color={Colors.dark.warning} />
                       <Text style={styles.emailBannerTitle}>Confirm your email first</Text>
                     </View>
-                    <Text style={styles.emailBannerSubtitle} numberOfLines={3}>
-                      We sent a verification link to {pendingVerificationEmail}. It can take a minute — check your spam or junk folder too.
+                    <Text style={styles.emailBannerSubtitle} numberOfLines={4}>
+                      We emailed a code to {pendingVerificationEmail}. Type it below, or tap the link in the email. It can take a minute, so check your spam or junk folder too.
                     </Text>
+                    <View style={styles.codeRow}>
+                      <TextInput
+                        style={styles.codeInput}
+                        value={verifyCode}
+                        onChangeText={(t) => { setVerifyCode(t.replace(/\D/g, '').slice(0, 8)); setCodeError(null); }}
+                        placeholder="Code"
+                        placeholderTextColor={Colors.dark.textSecondary}
+                        keyboardType="number-pad"
+                        textContentType="oneTimeCode"
+                        autoComplete="one-time-code"
+                        maxLength={8}
+                        testID="verify-code-input"
+                      />
+                      <TouchableOpacity
+                        style={[styles.codeButton, (verifyCode.length < 6 || isVerifying) && styles.resendButtonDisabled]}
+                        disabled={verifyCode.length < 6 || isVerifying}
+                        onPress={async () => {
+                          if (!pendingVerificationEmail) return;
+                          setIsVerifying(true);
+                          const res = await verifyEmailCode(pendingVerificationEmail, verifyCode);
+                          setIsVerifying(false);
+                          if (!res.success) { setCodeError(res.error || 'That code did not work.'); return; }
+                          setVerifyCode('');
+                        }}
+                        activeOpacity={0.85}
+                        testID="verify-code-button"
+                      >
+                        {isVerifying ? <ActivityIndicator color={Colors.dark.text} /> : <Text style={styles.resendButtonText}>Confirm</Text>}
+                      </TouchableOpacity>
+                    </View>
+                    {codeError ? <Text style={styles.codeError}>{codeError}</Text> : null}
                     <TouchableOpacity
                       style={[styles.resendButton, isResendingVerification && styles.resendButtonDisabled]}
                       disabled={isResendingVerification}
@@ -713,6 +748,38 @@ const styles = StyleSheet.create({
     backgroundColor: `${Colors.dark.warning}33`,
     borderWidth: 1,
     borderColor: `${Colors.dark.warning}55`,
+  },
+  codeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  codeInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${Colors.dark.warning}55`,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    paddingHorizontal: 12,
+    color: Colors.dark.text,
+    fontSize: 18,
+    fontWeight: '700' as const,
+    letterSpacing: 4,
+  },
+  codeButton: {
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.dark.warning,
+  },
+  codeError: {
+    fontSize: 12,
+    color: Colors.dark.error,
+    marginBottom: 8,
   },
   resendButtonDisabled: {
     opacity: 0.7,

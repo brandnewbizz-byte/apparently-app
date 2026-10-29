@@ -33,6 +33,8 @@ interface AuthState {
 }
 
 const PROFILE_CACHE_KEY = 'apparently_user_profile_cache_v3';
+/** Where the sign-up email's link lands: a plain "you're confirmed, go back to the app" page. */
+const EMAIL_CONFIRMED_URL = 'https://apparentlyappdashboard.nationalcompliancehub.com/confirmed';
 
 
 // UNAUTHENTICATED default — never assume a session on mount.
@@ -361,6 +363,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         email: trimmedEmail,
         password,
         options: {
+          emailRedirectTo: EMAIL_CONFIRMED_URL,
           data: {
             name: cleanedFullName,
             full_name: cleanedFullName,
@@ -774,7 +777,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       logger.info('Auth', 'Resending verification email', { trimmed });
       setIsResendingVerification(true);
 
-      const { error } = await supabase.auth.resend({ type: 'signup', email: trimmed });
+      const { error } = await supabase.auth.resend({ type: 'signup', email: trimmed, options: { emailRedirectTo: EMAIL_CONFIRMED_URL } });
 
       if (error) {
         logger.error('Auth', 'resend verification error', { message: error.message });
@@ -794,6 +797,34 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return { success: false, error: message };
     } finally {
       setIsResendingVerification(false);
+    }
+  };
+
+  /**
+   * Confirm a new account with the code from the sign-up email. Works even when
+   * the email's link can't open the app (or lands in a browser instead).
+   */
+  const verifyEmailCode = async (email: string, code: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmed = email.trim().toLowerCase();
+    const token = code.replace(/\D/g, '');
+    if (!trimmed || token.length < 6) return { success: false, error: 'Enter the code from the email.' };
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({ email: trimmed, token, type: 'signup' });
+      if (error) {
+        logger.warn('Auth', 'verify code failed', { message: error.message });
+        const m = error.message.toLowerCase();
+        const msg = m.includes('expired') || m.includes('invalid')
+          ? 'That code is wrong or has expired. Tap "Resend email" for a new one.'
+          : error.message;
+        return { success: false, error: msg };
+      }
+      if (data.session) {
+        setPendingVerificationEmail(null);
+        setEmailVerificationRequired(false);
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Could not check the code' };
     }
   };
 
@@ -857,6 +888,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signIn,
     signOut,
     resendVerificationEmail,
+    verifyEmailCode,
     resetPassword,
     clearError,
   };
