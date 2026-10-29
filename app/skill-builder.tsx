@@ -44,6 +44,8 @@ export default function SkillBuilderScreen() {
 function LoadingListing() {
   const { colors } = useTheme();
   const router = useRouter();
+  // Opened straight from a link (web) there's no screen to go back to.
+  const leave = () => (router.canGoBack() ? router.back() : router.replace('/manage'));
   const [slow, setSlow] = useState(false);
   useEffect(() => { const t = setTimeout(() => setSlow(true), 4000); return () => clearTimeout(t); }, []);
   return (
@@ -52,7 +54,7 @@ function LoadingListing() {
       {slow ? (
         <>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Couldn’t find this skill</Text>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}><Text style={{ color: ACCENT, fontWeight: '700' }}>Go back</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => leave()} style={{ marginTop: 12 }}><Text style={{ color: ACCENT, fontWeight: '700' }}>Go back</Text></TouchableOpacity>
         </>
       ) : <ActivityIndicator color={ACCENT} />}
     </View>
@@ -61,6 +63,8 @@ function LoadingListing() {
 
 function SkillForm({ editing }: { editing?: UserSkill }) {
   const router = useRouter();
+  // Opened straight from a link (web) there's no screen to go back to.
+  const leave = () => (router.canGoBack() ? router.back() : router.replace('/manage'));
   const editId = editing?.id;
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -113,8 +117,8 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
   };
 
   const goBack = useCallback(() => {
-    if (!dirty.current || saving) { router.back(); return; }
-    confirmDiscard(isEdit ? 'Your changes to this skill will be lost.' : 'This skill hasn’t been posted yet.', () => router.back());
+    if (!dirty.current || saving) { leave(); return; }
+    confirmDiscard(isEdit ? 'Your changes to this skill will be lost.' : 'This skill hasn’t been posted yet.', () => leave());
   }, [router, saving, isEdit]);
 
   const submit = async () => {
@@ -170,7 +174,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     dirty.current = false;
     setSaving(null);
-    router.back();
+    leave();
   };
 
   return (
@@ -190,6 +194,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 170 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <CoverPicker uri={cover?.uri || null} onPick={chooseCover} onRemove={() => { dirty.current = true; setCover(null); }}
+          onLink={(url) => { dirty.current = true; setCover({ uri: url, type: 'image' }); }}
           accent={ACCENT} colors={colors} label="Add a cover photo" sub="Show your work. Without one we use your icon." />
 
         <Section n={1} title="Your skill" colors={colors}>

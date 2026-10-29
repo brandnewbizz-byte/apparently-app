@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Camera, Check, ImagePlus, Minus, Play, Plus, X } from 'lucide-react-native';
 import { LISTING_CATEGORIES } from '@/lib/listingCategories';
 
@@ -135,11 +135,27 @@ export function Stepper({ value, onChange, min = 1, max = 999, colors, suffix }:
 }
 
 /** Big 16:9 cover tile: pick, replace, remove. */
-export function CoverPicker({ uri, isVideo, onPick, onRemove, busy, accent, colors, label = 'Add a cover photo', sub }: {
+/** A public https photo address someone pasted (web only). */
+export function isPhotoLink(v: string): boolean {
+  return /^https:\/\/[^\s]+$/i.test(v.trim());
+}
+
+export function CoverPicker({ uri, isVideo, onPick, onRemove, onLink, busy, accent, colors, label = 'Add a cover photo', sub }: {
   uri: string | null; isVideo?: boolean; onPick: () => void; onRemove: () => void; busy?: boolean;
+  /** Web only: use a photo from a link instead of a file. */
+  onLink?: (url: string) => void;
   accent: string; colors: BuilderColors; label?: string; sub?: string;
 }) {
+  const [link, setLink] = useState('');
+  const showLink = !!onLink && Platform.OS === 'web' && !uri;
+  const useLink = () => {
+    const v = link.trim();
+    if (!isPhotoLink(v) || !onLink) return;
+    onLink(v);
+    setLink('');
+  };
   return (
+    <View>
     <Pressable onPress={onPick} style={[s.cover, { borderColor: uri ? 'transparent' : colors.border, backgroundColor: colors.surfaceHighlight }]} accessibilityRole="button" accessibilityLabel={uri ? 'Change cover' : label}>
       {uri ? (
         <>
@@ -164,6 +180,26 @@ export function CoverPicker({ uri, isVideo, onPick, onRemove, busy, accent, colo
       )}
       {busy ? <View style={s.coverBusy}><ActivityIndicator color="#FFF" /></View> : null}
     </Pressable>
+    {showLink ? (
+      <View style={[s.linkRow, { borderColor: colors.border, backgroundColor: colors.background }]}>
+        <TextInput
+          value={link}
+          onChangeText={setLink}
+          onSubmitEditing={useLink}
+          placeholder="Or paste a photo link (https://…)"
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[s.linkInput, { color: colors.text }]}
+          accessibilityLabel="Photo link"
+          testID="cover-link-input"
+        />
+        <TouchableOpacity onPress={useLink} disabled={!isPhotoLink(link)} style={[s.linkBtn, { backgroundColor: accent, opacity: isPhotoLink(link) ? 1 : 0.4 }]} accessibilityLabel="Use photo link" testID="cover-link-use">
+          <Text style={s.linkBtnText}>Use</Text>
+        </TouchableOpacity>
+      </View>
+    ) : null}
+    </View>
   );
 }
 
@@ -266,6 +302,10 @@ const s = StyleSheet.create({
   coverBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999 },
   coverBtnText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
   coverBusy: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, borderWidth: 1, borderRadius: 12, paddingLeft: 12, paddingRight: 6, paddingVertical: 6 },
+  linkInput: { flex: 1, minWidth: 0, fontSize: 14, paddingVertical: 6 },
+  linkBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9 },
+  linkBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
   tagBox: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 8, minHeight: 50 },
   tag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   tagText: { fontSize: 13, fontWeight: '700' },
