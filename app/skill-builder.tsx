@@ -247,7 +247,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
 
         <Section n={3} title="Spots and timing" colors={colors}>
           <View style={styles.spotsRow}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={[styles.spotsTitle, { color: colors.text }]}>Spots</Text>
               <Text style={[styles.spotsHint, { color: colors.textTertiary }]}>How many people can grab this deal.</Text>
             </View>

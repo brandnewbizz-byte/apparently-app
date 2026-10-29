@@ -260,7 +260,7 @@ function BundleForm({ editing }: { editing?: UserBundle }) {
           ) : null}
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <View style={styles.spotsRow}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={[styles.spotsTitle, { color: colors.text }]}>Spots</Text>
               <Text style={[styles.spotsHint, { color: colors.textTertiary }]}>How many people can grab it. It closes when full.</Text>
             </View>
