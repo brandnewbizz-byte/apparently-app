@@ -36,6 +36,27 @@ const PROFILE_CACHE_KEY = 'apparently_user_profile_cache_v3';
 /** Where the sign-up email's link lands: a plain "you're confirmed, go back to the app" page. */
 const EMAIL_CONFIRMED_URL = 'https://apparentlyappdashboard.nationalcompliancehub.com/confirmed';
 
+/** Turn Supabase Auth errors into something a person can act on. */
+export function friendlyAuthError(raw: string | undefined | null): string {
+  const m = String(raw || '');
+  const lower = m.toLowerCase();
+  const wait = m.match(/after (\d+) seconds?/i);
+  if (wait) return `Please wait ${wait[1]} seconds and try again.`;
+  if (lower.includes('rate limit') || lower.includes('too many')) return 'Too many tries. Please wait a minute and try again.';
+  if (lower.includes('invalid login credentials')) return 'Wrong email or password.';
+  if (lower.includes('failed to fetch') || lower.includes('network request failed') || lower.includes('networkerror')) {
+    return 'No connection. Check your internet and try again.';
+  }
+  if (lower.includes('token has expired') || lower.includes('otp_expired') || lower.includes('invalid otp')) {
+    return 'That code is wrong or has expired. Ask for a new one.';
+  }
+  if (lower.includes('same_password') || lower.includes('different from the old password')) {
+    return 'Choose a password you haven\'t used before.';
+  }
+  if (lower.includes('weak') || lower.includes('password should')) return m;
+  return m || 'Something went wrong. Please try again.';
+}
+
 
 // UNAUTHENTICATED default — never assume a session on mount.
 // The useEffect calls getSession() + onAuthStateChange to determine real auth state.
@@ -381,10 +402,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         });
 
         const msgLower = authError.message.toLowerCase();
-        let userMessage = authError.message;
+        let userMessage = friendlyAuthError(authError.message);
 
         if (msgLower.includes('already registered') || msgLower.includes('already exists')) {
-          userMessage = 'This email is already registered.';
+          userMessage = 'An account with this email already exists. Sign in instead, or use "Forgot password".';
         } else if (msgLower.includes('database error saving new user')) {
           userMessage = "Couldn't create your account. Please try again in a minute.";
         }
@@ -402,7 +423,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: msg };
       }
 
-      if (authData.user) {
+      if (authData.user && authData.session) {
         const { error: profileError } = await supabase
           .from('profiles')
           .update(
@@ -441,7 +462,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signIn = async (
     emailOrUsername: string,
     password: string
-  ): Promise<{ success: boolean; error?: string; needsEmailVerification?: boolean }> => {
+  ): Promise<{ success: boolean; error?: string; needsEmailVerification?: boolean; email?: string }> => {
     try {
       setAuthError(null);
       const trimmedInput = emailOrUsername.toLowerCase().trim();
@@ -452,31 +473,45 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       logger.info('Auth', 'Sign in with', { value: isEmail ? 'email' : 'username', trimmedInput });
 
-      let loginEmail = trimmedInput;
-
       if (!isEmail) {
-        const { data: profileRows, error: profileError } = await supabase
-          .rpc('resolve_login_email', { p_username: trimmedInput });
-
-        const profileData = (profileRows && profileRows.length > 0) ? profileRows[0] : null;
-
-        if (profileError || !profileData) {
-          logger.info('Auth', 'Username not found', { trimmedInput });
-          const msg = 'Invalid username or password.';
-          setAuthError(msg);
-          return { success: false, error: msg };
+        // Usernames are resolved on the server so nobody can look up another
+        // person's email address (supabase/functions/username-login).
+        const { data, error: fnError } = await supabase.functions.invoke('username-login', {
+          body: { username: trimmedInput, password },
+        });
+        let payload: any = data;
+        if (fnError) {
+          // functions.invoke puts non-2xx bodies on error.context
+          try { payload = await (fnError as any).context?.json?.(); } catch { payload = null; }
         }
-
-        if (profileData.email) {
-          loginEmail = profileData.email;
-        } else {
-          logger.info('Auth', 'No email found for username', { trimmedInput });
-          const msg = 'Invalid username or password.';
-          setAuthError(msg);
-          return { success: false, error: msg };
+        if (payload?.session?.access_token) {
+          const { error: setErr } = await supabase.auth.setSession({
+            access_token: payload.session.access_token,
+            refresh_token: payload.session.refresh_token,
+          });
+          if (setErr) {
+            const msg = friendlyAuthError(setErr.message);
+            setAuthError(msg);
+            return { success: false, error: msg };
+          }
+          logger.info('Auth', 'Sign in successful (username)');
+          return { success: true };
         }
+        if (payload?.error === 'email_not_confirmed' && payload.email) {
+          setEmailVerificationRequired(true);
+          setPendingVerificationEmail(payload.email);
+          return { success: false, error: 'Confirm your email first.', needsEmailVerification: true, email: payload.email };
+        }
+        const msg = payload?.error === 'rate_limited'
+          ? 'Too many tries. Please wait a minute and try again.'
+          : payload?.error === 'invalid_credentials'
+          ? 'Wrong username or password.'
+          : friendlyAuthError((fnError as any)?.message || 'Could not sign in');
+        setAuthError(msg);
+        return { success: false, error: msg };
       }
 
+      const loginEmail = trimmedInput;
       const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password,
@@ -489,13 +524,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (isEmailNotConfirmed) {
           setEmailVerificationRequired(true);
           setPendingVerificationEmail(loginEmail);
-          return { success: false, error: 'Confirm your email first.', needsEmailVerification: true };
+          return { success: false, error: 'Confirm your email first.', needsEmailVerification: true, email: loginEmail };
         }
 
-        let userMessage = error.message;
-        if (error.message.includes('Invalid login credentials')) {
-          userMessage = 'Invalid email or password.';
-        }
+        const userMessage = friendlyAuthError(error.message);
         setAuthError(userMessage);
         return { success: false, error: userMessage };
       }
@@ -781,10 +813,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (error) {
         logger.error('Auth', 'resend verification error', { message: error.message });
-        let userMessage = error.message;
-        if (error.message.toLowerCase().includes('rate limit')) {
-          userMessage = 'Too many requests. Please wait a minute and try again.';
-        }
+        const userMessage = friendlyAuthError(error.message);
         setAuthError(userMessage);
         return { success: false, error: userMessage };
       }
@@ -814,8 +843,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         logger.warn('Auth', 'verify code failed', { message: error.message });
         const m = error.message.toLowerCase();
         const msg = m.includes('expired') || m.includes('invalid')
-          ? 'That code is wrong or has expired. Tap "Resend email" for a new one.'
-          : error.message;
+          ? 'That code is wrong or has expired. Tap "Send a new code".'
+          : friendlyAuthError(error.message);
         return { success: false, error: msg };
       }
       if (data.session) {
@@ -840,18 +869,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { success: false, error: msg };
       }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: 'rork-app://reset-password',
-      });
+      // The email carries a code for the app and a link to the web reset page.
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
 
       if (error) {
         logger.error('Auth', 'Password reset error', { message: error.message });
-        
-        let userMessage = error.message;
-        if (error.message.toLowerCase().includes('rate limit')) {
-          userMessage = 'Too many password reset requests. Please wait a few minutes before trying again.';
-        }
-        
+        const userMessage = friendlyAuthError(error.message);
         setAuthError(userMessage);
         return { success: false, error: userMessage };
       }
@@ -863,6 +886,28 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       logger.error('Auth', 'Password reset exception', { message });
       setAuthError(message);
       return { success: false, error: message };
+    }
+  };
+
+  /** Finish a password reset in the app with the code from the email. */
+  const resetPasswordWithCode = async (
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<{ success: boolean; error?: string }> => {
+    const trimmed = email.trim().toLowerCase();
+    const token = code.replace(/\D/g, '');
+    if (token.length < 6) return { success: false, error: 'Enter the code from the email.' };
+    if (newPassword.length < 8) return { success: false, error: 'Use at least 8 characters.' };
+    try {
+      const { error: vErr } = await supabase.auth.verifyOtp({ email: trimmed, token, type: 'recovery' });
+      if (vErr) return { success: false, error: friendlyAuthError(vErr.message) };
+      const { error: uErr } = await supabase.auth.updateUser({ password: newPassword });
+      if (uErr) return { success: false, error: friendlyAuthError(uErr.message) };
+      logger.info('Auth', 'Password reset with code');
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: friendlyAuthError(e instanceof Error ? e.message : String(e)) };
     }
   };
 
@@ -890,6 +935,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     resendVerificationEmail,
     verifyEmailCode,
     resetPassword,
+    resetPasswordWithCode,
     clearError,
   };
 });
