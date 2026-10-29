@@ -55,7 +55,9 @@ import { usePlanner } from '@/contexts/PlannerContext';
 import { localDateKey, formatTime12 } from '@/lib/dates';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useFeedStack, type FeedStack } from '@/hooks/useFeedStack';
+import { useFeedStack, useNeedsPicks, type FeedStack } from '@/hooks/useFeedStack';
+import { vibesOf } from '@/lib/vibes';
+import type { HideReason } from '@/lib/feedEngine';
 import { planFor } from '@/lib/plans';
 import type { FeedItemInfo } from '@/lib/feedEngine';
 import { supabase } from '@/lib/supabase';
@@ -108,6 +110,7 @@ interface BundlePlan {
   /** Spots the creator allows (how many people can grab). */
   availableCount?: number;
   location?: string;
+  tags?: string[];
   createdAt?: string;
 }
 
@@ -143,6 +146,7 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     grabCount: b.grabCount,
     availableCount: b.availableCount,
     location: b.location,
+    tags: b.tags,
     createdAt: b.createdAt,
   };
 }
@@ -203,20 +207,62 @@ interface SwipeableBundlesProps {
 
 // Rounds and waits come from the plan (lib/feedEngine.ts → FEED_PACE).
 const describeBundle = (b: BundlePlan): FeedItemInfo => ({
-  id: b.id, category: b.category || b.type, creatorId: b.creatorId, createdAt: b.createdAt, price: b.price,
+  id: b.id, category: b.category || b.type, location: b.location,
+  types: vibesOf({ category: b.category || b.type, tags: b.tags, title: b.title, description: b.description }),
+  creatorId: b.creatorId, createdAt: b.createdAt, price: b.price,
   spotsLeft: b.availableCount ? Math.max(b.availableCount - (b.grabCount || 0), 0) : undefined,
   grabCount: b.grabCount, hasImage: !!(b.imageUrl || b.image || b.videoUrl), description: b.description,
 });
 const describeSkill = (k: SkillDeal): FeedItemInfo => ({
-  id: k.id, category: k.category, creatorId: k.creatorId, createdAt: k.createdAt, price: k.price, originalPrice: k.originalPrice,
+  id: k.id, category: k.category, types: k.category ? [k.category] : undefined, creatorId: k.creatorId, createdAt: k.createdAt, price: k.price, originalPrice: k.originalPrice,
   spotsLeft: k.spotsLeft, expiresIn: k.expiresIn, grabCount: k.grabCount, hasImage: !!(k.imageUrl || k.image), description: k.description,
 });
+
+/** The welcome picks open once per app session at most. */
+let picksAsked = false;
 
 const fmtWait = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const sec = seconds % 60;
   return `${m}:${sec.toString().padStart(2, '0')}`;
 };
+
+const WHY_NOT: { key: HideReason; label: string; skillLabel?: string }[] = [
+  { key: 'pricey', label: 'Too pricey' },
+  { key: 'not_for_me', label: 'Not my thing' },
+  { key: 'far', label: 'Too far' },
+  { key: 'dates', label: 'Not those dates', skillLabel: 'Not right now' },
+];
+
+/** "Not interested" → one tap on why, so the feed changes the right thing. */
+function NotInterested({ onHide, noun, colors, testPrefix }: { onHide: (reason?: HideReason) => void; noun: string; colors: any; testPrefix: string }) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) {
+    return (
+      <TouchableOpacity onPress={() => setAsking(true)} style={styles.notInterestedBtn} accessibilityLabel={`Not interested in this ${noun}`} testID={`${testPrefix}-not-interested`}>
+        <Text style={[styles.notInterestedText, { color: colors.textTertiary }]}>Not interested · don’t show me this again</Text>
+      </TouchableOpacity>
+    );
+  }
+  const pick = (r?: HideReason) => { setAsking(false); onHide(r); };
+  return (
+    <View style={styles.whyNotWrap} testID={`${testPrefix}-why-not`}>
+      <Text style={[styles.whyNotTitle, { color: colors.textSecondary }]}>Got it. What’s the reason?</Text>
+      <View style={styles.whyNotRow}>
+        {WHY_NOT.map((w) => (
+          <TouchableOpacity key={w.key} onPress={() => pick(w.key)} style={[styles.whyNotChip, { borderColor: colors.border, backgroundColor: colors.surface }]} testID={`${testPrefix}-why-${w.key}`}>
+            <Text style={[styles.whyNotChipText, { color: colors.text }]}>{testPrefix === 'skill' && w.skillLabel ? w.skillLabel : w.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.whyNotRow}>
+        <TouchableOpacity onPress={() => pick()} testID={`${testPrefix}-why-none`}><Text style={[styles.whyNotLink, { color: colors.textTertiary }]}>Just hide it</Text></TouchableOpacity>
+        <Text style={{ color: colors.textTertiary }}>·</Text>
+        <TouchableOpacity onPress={() => setAsking(false)} testID={`${testPrefix}-why-cancel`}><Text style={[styles.whyNotLink, { color: colors.textTertiary }]}>Keep it</Text></TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
 /** What the stack shows between rounds, or when there's nothing new. */
 function FeedPausePanel({ feed, noun, accent, colors, compact }: { feed: FeedStack<unknown>; noun: string; accent: string; colors: any; compact?: boolean }) {
@@ -286,10 +332,10 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
 
-  const hideBundle = useCallback(() => {
+  const hideBundle = useCallback((reason?: HideReason) => {
     if (!currentBundle) return;
     localApi.trackDealStat('bundle', currentBundle.id, 'skip');
-    feed.record(currentBundle, 'hide');
+    feed.record(currentBundle, 'hide', reason);
     resetCard();
   }, [currentBundle, feed, resetCard]);
 
@@ -515,9 +561,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity onPress={hideBundle} style={styles.notInterestedBtn} accessibilityLabel="Not interested in this bundle" testID="bundle-not-interested">
-        <Text style={[styles.notInterestedText, { color: colors.textTertiary }]}>Not interested · don’t show me this again</Text>
-      </TouchableOpacity>
+      <NotInterested key={currentBundle.id} onHide={hideBundle} noun="bundle" colors={colors} testPrefix="bundle" />
 
       <View style={styles.swipeIndicator}>
         {limitedBundles.map((_, i) => (
@@ -711,10 +755,10 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
 
-  const hideSkill = useCallback(() => {
+  const hideSkill = useCallback((reason?: HideReason) => {
     if (!currentSkill) return;
     localApi.trackDealStat('skill', currentSkill.id, 'skip');
-    feed.record(currentSkill, 'hide');
+    feed.record(currentSkill, 'hide', reason);
     resetCard();
   }, [currentSkill, feed, resetCard]);
 
@@ -876,9 +920,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity onPress={hideSkill} style={styles.notInterestedBtn} accessibilityLabel="Not interested in this skill deal" testID="skill-not-interested">
-        <Text style={[styles.notInterestedText, { color: colors.textTertiary }]}>Not interested · don’t show me this again</Text>
-      </TouchableOpacity>
+      <NotInterested key={currentSkill.id} onHide={hideSkill} noun="skill deal" colors={colors} testPrefix="skill" />
 
       <View style={styles.skillSwipeIndicator}>
         {limitedSkills.map((_, i) => (
@@ -1270,6 +1312,14 @@ export default function HomeScreen() {
     const upcoming = plans.filter((p) => p.date > today && p.status !== 'completed' && p.status !== 'cancelled').length;
     return upcoming > 0 ? `Nothing today · ${upcoming} coming up` : 'Nothing planned yet — tap to start';
   }, [plans]);
+  // First time on Home: ask what kinds of plans this person likes (once per account).
+  const needsPicks = useNeedsPicks();
+  useEffect(() => {
+    if (!needsPicks || picksAsked) return;
+    picksAsked = true;
+    const t = setTimeout(() => router.push('/picks' as never), 400);
+    return () => clearTimeout(t);
+  }, [needsPicks, router]);
   const { bundles: contextBundles, grabBundle, reload: reloadBundles } = useBundles();
   const { skills: contextSkills, grabSkill, reload: reloadSkills } = useSkills();
   const { requests: serviceRequests, grabRequest, reload: reloadRequests } = useServiceRequests();
@@ -2626,6 +2676,12 @@ const styles = StyleSheet.create({
   },
   notInterestedBtn: { alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12, marginTop: 2 },
   notInterestedText: { fontSize: 12, fontWeight: '600' },
+  whyNotWrap: { alignItems: 'center', paddingTop: 4, gap: 8 },
+  whyNotTitle: { fontSize: 12.5, fontWeight: '700' },
+  whyNotRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  whyNotChip: { borderWidth: 1, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 12 },
+  whyNotChipText: { fontSize: 12.5, fontWeight: '700' },
+  whyNotLink: { fontSize: 12, fontWeight: '600', paddingVertical: 2 },
   swipeEmptyState: {
     height: 380,
     alignItems: 'center',

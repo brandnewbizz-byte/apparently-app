@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import {
   feedKey, feedStore, isEligible, paceFor, rankItems,
-  type FeedItemInfo, type FeedKind, type FeedPace, type FeedVerdict,
+  type FeedItemInfo, type FeedKind, type FeedPace, type FeedVerdict, type HideReason,
 } from '@/lib/feedEngine';
 
 export type FeedStackState = 'loading' | 'cards' | 'wait' | 'empty';
@@ -18,7 +18,7 @@ export interface FeedStack<T> {
   /** Seconds left before the next round. */
   waitLeft: number;
   pace: FeedPace;
-  record: (item: T, verdict: FeedVerdict) => void;
+  record: (item: T, verdict: FeedVerdict, reason?: HideReason) => void;
 }
 
 /**
@@ -39,6 +39,7 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
   // Signed-out / not-yet-known account: wait, so nothing is written under the wrong key.
   const loaded = !!user?.id && feedStore.loaded && feedStore.uid === user.id;
   const marks = st.marks;
+  const profile = st.profile;
   const round = st.rounds[kind];
   const waitUntil = st.waitUntil[kind] || 0;
 
@@ -51,10 +52,10 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
 
   const eligible = useMemo(() => {
     const list = items.filter((it) => isEligible(marks[feedKey(kind, it.id)], infos.get(it.id)!, now));
-    const ranked = rankItems(list.map((it) => infos.get(it.id)!), marks, kind, now);
+    const ranked = rankItems(list.map((it) => infos.get(it.id)!), marks, kind, now, profile);
     const byId = new Map(items.map((it) => [it.id, it] as const));
     return ranked.map((r) => byId.get(r.id)!).filter(Boolean);
-  }, [items, infos, marks, kind, now]);
+  }, [items, infos, marks, kind, now, profile]);
 
   const eligibleIds = useMemo(() => new Set(eligible.map((e) => e.id)), [eligible]);
   const remaining = useMemo(() => (round ? round.ids.filter((id) => eligibleIds.has(id)) : []), [round, eligibleIds]);
@@ -92,8 +93,8 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
     return () => clearInterval(t);
   }, [waiting]);
 
-  const record = useCallback((item: T, verdict: FeedVerdict) => {
-    feedStore.mark(kind, describe(item), verdict);
+  const record = useCallback((item: T, verdict: FeedVerdict, reason?: HideReason) => {
+    feedStore.mark(kind, describe(item), verdict, reason);
     setNow(Date.now());
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -118,4 +119,18 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
     state: 'cards', current: ordered[0], next: ordered[1],
     round: roundItems, done: roundItems.length - ordered.length, waitLeft: 0, pace, record,
   };
+}
+
+/**
+ * True when this account hasn't picked its kinds of plans yet (or skipped that),
+ * once its saved feed has been checked on this device and the account.
+ */
+export function useNeedsPicks(): boolean {
+  const { user } = useAuth();
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => feedStore.subscribe(rerender), []);
+  useEffect(() => { feedStore.load(user?.id || null); }, [user?.id]);
+  if (!user?.id || feedStore.uid !== user.id || !feedStore.loaded || !feedStore.synced) return false;
+  const p = feedStore.state.profile;
+  return !p?.pickedAt && !p?.skippedAt;
 }

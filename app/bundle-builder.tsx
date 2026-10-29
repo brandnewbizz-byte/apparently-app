@@ -15,6 +15,7 @@ import { Section, Field, CategoryGrid, Pills, Stepper, CoverPicker, TagEditor, R
 import { BundlePreview } from '@/components/builder/ListingPreview';
 import { pickCover, uploadCover, confirmDiscard, type PickedCover } from '@/lib/coverMedia';
 import { TAG_IDEAS, WHEN_IDEAS, cleanMoneyInput, parseMoney, formatMoney } from '@/lib/listingCategories';
+import { VIBES, isVibeTag, vibeTag, type VibeKey } from '@/lib/vibes';
 import { isVideoUrl } from '@/lib/media';
 import { saveListingNotes, useListingNotes } from '@/lib/listingNotes';
 
@@ -83,7 +84,9 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
   const [spots, setSpots] = useState(Math.max(editing?.availableCount || 1, 1));
   const [location, setLocation] = useState(editing?.location || '');
   const [when, setWhen] = useState(editing?.dateRange || '');
-  const [tags, setTags] = useState<string[]>(editing?.tags?.filter((t) => t !== 'Bundle') || []);
+  const [tags, setTags] = useState<string[]>(editing?.tags?.filter((t) => t !== 'Bundle' && !isVibeTag(t)) || []);
+  // "Who's it for?" (up to 2) — saved as tags, used by the Home feed to match people's picks.
+  const [vibes, setVibes] = useState<VibeKey[]>(() => VIBES.filter((v) => editing?.tags?.some((t) => t.toLowerCase() === v.tag.toLowerCase())).map((v) => v.key));
   const [notes, setNotes] = useState(initialNotes || editing?.plannerNotes || '');
   const [saving, setSaving] = useState<null | 'upload' | 'save'>(null);
   const [triedSubmit, setTriedSubmit] = useState(false);
@@ -92,6 +95,7 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
   // Fill the form when editing (once the bundle is loaded).
 
   const touch = <T,>(fn: (v: T) => void) => (v: T) => { dirty.current = true; fn(v); };
+  const toggleVibe = (k: VibeKey) => touch(setVibes)(vibes.includes(k) ? vibes.filter((x) => x !== k) : [...vibes, k].slice(-2));
 
   const itemsTotal = useMemo(() => services.reduce((sum, s) => sum + parseMoney(s.price), 0), [services]);
   const priceNum = parseMoney(price);
@@ -160,7 +164,7 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
       category: category || 'other',
       location: location.trim(),
       dateRange: when.trim(),
-      tags,
+      tags: [...vibes.map(vibeTag), ...tags],
       availableCount: spots,
       plannerNotes: notes.trim() || undefined,
     };
@@ -295,7 +299,21 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
           <Pills options={WHEN_IDEAS.map((w) => ({ key: w, label: w }))} value={when} onChange={touch(setWhen)} accent={ACCENT} colors={colors} />
         </Section>
 
-        <Section n={5} title="Tags" hint="Up to 5. They help people find your bundle." colors={colors}>
+        <Section n={5} title="Who’s it for?" hint="Pick 1 or 2. We show it first to people who like these." colors={colors}>
+          <View style={styles.vibeWrap}>
+            {VIBES.map((v) => {
+              const on = vibes.includes(v.key);
+              return (
+                <TouchableOpacity key={v.key} onPress={() => toggleVibe(v.key)} activeOpacity={0.8} testID={`bundle-vibe-${v.key}`}
+                  style={[styles.vibeChip, { borderColor: on ? ACCENT : colors.border, backgroundColor: on ? ACCENT : colors.background }]}>
+                  <Text style={[styles.vibeChipText, { color: on ? '#FFFFFF' : colors.text }]}>{v.icon} {v.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Section>
+
+        <Section n={6} title="Tags" hint="Up to 5. They help people find your bundle." colors={colors}>
           <TagEditor tags={tags} onChange={touch(setTags)} ideas={TAG_IDEAS[category || 'other']} accent={ACCENT} colors={colors} />
         </Section>
 
@@ -359,6 +377,9 @@ const styles = StyleSheet.create({
   moneyInput: { flex: 1, minWidth: 0, fontSize: 28, fontWeight: '800', padding: 0 },
   valueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   valueText: { fontSize: 14 },
+  vibeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  vibeChip: { borderWidth: 1.5, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 12 },
+  vibeChipText: { fontSize: 13.5, fontWeight: '700' },
   saveChip: { backgroundColor: 'rgba(16,185,129,0.14)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   saveChipText: { color: '#059669', fontWeight: '800', fontSize: 12 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 16 },

@@ -25,7 +25,9 @@ import { useSocial } from '@/contexts/SocialContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { formatGB, planFor } from '@/lib/plans';
 import { manageSubscriptionsUrl, restore as restorePurchases } from '@/lib/purchases';
-import { Crown, RotateCcw, CreditCard } from 'lucide-react-native';
+import { Crown, RotateCcw, CreditCard, Sparkles } from 'lucide-react-native';
+import { feedStore } from '@/lib/feedEngine';
+import { VIBES } from '@/lib/vibes';
 
 const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
@@ -501,6 +503,19 @@ export default function SettingsScreen() {
             </View>
             <Text style={[styles.footer, { color: colors.textTertiary }]}>Automatic follows your phone's setting{themeMode === 'system' ? ` (now ${isDark ? 'dark' : 'light'})` : ''}.</Text>
           </View>
+
+          {/* ── Home feed ── */}
+          <Section colors={colors} title="HOME FEED">
+            <Row
+              colors={colors}
+              icon={<Sparkles size={18} color={colors.accent} />}
+              label="Your picks"
+              value={(feedStore.state.profile?.picks || []).map((k) => VIBES.find((v) => v.key === k)?.label).filter(Boolean).join(' · ') || 'Choose the kinds of plans you like'}
+              onPress={() => { tap(); router.push('/picks?edit=1' as never); }}
+              last
+              testID="settings-your-picks"
+            />
+          </Section>
 
           {/* ── Notifications ── */}
           <Section colors={colors} title="PUSH NOTIFICATIONS">
