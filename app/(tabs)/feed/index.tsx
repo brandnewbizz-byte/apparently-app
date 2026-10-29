@@ -1035,6 +1035,9 @@ export default function FeedScreen() {
   };
 
   // Called when user captures from InstagramCamera
+  // Whether the open composer was reached from the in-app camera (its Back returns there).
+  const [composerFromCamera, setComposerFromCamera] = useState(false);
+
   const handleCameraCapture = (media: CapturedMedia) => {
     // The camera captures photos; reset in case a video was picked earlier.
     setCreateMediaType('photo');
@@ -1043,6 +1046,7 @@ export default function FeedScreen() {
     setCreatePreloadMediaHeight(media.height);
     setShowCamera(false);
     showTabBar();
+    setComposerFromCamera(true);
     setShowCreate(true);
   };
 
@@ -1324,7 +1328,7 @@ export default function FeedScreen() {
       )}
 
       {/* Instagram Camera — full-screen custom viewfinder (Modal overlays tab bar) */}
-      <Modal visible={showCamera} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent>
+      <Modal visible={showCamera} animationType="slide" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={handleCameraClose}>
         <InstagramCamera
           visible={showCamera}
           onClose={handleCameraClose}
@@ -1336,7 +1340,14 @@ export default function FeedScreen() {
       {/* Post Composer — Instagram-style single screen */}
       <PostComposer
         visible={showCreate}
-        onClose={() => { setShowCreate(false); setCreatePreloadMedia(null); }}
+        onClose={() => { setShowCreate(false); setCreatePreloadMedia(null); setComposerFromCamera(false); }}
+        onBack={composerFromCamera ? () => {
+          // Back from "New Post" → the camera again, to retake.
+          setShowCreate(false);
+          setCreatePreloadMedia(null);
+          setComposerFromCamera(false);
+          setShowCamera(true);
+        } : undefined}
         onPost={handleCreatePost}
         preloadMediaUri={createPreloadMedia}
         preloadMediaWidth={createPreloadMediaWidth}

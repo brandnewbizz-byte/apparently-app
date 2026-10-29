@@ -44,6 +44,8 @@ export const POST_CATEGORIES = [
 interface PostComposerProps {
   visible: boolean;
   onClose: () => void;
+  /** When the photo came from the in-app camera: go back there instead of closing. */
+  onBack?: () => void;
   onPost: (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category: string }) => void;
   preloadMediaUri?: string | null;
   preloadMediaWidth?: number;
@@ -56,6 +58,7 @@ interface PostComposerProps {
 export default function PostComposer({
   visible,
   onClose,
+  onBack,
   onPost,
   preloadMediaUri,
   preloadMediaWidth,
@@ -145,14 +148,42 @@ export default function PostComposer({
 
   const canPost = caption.trim().length > 0 || mediaUri != null;
 
+  // Back = to the camera when we came from it, otherwise cancel.
+  const goBack = () => {
+    if (!onBack) { handleClose(); return; }
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setCaption('');
+    setMediaUri(null);
+    setMediaDims(null);
+    setCropOffset({ x: 0, y: 0 });
+    onBack();
+  };
+  // Swipe right from the left edge to go back (iOS-style).
+  const edgeStart = useRef<{ x: number; y: number } | null>(null);
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
-      <View style={[styles.root, { backgroundColor }]}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={goBack}>
+      <View
+        style={[styles.root, { backgroundColor }]}
+        onTouchStart={(e) => { const { pageX, pageY } = e.nativeEvent; edgeStart.current = pageX < 32 ? { x: pageX, y: pageY } : null; }}
+        onTouchEnd={(e) => {
+          const st = edgeStart.current;
+          edgeStart.current = null;
+          if (st && e.nativeEvent.pageX - st.x > 80 && Math.abs(e.nativeEvent.pageY - st.y) < 80) goBack();
+        }}
+      >
         {/* ── Header ── */}
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity onPress={handleClose} style={styles.headerBtn}>
-            <Text style={[styles.headerBtnText, { color: textColor, opacity: 0.7 }]}>Cancel</Text>
-          </TouchableOpacity>
+          {onBack ? (
+            <TouchableOpacity onPress={goBack} style={[styles.headerBtn, { flexDirection: 'row', alignItems: 'center' }]} accessibilityLabel="Back to camera" hitSlop={10} testID="composer-back">
+              <ChevronLeft size={22} color={textColor} />
+              <Text style={[styles.headerBtnText, { color: textColor }]}>Back</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={handleClose} style={styles.headerBtn} testID="composer-cancel">
+              <Text style={[styles.headerBtnText, { color: textColor, opacity: 0.7 }]}>Cancel</Text>
+            </TouchableOpacity>
+          )}
           <Text style={[styles.headerTitle, { color: textColor }]}>New Post</Text>
           <TouchableOpacity
             onPress={handlePost}

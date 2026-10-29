@@ -17,6 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import { CameraView, CameraType, FlashMode } from 'expo-camera';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -118,6 +119,10 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   // ── Swipe-to-dismiss state ──
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
   const swipeRef = useRef({ startX: 0, currentX: 0, active: false });
+  const previewSwipe = useRef(0);
+  const insets = useSafeAreaInsets();
+  // Keep the top buttons clear of the notch / Dynamic Island.
+  const topOffset = { top: Math.max(insets.top, Platform.OS === 'ios' ? 47 : 24) + 8 };
 
   // ── Permissions ──
   useEffect(() => {
@@ -224,10 +229,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
       // Single-finger swipe
       swipeRef.current.currentX = touches[0].pageX;
       const dx = swipeRef.current.currentX - swipeRef.current.startX;
-      // Only track leftward (negative) swipe — Instagram-style dismiss
-      if (dx < 0) {
-        swipeTranslateX.setValue(dx);
-      }
+      // Swipe either way to leave the camera (right = "back", like the rest of the app)
+      swipeTranslateX.setValue(dx);
     }
   };
 
@@ -235,9 +238,9 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
     // Check swipe for dismiss
     if (swipeRef.current.active) {
       const dx = swipeRef.current.currentX - swipeRef.current.startX;
-      if (dx < -SWIPE_THRESHOLD) {
+      if (Math.abs(dx) > SWIPE_THRESHOLD) {
         Animated.timing(swipeTranslateX, {
-          toValue: -SCREEN_WIDTH,
+          toValue: dx > 0 ? SCREEN_WIDTH : -SCREEN_WIDTH,
           duration: 200,
           useNativeDriver: true,
         }).start(() => {
@@ -382,14 +385,19 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   // ── Preview mode (after capture) ──
   if (capturedUri) {
     return (
-      <View style={styles.fullScreen}>
+      <View
+        style={styles.fullScreen}
+        // Swipe right on the preview = back to the camera
+        onTouchStart={(e) => { previewSwipe.current = e.nativeEvent.pageX; }}
+        onTouchEnd={(e) => { if (e.nativeEvent.pageX - previewSwipe.current > SWIPE_THRESHOLD) handleRetake(); }}
+      >
         <StatusBar barStyle="light-content" />
         <RNImage source={{ uri: capturedUri }} style={styles.fullScreen} resizeMode="contain" />
 
         {/* Top bar */}
-        <View style={styles.previewTopBar}>
-          <TouchableOpacity style={styles.previewBtn} onPress={handleRetake}>
-            <X size={26} color="#FFF" />
+        <View style={[styles.previewTopBar, topOffset]}>
+          <TouchableOpacity style={styles.previewBtn} onPress={handleRetake} accessibilityLabel="Back to camera" hitSlop={12} testID="camera-preview-back">
+            <ChevronLeft size={28} color="#FFF" />
           </TouchableOpacity>
           <Text style={styles.previewTitle}>Preview</Text>
           <View style={{ width: 40 }} />
@@ -492,8 +500,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         <View style={styles.cropBorderBottom} pointerEvents="none" />
 
         {/* Top controls */}
-        <View style={styles.topBar}>
-          <TouchableOpacity style={styles.topBtn} onPress={onClose}>
+        <View style={[styles.topBar, topOffset]}>
+          <TouchableOpacity style={styles.topBtn} onPress={onClose} accessibilityLabel="Back" hitSlop={12} testID="camera-back">
             <ChevronLeft size={28} color="#FFF" />
           </TouchableOpacity>
 

@@ -41,6 +41,7 @@ import {
   Image,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isDealLive } from '@/lib/dealStatus';
@@ -54,6 +55,9 @@ import { usePlanner } from '@/contexts/PlannerContext';
 import { localDateKey, formatTime12 } from '@/lib/dates';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFeedStack, type FeedStack } from '@/hooks/useFeedStack';
+import { planFor } from '@/lib/plans';
+import type { FeedItemInfo } from '@/lib/feedEngine';
 import { supabase } from '@/lib/supabase';
 import * as localApi from '@/lib/api';
 import * as ImagePicker from 'expo-image-picker';
@@ -104,6 +108,7 @@ interface BundlePlan {
   /** Spots the creator allows (how many people can grab). */
   availableCount?: number;
   location?: string;
+  createdAt?: string;
 }
 
 interface LifestyleCategory {
@@ -138,6 +143,7 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     grabCount: b.grabCount,
     availableCount: b.availableCount,
     location: b.location,
+    createdAt: b.createdAt,
   };
 }
 
@@ -176,6 +182,7 @@ interface SkillDeal {
   imageUrl?: string;
   category?: string;
   grabCount?: number;
+  createdAt?: string;
 }
 
 // All skill deals, service requests, and live updates now come from live Supabase.
@@ -194,40 +201,76 @@ interface SwipeableBundlesProps {
   colors: any;
 }
 
-const BUNDLE_LIMIT = 7;
-const COOLDOWN_SECONDS = 60;
+// Rounds and waits come from the plan (lib/feedEngine.ts → FEED_PACE).
+const describeBundle = (b: BundlePlan): FeedItemInfo => ({
+  id: b.id, category: b.category || b.type, creatorId: b.creatorId, createdAt: b.createdAt, price: b.price,
+  spotsLeft: b.availableCount ? Math.max(b.availableCount - (b.grabCount || 0), 0) : undefined,
+  grabCount: b.grabCount, hasImage: !!(b.imageUrl || b.image || b.videoUrl), description: b.description,
+});
+const describeSkill = (k: SkillDeal): FeedItemInfo => ({
+  id: k.id, category: k.category, creatorId: k.creatorId, createdAt: k.createdAt, price: k.price, originalPrice: k.originalPrice,
+  spotsLeft: k.spotsLeft, expiresIn: k.expiresIn, grabCount: k.grabCount, hasImage: !!(k.imageUrl || k.image), description: k.description,
+});
 
-const SKILL_LIMIT = 10;
-const SKILL_COOLDOWN_SECONDS = 3 * 60;
+const fmtWait = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
+/** What the stack shows between rounds, or when there's nothing new. */
+function FeedPausePanel({ feed, noun, accent, colors, compact }: { feed: FeedStack<unknown>; noun: string; accent: string; colors: any; compact?: boolean }) {
+  const { plan, openPaywall } = useSubscription();
+  const waiting = feed.state === 'wait';
+  const total = Math.max(feed.pace.waitSec, 1);
+  const showUpsell = waiting && plan.enforced && plan.tier !== 'pro';
+  return (
+    <View style={[compact ? styles.skillEmptyState : styles.swipeEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={compact ? styles.skillCooldownIconContainer : styles.cooldownIconContainer}>
+        <Clock size={compact ? 40 : 48} color={accent} />
+      </View>
+      {waiting ? (
+        <>
+          <Text style={[compact ? styles.skillCooldownTimer : styles.cooldownTimer, { color: colors.text }]}>{fmtWait(feed.waitLeft)}</Text>
+          <Text style={[styles.swipeEmptyText, { color: colors.text }]}>That’s this round of {noun}</Text>
+          <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>
+            {plan.enforced ? `${planFor(plan.tier).name} plan: ` : ''}a new round every {Math.round(total / 60)} min
+          </Text>
+          <View style={compact ? styles.skillCooldownProgressContainer : styles.cooldownProgressContainer}>
+            <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
+              <View style={[compact ? styles.skillCooldownProgressFill : styles.cooldownProgressFill, { width: `${((total - feed.waitLeft) / total) * 100}%` }]} />
+            </View>
+          </View>
+          {showUpsell ? (
+            <TouchableOpacity onPress={() => openPaywall('upgrade')} style={{ marginTop: 12 }} testID={`feed-upgrade-${noun}`}>
+              <Text style={{ color: accent, fontWeight: '700', fontSize: 14 }}>Pro members never wait · Upgrade</Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
+      ) : feed.state === 'loading' ? (
+        <ActivityIndicator color={accent} />
+      ) : (
+        <>
+          <Text style={[styles.swipeEmptyText, { color: colors.text }]}>You’re all caught up</Text>
+          <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>New {noun} show up here as soon as they’re posted.</Text>
+        </>
+      )}
+    </View>
+  );
+}
 
 function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, colors }: SwipeableBundlesProps) {
-  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
-  const [isOnCooldown, setIsOnCooldown] = useState(false);
-  const [cooldownRemaining, setCooldownRemaining] = useState(COOLDOWN_SECONDS);
-  const [bundleRound, setBundleRound] = useState(0);
+  const feed = useFeedStack('bundle', bundles, describeBundle);
   const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const nextCardScale = useRef(new Animated.Value(0.95)).current;
 
-  const limitedBundles = useMemo(() => {
-    const startIdx = (bundleRound * BUNDLE_LIMIT) % bundles.length;
-    const result: BundlePlan[] = [];
-    for (let i = 0; i < BUNDLE_LIMIT && i < bundles.length; i++) {
-      result.push(bundles[(startIdx + i) % bundles.length]);
-    }
-    return result;
-  }, [bundles, bundleRound]);
-
-  const visibleBundles = useMemo(
-    () => limitedBundles.filter((bundle) => !dismissedIds.includes(bundle.id)),
-    [dismissedIds, limitedBundles]
-  );
-
-  const currentBundle = visibleBundles[0];
-  const nextBundle = visibleBundles[1];
-  const completedCount = limitedBundles.length - visibleBundles.length;
+  const currentBundle = feed.current;
+  const nextBundle = feed.next;
+  const completedCount = feed.done;
+  const limitedBundles = feed.round;
 
   // Track view when a new bundle is shown
   useEffect(() => {
@@ -236,36 +279,6 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
     }
   }, [currentBundle?.id]);
 
-  useEffect(() => {
-    setDismissedIds((prev) => prev.filter((id) => limitedBundles.some((bundle) => bundle.id === id)));
-  }, [limitedBundles]);
-
-  useEffect(() => {
-    if (!isOnCooldown && limitedBundles.length > 0 && visibleBundles.length === 0) {
-      setIsOnCooldown(true);
-      setCooldownRemaining(COOLDOWN_SECONDS);
-    }
-  }, [isOnCooldown, limitedBundles.length, visibleBundles.length]);
-
-  useEffect(() => {
-    if (!isOnCooldown) return;
-
-    const interval = setInterval(() => {
-      setCooldownRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setIsOnCooldown(false);
-          setDismissedIds([]);
-          setBundleRound(r => r + 1);
-          return COOLDOWN_SECONDS;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isOnCooldown]);
-
   const resetCard = useCallback(() => {
     swipeAnim.setValue({ x: 0, y: 0 });
     rotateAnim.setValue(0);
@@ -273,9 +286,12 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
 
-  const dismissBundle = useCallback((bundleId: string) => {
-    setDismissedIds((prev) => (prev.includes(bundleId) ? prev : [...prev, bundleId]));
-  }, []);
+  const hideBundle = useCallback(() => {
+    if (!currentBundle) return;
+    localApi.trackDealStat('bundle', currentBundle.id, 'skip');
+    feed.record(currentBundle, 'hide');
+    resetCard();
+  }, [currentBundle, feed, resetCard]);
 
   const completeAction = useCallback(async (action: 'skip' | 'save' | 'grab') => {
     if (!currentBundle) return;
@@ -296,9 +312,9 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
       onGrab(currentBundle);
     }
 
-    dismissBundle(currentBundle.id);
+    feed.record(currentBundle, action);
     resetCard();
-  }, [currentBundle, dismissBundle, onGrab, onSave, onSkip, resetCard, beforeAction]);
+  }, [currentBundle, feed, onGrab, onSave, onSkip, resetCard, beforeAction]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
@@ -424,33 +440,8 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
     extrapolate: 'clamp',
   });
 
-  const formatCooldownTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (isOnCooldown || !currentBundle) {
-    return (
-      <View style={[styles.swipeEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={styles.cooldownIconContainer}>
-          <Clock size={48} color="#7B61FF" />
-        </View>
-        <Text style={[styles.cooldownTimer, { color: colors.text }]}>{formatCooldownTime(cooldownRemaining)}</Text>
-        <Text style={[styles.swipeEmptyText, { color: colors.text }]}>No more bundles!</Text>
-        <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>Waiting for new bundles to appear...</Text>
-        <View style={styles.cooldownProgressContainer}>
-          <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
-            <View
-              style={[
-                styles.cooldownProgressFill,
-                { width: `${((COOLDOWN_SECONDS - cooldownRemaining) / COOLDOWN_SECONDS) * 100}%` }
-              ]}
-            />
-          </View>
-        </View>
-      </View>
-    );
+  if (feed.state !== 'cards' || !currentBundle) {
+    return <FeedPausePanel feed={feed as FeedStack<unknown>} noun="bundles" accent="#7B61FF" colors={colors} />;
   }
 
   return (
@@ -495,6 +486,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
           style={[styles.swipeActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('left')}
           activeOpacity={0.8}
+          testID="bundle-skip"
         >
           <X size={22} color="#EF4444" />
         </TouchableOpacity>
@@ -522,6 +514,10 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
           <Bookmark size={22} color="#10B981" />
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity onPress={hideBundle} style={styles.notInterestedBtn} accessibilityLabel="Not interested in this bundle" testID="bundle-not-interested">
+        <Text style={[styles.notInterestedText, { color: colors.textTertiary }]}>Not interested · don’t show me this again</Text>
+      </TouchableOpacity>
 
       <View style={styles.swipeIndicator}>
         {limitedBundles.map((_, i) => (
@@ -692,67 +688,21 @@ function formatCountdown(seconds: number): string {
 }
 
 function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors }: SwipeableSkillsProps) {
-  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
-  const [isOnCooldown, setIsOnCooldown] = useState(false);
-  const [cooldownRemaining, setCooldownRemaining] = useState(SKILL_COOLDOWN_SECONDS);
-  const [skillRound, setSkillRound] = useState(0);
+  const feed = useFeedStack('skill', skills, describeSkill);
   const [grabPreviewActive, setGrabPreviewActive] = useState(false);
   const swipeAnim = useRef(new Animated.ValueXY()).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const nextCardScale = useRef(new Animated.Value(0.95)).current;
 
-  const limitedSkills = useMemo(() => {
-    const startIdx = (skillRound * SKILL_LIMIT) % skills.length;
-    const result: SkillDeal[] = [];
-    for (let i = 0; i < SKILL_LIMIT && i < skills.length; i++) {
-      result.push(skills[(startIdx + i) % skills.length]);
-    }
-    return result;
-  }, [skills, skillRound]);
-
-  const visibleSkills = useMemo(
-    () => limitedSkills.filter((skill) => !dismissedIds.includes(skill.id)),
-    [dismissedIds, limitedSkills]
-  );
-
-  const currentSkill = visibleSkills[0];
-  const nextSkill = visibleSkills[1];
-  const completedCount = limitedSkills.length - visibleSkills.length;
+  const currentSkill = feed.current;
+  const nextSkill = feed.next;
+  const completedCount = feed.done;
+  const limitedSkills = feed.round;
 
   useEffect(() => {
     if (currentSkill?.id) localApi.trackDealStat('skill', currentSkill.id, 'view');
   }, [currentSkill?.id]);
-
-  useEffect(() => {
-    setDismissedIds((prev) => prev.filter((id) => limitedSkills.some((skill) => skill.id === id)));
-  }, [limitedSkills]);
-
-  useEffect(() => {
-    if (!isOnCooldown && limitedSkills.length > 0 && visibleSkills.length === 0) {
-      setIsOnCooldown(true);
-      setCooldownRemaining(SKILL_COOLDOWN_SECONDS);
-    }
-  }, [isOnCooldown, limitedSkills.length, visibleSkills.length]);
-
-  useEffect(() => {
-    if (!isOnCooldown) return;
-
-    const interval = setInterval(() => {
-      setCooldownRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setIsOnCooldown(false);
-          setDismissedIds([]);
-          setSkillRound(r => r + 1);
-          return SKILL_COOLDOWN_SECONDS;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isOnCooldown]);
 
   const resetCard = useCallback(() => {
     swipeAnim.setValue({ x: 0, y: 0 });
@@ -761,9 +711,12 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
     nextCardScale.setValue(0.95);
   }, [swipeAnim, rotateAnim, opacityAnim, nextCardScale]);
 
-  const dismissSkill = useCallback((skillId: string) => {
-    setDismissedIds((prev) => (prev.includes(skillId) ? prev : [...prev, skillId]));
-  }, []);
+  const hideSkill = useCallback(() => {
+    if (!currentSkill) return;
+    localApi.trackDealStat('skill', currentSkill.id, 'skip');
+    feed.record(currentSkill, 'hide');
+    resetCard();
+  }, [currentSkill, feed, resetCard]);
 
   const completeAction = useCallback(async (action: 'skip' | 'save' | 'grab') => {
     if (!currentSkill) return;
@@ -783,9 +736,9 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
       onGrab(currentSkill);
     }
 
-    dismissSkill(currentSkill.id);
+    feed.record(currentSkill, action);
     resetCard();
-  }, [currentSkill, dismissSkill, onGrab, onSave, onSkip, resetCard, beforeAction]);
+  }, [currentSkill, feed, onGrab, onSave, onSkip, resetCard, beforeAction]);
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
     if (grabPreviewActive) return;
@@ -865,33 +818,8 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
   const skipOpacity = swipeAnim.x.interpolate({ inputRange: [-SCREEN_WIDTH * 0.3, 0], outputRange: [1, 0], extrapolate: 'clamp' });
   const saveOpacity = swipeAnim.x.interpolate({ inputRange: [0, SCREEN_WIDTH * 0.3], outputRange: [0, 1], extrapolate: 'clamp' });
 
-  const formatSkillCooldownTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (isOnCooldown || !currentSkill) {
-    return (
-      <View style={[styles.skillEmptyState, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={styles.skillCooldownIconContainer}>
-          <Clock size={40} color="#F59E0B" />
-        </View>
-        <Text style={[styles.skillCooldownTimer, { color: colors.text }]}>{formatSkillCooldownTime(cooldownRemaining)}</Text>
-        <Text style={[styles.swipeEmptyText, { color: colors.text }]}>No more deals!</Text>
-        <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>Waiting for new skill deals...</Text>
-        <View style={styles.skillCooldownProgressContainer}>
-          <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
-            <View
-              style={[
-                styles.skillCooldownProgressFill,
-                { width: `${((SKILL_COOLDOWN_SECONDS - cooldownRemaining) / SKILL_COOLDOWN_SECONDS) * 100}%` }
-              ]}
-            />
-          </View>
-        </View>
-      </View>
-    );
+  if (feed.state !== 'cards' || !currentSkill) {
+    return <FeedPausePanel feed={feed as FeedStack<unknown>} noun="skill deals" accent="#F59E0B" colors={colors} compact />;
   }
 
   return (
@@ -929,6 +857,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
         <TouchableOpacity
           style={[styles.skillActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => swipeCard('left')}
+          testID="skill-skip"
         >
           <X size={20} color="#EF4444" />
         </TouchableOpacity>
@@ -946,6 +875,10 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
           <Bookmark size={20} color="#10B981" />
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity onPress={hideSkill} style={styles.notInterestedBtn} accessibilityLabel="Not interested in this skill deal" testID="skill-not-interested">
+        <Text style={[styles.notInterestedText, { color: colors.textTertiary }]}>Not interested · don’t show me this again</Text>
+      </TouchableOpacity>
 
       <View style={styles.skillSwipeIndicator}>
         {limitedSkills.map((_, i) => (
@@ -1765,6 +1698,7 @@ export default function HomeScreen() {
         imageUrl: s.imageUrl,
         category: s.category,
         grabCount: s.grabCount,
+        createdAt: s.createdAt,
       }));
     const merged = [...convertedSkills, ...createdSkills];
     // Exclude own skills
@@ -2690,6 +2624,8 @@ const styles = StyleSheet.create({
   swipeDotDone: {
     backgroundColor: '#10B981',
   },
+  notInterestedBtn: { alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12, marginTop: 2 },
+  notInterestedText: { fontSize: 12, fontWeight: '600' },
   swipeEmptyState: {
     height: 380,
     alignItems: 'center',
