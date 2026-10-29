@@ -11,6 +11,7 @@ export const LISTING_CATEGORIES = [
   { key: 'tech', label: 'Tech', icon: '💻' },
   { key: 'education', label: 'Lessons', icon: '📚' },
   { key: 'events', label: 'Events', icon: '🎉' },
+  { key: 'travel', label: 'Travel', icon: '✈️' },
   { key: 'outdoor', label: 'Outdoor', icon: '🌲' },
   { key: 'transport', label: 'Rides', icon: '🚗' },
   { key: 'repair', label: 'Repair', icon: '🔧' },
@@ -32,7 +33,8 @@ export const TAG_IDEAS: Record<string, string[]> = {
   creative: ['Photography', 'Design', 'Music'],
   tech: ['Setup', 'Repair', 'Websites'],
   education: ['Tutoring', 'Online', 'Kids'],
-  events: ['Party', 'Birthday', 'DJ'],
+  events: ['Party', 'Birthday', 'DJ', 'Concert', 'Sports'],
+  travel: ['Getaway', 'Flights + hotel', 'Island', 'Weekend trip'],
   outdoor: ['Lawn', 'Garden', 'Adventure'],
   transport: ['Airport', 'Chauffeur', 'Moving'],
   repair: ['Plumbing', 'Electrical', 'Handyman'],
@@ -42,6 +44,7 @@ export const TAG_IDEAS: Record<string, string[]> = {
 export const SKILL_EMOJIS = [
   '🛠️', '🧹', '👨‍🍳', '🐕', '📸', '📚', '💪', '🎨', '💻', '🧘', '🌲', '🎉', '🚗', '💄', '🔧', '🏠',
   '🍽️', '🐾', '🎵', '📱', '✂️', '🪴', '🧺', '🎂', '🗣️', '🏋️', '🎯', '🧵', '📊', '🎬', '💡', '💅',
+  '🎟️', '✈️', '🏝️', '🏟️', '🎤',
 ];
 
 /** How long a skill deal stays up. */
