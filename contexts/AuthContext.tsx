@@ -2,6 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import { File as ExpoFile } from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
@@ -547,8 +548,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       logger.info('Auth', 'Signing out user...');
       // Stop sending this account's pushes to this device once signed out
       // (must run while the session is still valid, before auth.signOut()).
+      // The web version never registers a push token, so signing out there must
+      // not wipe the token a phone saved for the same account.
       const signingOutId = state.session?.user?.id;
-      if (signingOutId) {
+      if (signingOutId && Platform.OS !== 'web') {
         try {
           await supabase
             .from('profiles')
@@ -558,7 +561,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           logger.warn('Auth', 'Failed to clear push token on sign out', { e });
         }
       }
-      const { error } = await supabase.auth.signOut();
+      // 'local' signs out this device only. The default ('global') also ends the
+      // account's sessions on every other phone and browser.
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) {
         logger.error('Auth', 'Sign out error', { message: error.message });
       }

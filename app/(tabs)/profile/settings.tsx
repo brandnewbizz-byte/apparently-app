@@ -422,6 +422,7 @@ export default function SettingsScreen() {
             const storagePct = Math.min(1, sub.storageUsed / Math.max(storageCap, 1));
             const until = sub.periodEnd ? new Date(sub.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
             const statusLine = sub.tier === 'free' ? 'Free plan'
+              : sub.store === 'admin' ? (until ? `Given by Apparently · until ${until}` : 'Given by Apparently · no end date')
               : sub.isTrial ? `Free trial · ends ${until ?? 'soon'}`
               : sub.willRenew === false ? `Ends ${until ?? 'soon'} — won't renew`
               : until ? `Renews ${until}` : 'Active';
