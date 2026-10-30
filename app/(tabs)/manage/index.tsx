@@ -8,8 +8,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
   BellRing, Package, Zap, Check, CheckCheck, X, MessageCircle, Plus, Trash2, CalendarDays, Pause, Play, Pencil,
-  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown,
+  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck,
 } from 'lucide-react-native';
+import { useAuth } from '@/contexts/AuthContext';
+import { useMessaging } from '@/contexts/MessagingContext';
+import { RequestPaymentSheet } from '@/components/PaymentRequest';
+import { useMyPaymentRequests, paymentForOrder, money, type PaymentRequest } from '@/lib/payments';
 import { useTheme } from '@/contexts/ThemeContext';
 import { isVideoUrl } from '@/lib/media';
 import { useOrders, type GrabOrder } from '@/contexts/OrdersContext';
@@ -126,10 +130,14 @@ export default function ManageScreen() {
   const { myBundles, deleteBundle, updateBundle, reload: reloadBundles } = useBundles();
   const { plans, deletePlan, refetch: refetchPlans } = usePlanner();
   const { plan: sub, openPaywall } = useSubscription();
+  const { user } = useAuth();
+  const { sendMessage } = useMessaging();
+  const payments = useMyPaymentRequests(user?.id);
+  const [payOrder, setPayOrder] = useState<GrabOrder | null>(null);
 
-  // Fresh orders, listings and plans every time Manage opens.
+  // Fresh orders, listings, plans and payments every time Manage opens.
   const reloadAll = React.useRef(() => {});
-  React.useEffect(() => { reloadAll.current = () => { refresh(); reloadSkills(); reloadBundles(); refetchPlans(); }; });
+  React.useEffect(() => { reloadAll.current = () => { refresh(); reloadSkills(); reloadBundles(); refetchPlans(); payments.refresh(); }; });
   useFocusEffect(useCallback(() => { reloadAll.current(); }, []));
 
   const [tab, setTab] = useState<Tab>('orders');
@@ -147,7 +155,20 @@ export default function ManageScreen() {
     declined: orders.filter((o) => o.status === 'declined').length,
     all: orders.length,
   }), [orders]);
-  const earned = useMemo(() => orders.filter((o) => o.status === 'fulfilled').reduce((s, o) => s + (typeof o.price === 'number' ? o.price : 0), 0), [orders]);
+  const myId = user?.id;
+  const payByOrder = payments.byOrder;
+  const paymentFor = (o: GrabOrder): PaymentRequest | undefined => paymentForOrder(payByOrder, myId, o);
+  // Earned = what buyers paid in the app, plus finished orders that were paid some other way.
+  const { earned, earnedFrom } = useMemo(() => {
+    let total = 0; let n = 0;
+    for (const o of orders) {
+      if (o.status === 'declined' || o.kind === 'service') continue;
+      const p = paymentForOrder(payByOrder, myId, o);
+      if (p?.status === 'paid') { total += p.amount_cents / 100; n += 1; }
+      else if (o.status === 'fulfilled') { total += typeof o.price === 'number' ? o.price : 0; n += 1; }
+    }
+    return { earned: total, earnedFrom: n };
+  }, [orders, payByOrder, myId]);
   // Default to whatever needs attention first.
   const effectiveOrderFilter: OrderFilter = orderFilter ?? (counts.waiting ? 'waiting' : counts.active ? 'active' : 'all');
   const shownOrders = useMemo(() => {
@@ -269,6 +290,31 @@ export default function ManageScreen() {
     </View>
   );
 
+  /** Seller can ask for payment once the order is accepted, unless it's already requested or paid. */
+  const canRequest = (o: GrabOrder) => {
+    if (o.kind === 'service' || o.status !== 'accepted') return false;
+    const p = paymentFor(o);
+    return !p || p.status === 'canceled';
+  };
+
+  const renderPayment = (o: GrabOrder) => {
+    const p = paymentFor(o);
+    if (!p || p.status === 'canceled') return null;
+    const paid = p.status === 'paid';
+    const iPay = o.kind === 'service';
+    return (
+      <TouchableOpacity activeOpacity={0.8} onPress={() => message(o)}
+        style={[styles.payRow, { backgroundColor: paid ? C.greenDim : C.goldDim }]} testID="order-payment-status">
+        {paid ? <CircleCheck size={15} color={C.green} /> : <DollarSign size={15} color={C.gold} />}
+        <Text style={[styles.payText, { color: paid ? C.green : C.gold }]} numberOfLines={1}>
+          {paid
+            ? `Paid ${money(p.amount_cents)} in the app${p.paid_at ? ` · ${ago(p.paid_at)}` : ''}`
+            : iPay ? `${o.buyerName} requested ${money(p.amount_cents)} · tap to pay in chat` : `Payment requested · ${money(p.amount_cents)} · waiting for ${o.buyerName}`}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   const renderOrder = ({ item: o }: { item: GrabOrder }) => {
     const st = ORDER_STATUS[o.status] || ORDER_STATUS.requested;
     const isBundle = o.kind === 'bundle';
@@ -299,6 +345,7 @@ export default function ManageScreen() {
           {typeof o.price === 'number' && o.price > 0 ? <Text style={[styles.orderPrice, { color: colors.text }]}>{formatMoney(o.price)}</Text> : null}
           <ChevronRight size={16} color={colors.textTertiary} />
         </View>
+        {renderPayment(o)}
         {o.status === 'requested' || o.status === 'accepted' ? (
           <View style={styles.orderActions}>
             {o.status === 'requested' ? (
@@ -311,9 +358,16 @@ export default function ManageScreen() {
                 </TouchableOpacity>
               </>
             ) : (
-              <TouchableOpacity disabled={busy} onPress={() => fulfill(o)} style={[styles.actBtn, styles.actPrimary, { backgroundColor: C.blue }]}>
-                <CheckCheck size={16} color="#FFF" /><Text style={styles.actPrimaryText}>{busy ? 'Working…' : 'Mark done'}</Text>
-              </TouchableOpacity>
+              <>
+                {canRequest(o) ? (
+                  <TouchableOpacity onPress={() => { haptic(); setPayOrder(o); }} style={[styles.actBtn, styles.actPrimary, { backgroundColor: C.green }]} testID="order-request-payment">
+                    <DollarSign size={16} color="#FFF" /><Text style={styles.actPrimaryText}>Request {typeof o.price === 'number' && o.price > 0 ? formatMoney(o.price) : 'payment'}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity disabled={busy} onPress={() => fulfill(o)} style={[styles.actBtn, styles.actPrimary, { backgroundColor: C.blue }]}>
+                  <CheckCheck size={16} color="#FFF" /><Text style={styles.actPrimaryText}>{busy ? 'Working…' : 'Mark done'}</Text>
+                </TouchableOpacity>
+              </>
             )}
             <TouchableOpacity onPress={() => message(o)} style={[styles.actIcon, { backgroundColor: colors.surfaceHighlight }]} accessibilityLabel="Message">
               <MessageCircle size={18} color={colors.text} />
@@ -434,7 +488,7 @@ export default function ManageScreen() {
           <View style={{ flex: 1.2 }}>
             <Text style={styles.sumLabel}>Earned</Text>
             <Text style={styles.sumBig}>{formatMoney(earned)}</Text>
-            <Text style={styles.sumHint}>from {counts.done} finished order{counts.done === 1 ? '' : 's'}</Text>
+            <Text style={styles.sumHint}>from {earnedFrom} paid or finished order{earnedFrom === 1 ? '' : 's'}</Text>
           </View>
           <View style={styles.sumStats}>
             <TouchableOpacity style={styles.sumStat} onPress={() => { setTab('orders'); setOrderFilter('waiting'); }}>
@@ -645,11 +699,29 @@ export default function ManageScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {payOrder ? (
+        <RequestPaymentSheet
+          visible
+          onClose={() => setPayOrder(null)}
+          buyerId={payOrder.buyerId}
+          buyerName={payOrder.buyerName}
+          prefill={{ amount: payOrder.price, title: payOrder.itemTitle, itemId: payOrder.itemId, itemType: payOrder.kind }}
+          onSent={(r) => {
+            // The request shows up in their chat, with a Pay button.
+            sendMessage(payOrder.buyerId, `Payment request: ${money(r.amount_cents)} for ${r.title}`, { name: payOrder.buyerName, avatar: payOrder.buyerAvatar }, { payment_request: r });
+            haptic('success');
+            payments.refresh();
+          }}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  payRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
+  payText: { fontSize: 13, fontWeight: '700', flexShrink: 1 },
   container: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   header: { paddingHorizontal: 16, paddingBottom: 12 },

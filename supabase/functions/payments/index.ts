@@ -79,6 +79,25 @@ async function syncAccount(userId: string, accountId: string) {
   return { ...row, needs_info: due.length > 0 };
 }
 
+/** Mark a request paid (once) and tell the seller. */
+async function markPaid(pr: Record<string, any>, session: Record<string, any>) {
+  const { data: changed } = await admin.from('payment_requests').update({
+    status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: session.payment_intent || null,
+  }).eq('id', pr.id).eq('status', 'requested').select('id');
+  if (!changed || changed.length === 0) return; // someone else already marked it
+  try {
+    const { data: buyer } = await admin.from('profiles').select('full_name, username, avatar').eq('id', pr.buyer_id).maybeSingle();
+    const name = buyer?.full_name || buyer?.username || 'Someone';
+    const amount = `$${(pr.amount_cents / 100).toFixed(pr.amount_cents % 100 === 0 ? 0 : 2)}`;
+    const text = `${name} paid ${amount} for "${pr.title}" 💸`;
+    await admin.from('notifications').insert({
+      user_id: pr.seller_id, actor_id: pr.buyer_id, actor_name: name, actor_avatar: buyer?.avatar || '',
+      type: 'general', title: text, body: text, read: false,
+      data: { subject: 'paid', emoji: '💸', payment_request_id: pr.id, item_id: pr.item_id, item_title: pr.title, amount_cents: pr.amount_cents },
+    });
+  } catch (_) { /* the payment itself is recorded; the heads-up is best effort */ }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     // Allow whatever headers the Supabase client asks for (it adds new x-supabase-* ones over time).
@@ -151,9 +170,7 @@ Deno.serve(async (req) => {
         if (pr.status !== 'requested' || !pr.checkout_session_id || !sellerAcct) return json({ status: pr.status });
         const session = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`, undefined, sellerAcct);
         if (session.payment_status === 'paid') {
-          await admin.from('payment_requests').update({
-            status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: session.payment_intent || null,
-          }).eq('id', pr.id).eq('status', 'requested');
+          await markPaid(pr, session);
           return json({ status: 'paid' });
         }
         return json({ status: pr.status });
@@ -167,7 +184,7 @@ Deno.serve(async (req) => {
       if (pr.checkout_session_id) {
         const prev = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`, undefined, sellerAcct);
         if (prev.payment_status === 'paid') {
-          await admin.from('payment_requests').update({ status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: prev.payment_intent || null }).eq('id', pr.id).eq('status', 'requested');
+          await markPaid(pr, prev);
           return json({ error: 'already_paid' }, 409);
         }
         if (prev.status === 'open' && prev.url) return json({ url: prev.url });

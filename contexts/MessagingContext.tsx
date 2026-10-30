@@ -62,7 +62,7 @@ export interface Message {
     voice_note?: { url?: string; path?: string; duration: number };
     image?: { url?: string; path?: string; width?: number; height?: number };
     /** A seller's request for the agreed amount; the buyer pays it in the app (see lib/payments.ts). */
-    payment_request?: { id: string; amount_cents: number; title: string };
+    payment_request?: { id: string; amount_cents: number; title: string; item_id?: string | null; item_type?: string | null };
   };
 }
 

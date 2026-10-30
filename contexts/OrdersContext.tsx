@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
+import { useMessaging } from '@/contexts/MessagingContext';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ const itemFields: Record<OrderKind, { id: string; title: string }> = {
 
 export function OrdersProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const { sendMessage } = useMessaging();
   const [rawRows, setRawRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolvedMap, setResolvedMap] = useState<Record<string, OrderStatus>>({});
@@ -231,13 +233,26 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     [user?.id, meName, meAvatar]
   );
 
+  /** Post the order's progress into the chat with the other person, so the conversation tells the whole story. */
+  const tellInChat = useCallback((order: GrabOrder, text: string) => {
+    if (!order.buyerId) return;
+    try {
+      sendMessage(order.buyerId, text, { name: order.buyerName, avatar: order.buyerAvatar });
+    } catch (e) {
+      logger.warn('OrdersContext', 'order chat message failed', { e });
+    }
+  }, [sendMessage]);
+
   const acceptOrder = useCallback(
     async (order: GrabOrder) => {
       markOrder(order.id, 'accepted');
       await setItemStatus(order, 'accepted');
       await notifyBuyer(order, 'accepted', `Your order is accepted — ready to get started on "${order.itemTitle}".`, '✅');
+      tellInChat(order, order.kind === 'service'
+        ? `✅ I accepted your offer to help with "${order.itemTitle}". Let's sort out the details here.`
+        : `✅ I accepted your order for "${order.itemTitle}". Let's confirm the details here, and I'll send the payment request in this chat.`);
     },
-    [markOrder, setItemStatus, notifyBuyer]
+    [markOrder, setItemStatus, notifyBuyer, tellInChat]
   );
 
   const fulfillOrder = useCallback(
@@ -245,8 +260,11 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       markOrder(order.id, 'fulfilled');
       await setItemStatus(order, 'fulfilled');
       await notifyBuyer(order, 'fulfilled', `Your order for "${order.itemTitle}" is complete. Thanks!`, '🎉');
+      tellInChat(order, order.kind === 'service'
+        ? `🎉 "${order.itemTitle}" is all done. Thank you!`
+        : `🎉 Your order for "${order.itemTitle}" is complete. Thanks for booking with me!`);
     },
-    [markOrder, setItemStatus, notifyBuyer]
+    [markOrder, setItemStatus, notifyBuyer, tellInChat]
   );
 
   /**
@@ -279,8 +297,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       await setItemStatus(order, 'declined');
       if (!wasDeclined) await releaseSpot(order);
       await notifyBuyer(order, 'declined', `Sorry — the order for "${order.itemTitle}" couldn't be accepted right now.`, '🙏');
+      if (!wasDeclined) tellInChat(order, `🙏 Sorry, I can't take "${order.itemTitle}" right now.`);
     },
-    [markOrder, setItemStatus, notifyBuyer, releaseSpot]
+    [markOrder, setItemStatus, notifyBuyer, releaseSpot, tellInChat]
   );
 
   const refresh = useCallback(() => {

@@ -21,9 +21,15 @@ import {
   X,
   MessageCircle,
   Clock,
+  DollarSign,
+  CircleCheck,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useOrders } from '@/contexts/OrdersContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { useMessaging } from '@/contexts/MessagingContext';
+import { RequestPaymentSheet } from '@/components/PaymentRequest';
+import { useMyPaymentRequests, paymentForOrder, money, sellerGets } from '@/lib/payments';
 
 const ACCENT = {
   purple: '#8B5CF6',
@@ -49,6 +55,8 @@ const STATUS_STEP: Record<string, { label: string; fg: string; bg: string }> = {
   accepted: { label: 'Accepted', fg: ACCENT.green, bg: ACCENT.greenDim },
   fulfilled: { label: 'Fulfilled', fg: ACCENT.blue, bg: ACCENT.blueDim },
   declined: { label: 'Declined', fg: ACCENT.coral, bg: ACCENT.coralDim },
+  pay_requested: { label: 'Payment requested', fg: ACCENT.gold, bg: ACCENT.goldDim },
+  paid: { label: 'Paid in the app', fg: ACCENT.green, bg: ACCENT.greenDim },
 };
 
 export default function OrderDetailScreen() {
@@ -59,6 +67,11 @@ export default function OrderDetailScreen() {
   const { orders, acceptOrder, fulfillOrder, declineOrder } = useOrders();
 
   const order = orders.find((o) => o.id === id);
+  const { user } = useAuth();
+  const { sendMessage } = useMessaging();
+  const payments = useMyPaymentRequests(user?.id);
+  const [paySheet, setPaySheet] = React.useState(false);
+  const payment = order ? paymentForOrder(payments.byOrder, user?.id, order) : undefined;
 
   const goBack = () => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -67,13 +80,19 @@ export default function OrderDetailScreen() {
 
   const confirmAction = (verb: string, fn: () => Promise<void>) => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const why = verb === 'Accept'
+      ? 'You can then message and deliver the service.'
+      : verb === 'Decline'
+      ? 'The item will be freed for other buyers.'
+      : 'Mark this order as completed.';
+    // Alert buttons do nothing on the web, so use the browser's confirm there.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`${verb} this order?\n\n${why}`)) fn();
+      return;
+    }
     Alert.alert(
       `${verb} this order?`,
-      verb === 'Accept'
-        ? 'You can then message and deliver the service.'
-        : verb === 'Decline'
-        ? 'The item will be freed for other buyers.'
-        : 'Mark this order as completed.',
+      why,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -118,6 +137,13 @@ export default function OrderDetailScreen() {
       </View>
     );
   }
+
+  // Order steps plus payment steps, in time order.
+  const timeline: { status: string; at: string }[] = [
+    ...(order.statusHistory && order.statusHistory.length > 0 ? order.statusHistory : [{ status: 'requested' as const, at: order.createdAt }]),
+    ...(payment && payment.status !== 'canceled' ? [{ status: 'pay_requested', at: payment.created_at }] : []),
+    ...(payment?.status === 'paid' && payment.paid_at ? [{ status: 'paid', at: payment.paid_at }] : []),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
   const kind = KIND_COLOR[order.kind] || KIND_COLOR.bundle;
   const st = STATUS_STEP[order.status] || STATUS_STEP.requested;
@@ -183,13 +209,63 @@ export default function OrderDetailScreen() {
           </View>
         </View>
 
+        {/* Payment */}
+        {order.status !== 'declined' && (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Payment</Text>
+            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="order-payment">
+              {payment && payment.status === 'paid' ? (
+                <View style={styles.payLine}>
+                  <CircleCheck size={20} color={ACCENT.green} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.payTitle, { color: ACCENT.green }]}>Paid {money(payment.amount_cents)} in the app</Text>
+                    <Text style={[styles.paySub, { color: colors.textTertiary }]}>
+                      {payment.paid_at ? new Date(payment.paid_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}
+                      {order.kind !== 'service' ? ` · you get about ${money(sellerGets(payment.amount_cents))} after fees` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ) : payment && payment.status === 'requested' ? (
+                <View style={styles.payLine}>
+                  <DollarSign size={20} color={ACCENT.gold} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.payTitle, { color: colors.text }]}>
+                      {order.kind === 'service' ? `${order.buyerName} requested ${money(payment.amount_cents)}` : `Requested ${money(payment.amount_cents)}`}
+                    </Text>
+                    <Text style={[styles.paySub, { color: colors.textTertiary }]}>
+                      {order.kind === 'service' ? 'Open the chat to pay with a card.' : `Waiting for ${order.buyerName} to pay in your chat.`}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={openChat} style={[styles.payBtn, { backgroundColor: ACCENT.goldDim }]}>
+                    <Text style={{ color: ACCENT.gold, fontWeight: '800' }}>{order.kind === 'service' ? 'Pay' : 'View'}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : order.kind === 'service' ? (
+                <Text style={[styles.paySub, { color: colors.textTertiary }]}>When the helper sends a payment request, you can pay it in your chat.</Text>
+              ) : (
+                <View style={styles.payLine}>
+                  <DollarSign size={20} color={colors.textTertiary} />
+                  <Text style={[styles.paySub, { flex: 1, color: colors.textSecondary }]}>
+                    {isActive ? 'Once you’ve agreed on the price, ask for payment. It shows up in your chat with a Pay button.' : 'Accept the order first, then you can ask for payment.'}
+                  </Text>
+                  {isActive ? (
+                    <TouchableOpacity onPress={() => setPaySheet(true)} style={[styles.payBtn, { backgroundColor: ACCENT.green }]} testID="order-detail-request-payment">
+                      <Text style={{ color: '#FFF', fontWeight: '800' }}>Request</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
         {/* Timeline */}
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Status Timeline</Text>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {(order.statusHistory && order.statusHistory.length > 0 ? order.statusHistory : [{ status: 'requested' as const, at: order.createdAt }]).map(
+          {timeline.map(
             (ev, i) => {
               const step = STATUS_STEP[ev.status] || STATUS_STEP.requested;
-              const isLast = i === ((order.statusHistory && order.statusHistory.length) || 1) - 1;
+              const isLast = i === timeline.length - 1;
               return (
                 <View key={`${ev.status}-${ev.at}-${i}`} style={styles.timelineRow}>
                   <View style={styles.timelineRail}>
@@ -258,11 +334,29 @@ export default function OrderDetailScreen() {
           )}
         </View>
       )}
+
+      {paySheet ? (
+        <RequestPaymentSheet
+          visible
+          onClose={() => setPaySheet(false)}
+          buyerId={order.buyerId}
+          buyerName={order.buyerName}
+          prefill={{ amount: order.price, title: order.itemTitle, itemId: order.itemId, itemType: order.kind }}
+          onSent={(r) => {
+            sendMessage(order.buyerId, `Payment request: ${money(r.amount_cents)} for ${r.title}`, { name: order.buyerName, avatar: order.buyerAvatar }, { payment_request: r });
+            payments.refresh();
+          }}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  payLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  payTitle: { fontSize: 15, fontWeight: '800' },
+  paySub: { fontSize: 13, marginTop: 2, lineHeight: 18 },
+  payBtn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   headerBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },

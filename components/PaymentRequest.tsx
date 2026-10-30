@@ -76,13 +76,18 @@ export function PaymentRequestCard({ data, isMe, returnPath }: { data: { id: str
 }
 
 /** Sheet the seller fills in to ask for the agreed amount. */
-export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSent }: {
+/** An order the request is for: fills in the agreed price and what it's for. */
+export interface PaymentPrefill { amount?: number; title?: string; itemId?: string; itemType?: string }
+
+/** Render only while open (or give it a new `key`) so a new prefill takes effect. */
+export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSent, prefill }: {
   visible: boolean; onClose: () => void; buyerId: string; buyerName: string;
-  onSent: (req: { id: string; amount_cents: number; title: string }) => void;
+  onSent: (req: { id: string; amount_cents: number; title: string; item_id?: string | null; item_type?: string | null }) => void;
+  prefill?: PaymentPrefill | null;
 }) {
   const { colors } = useTheme();
-  const [amount, setAmount] = useState('');
-  const [title, setTitle] = useState('');
+  const [amount, setAmount] = useState(prefill?.amount ? String(Math.round(prefill.amount * 100) / 100) : '');
+  const [title, setTitle] = useState(prefill?.title?.slice(0, 120) || '');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -106,8 +111,8 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
     if (!valid) return;
     setBusy(true);
     try {
-      const r = await createPaymentRequest(buyerId, title, value);
-      onSent({ id: r.id, amount_cents: r.amount_cents, title: r.title });
+      const r = await createPaymentRequest(buyerId, title, value, prefill?.itemId ? { itemId: prefill.itemId, itemType: prefill.itemType } : undefined);
+      onSent({ id: r.id, amount_cents: r.amount_cents, title: r.title, item_id: r.item_id, item_type: r.item_type });
       setAmount(''); setTitle(''); setReady(null); onClose();
     } catch (e) { say('Couldn’t send the request', errText(e)); }
     finally { setBusy(false); }
@@ -139,7 +144,9 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
             </View>
           ) : (
             <View style={{ gap: 10 }}>
-              <Text style={[s.body, { color: colors.textSecondary }]}>Ask {buyerName} for the price you agreed. They’ll see it here in the chat and can pay with a card.</Text>
+              <Text style={[s.body, { color: colors.textSecondary }]}>{prefill?.itemId
+                  ? `Filled in from ${buyerName}’s order. Change the amount if you agreed on a different price. They’ll see it in your chat and can pay with a card.`
+                  : `Ask ${buyerName} for the price you agreed. They’ll see it in your chat and can pay with a card.`}</Text>
               <View style={[s.amountBox, { borderColor: colors.border }]}>
                 <Text style={[s.dollar, { color: colors.text }]}>$</Text>
                 <TextInput

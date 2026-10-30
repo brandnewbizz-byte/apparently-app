@@ -17,7 +17,14 @@ export type PaymentStatus = 'requested' | 'paid' | 'canceled';
 export interface PaymentRequest {
   id: string; seller_id: string; buyer_id: string; title: string; amount_cents: number;
   fee_cents: number; status: PaymentStatus; created_at: string; paid_at: string | null;
+  /** The listing the payment is for (bundle / skill / service id), when it came from an order. */
+  item_id?: string | null; item_type?: string | null;
+  /** Set once the buyer has opened Stripe Checkout. */
+  checkout_session_id?: string | null;
 }
+
+/** What a payment request is for, when it belongs to an order. */
+export interface PaymentFor { itemId?: string; itemType?: string }
 export interface PayoutStatus {
   connected: boolean; charges_enabled: boolean; payouts_enabled: boolean;
   /** The seller finished Stripe's form. */
@@ -80,9 +87,12 @@ export async function openPayoutDashboard() {
   await openStripePage(url);
 }
 
-export async function createPaymentRequest(buyerId: string, title: string, amount: number): Promise<PaymentRequest> {
+export async function createPaymentRequest(buyerId: string, title: string, amount: number, forOrder?: PaymentFor): Promise<PaymentRequest> {
   const { data, error } = await supabase.from('payment_requests')
-    .insert({ buyer_id: buyerId, title: title.trim().slice(0, 120), amount_cents: Math.round(amount * 100) })
+    .insert({
+      buyer_id: buyerId, title: title.trim().slice(0, 120), amount_cents: Math.round(amount * 100),
+      item_id: forOrder?.itemId || null, item_type: forOrder?.itemType || null,
+    })
     .select('*').single();
   if (error) throw new PaymentsError('error', error.message);
   return data as PaymentRequest;
@@ -123,8 +133,73 @@ export function usePaymentRequest(id?: string) {
   useEffect(() => { Promise.resolve().then(refresh); }, [refresh]);
   useEffect(() => {
     if (!id || req?.status !== 'requested') return;
-    const t = setInterval(refresh, 15000);
+    // While it's open, ask Stripe now and then too, so it flips to Paid even if
+    // the buyer never came back to the app after paying.
+    let n = 0;
+    const t = setInterval(() => {
+      n += 1;
+      if (n % 2 === 0 && req?.checkout_session_id) confirmPaymentRequest(id).catch(() => {}).finally(refresh);
+      else refresh();
+    }, 15000);
     return () => clearInterval(t);
-  }, [id, req?.status, refresh]);
+  }, [id, req?.status, req?.checkout_session_id, refresh]);
   return { req, refresh };
+}
+
+/** Key that ties a payment request to an order: who sells, who pays, and for which listing. */
+export const orderPaymentKey = (sellerId: string, buyerId: string, itemId: string) => `${sellerId}:${buyerId}:${itemId}`;
+
+/**
+ * Every payment request I'm part of (as seller or buyer), keyed by order, newest
+ * first per order. Manage uses it to show Requested / Paid on each order.
+ */
+export function useMyPaymentRequests(userId?: string) {
+  const [byOrder, setByOrder] = useState<Record<string, PaymentRequest>>({});
+  const [all, setAll] = useState<PaymentRequest[]>([]);
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    const { data } = await supabase.from('payment_requests').select('*')
+      .or(`seller_id.eq.${userId},buyer_id.eq.${userId}`)
+      .order('created_at', { ascending: false }).limit(500);
+    let rows = (data || []) as PaymentRequest[];
+    // Open requests the buyer has started paying: check with Stripe (a few at a time).
+    const pending = rows.filter((r) => r.status === 'requested' && r.checkout_session_id).slice(0, 5);
+    if (pending.length) {
+      const results = await Promise.all(pending.map((r) => confirmPaymentRequest(r.id).catch(() => null)));
+      const nowPaid = new Set(pending.filter((_, i) => results[i] === 'paid').map((r) => r.id));
+      if (nowPaid.size) rows = rows.map((r) => (nowPaid.has(r.id) ? { ...r, status: 'paid' as const, paid_at: r.paid_at || new Date().toISOString() } : r));
+    }
+    const map: Record<string, PaymentRequest> = {};
+    for (const r of rows) {
+      if (!r.item_id) continue;
+      const k = orderPaymentKey(r.seller_id, r.buyer_id, r.item_id);
+      const cur = map[k];
+      // Prefer a paid request, then an open one, then the newest.
+      const rank = (x: PaymentRequest) => (x.status === 'paid' ? 2 : x.status === 'requested' ? 1 : 0);
+      if (!cur || rank(r) > rank(cur)) map[k] = r;
+    }
+    setAll(rows);
+    setByOrder(map);
+  }, [userId]);
+  useEffect(() => { Promise.resolve().then(refresh); }, [refresh]);
+  useEffect(() => {
+    if (!userId) return;
+    const t = setInterval(refresh, 20000);
+    return () => clearInterval(t);
+  }, [userId, refresh]);
+  return { byOrder, all, refresh };
+}
+
+/**
+ * The payment request tied to an order. On bundle/skill orders I'm the seller and
+ * `o.buyerId` pays; on a service order the helper (`o.buyerId`) sells to me.
+ */
+export function paymentForOrder(
+  byOrder: Record<string, PaymentRequest>, myId: string | undefined,
+  o: { kind: string; itemId: string; buyerId: string },
+): PaymentRequest | undefined {
+  if (!myId || !o.itemId || !o.buyerId) return undefined;
+  return o.kind === 'service'
+    ? byOrder[orderPaymentKey(o.buyerId, myId, o.itemId)]
+    : byOrder[orderPaymentKey(myId, o.buyerId, o.itemId)];
 }

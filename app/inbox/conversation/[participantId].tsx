@@ -1,5 +1,6 @@
 import { ChevronLeft, Phone, Video, BadgeCheck, Heart, MessageCircle, Mic, Play, Pause, Tag, Image as ImageIcon, Camera, Trash2, ArrowUp, Smile, DollarSign } from 'lucide-react-native';
-import { PaymentRequestCard, RequestPaymentSheet } from '@/components/PaymentRequest';
+import { PaymentRequestCard, RequestPaymentSheet, type PaymentPrefill } from '@/components/PaymentRequest';
+import { useOrders } from '@/contexts/OrdersContext';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
@@ -87,6 +88,14 @@ export default function ConversationScreen() {
   const [imageUrlCache, setImageUrlCache] = useState<Record<string, string>>({});
   const [viewerImage, setViewerImage] = useState<string | null>(null);
   const [showPaySheet, setShowPaySheet] = useState(false);
+  // If this person has an open order on one of my listings, the $ sheet starts from it.
+  const { orders } = useOrders();
+  const orderPrefill = useMemo<PaymentPrefill | null>(() => {
+    const o = orders
+      .filter((x) => x.buyerId === participantId && x.kind !== 'service' && (x.status === 'requested' || x.status === 'accepted'))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    return o ? { amount: o.price, title: o.itemTitle, itemId: o.itemId, itemType: o.kind } : null;
+  }, [orders, participantId]);
   // The recorder must be built from full recording options (useAudioRecorder
   // flattens them per platform). It used to be created with `{}`, which the
   // Android native side rejects (no file extension) — so recording always
@@ -895,13 +904,14 @@ export default function ConversationScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      <RequestPaymentSheet
+      {showPaySheet && <RequestPaymentSheet
         visible={showPaySheet}
+        prefill={orderPrefill}
         onClose={() => setShowPaySheet(false)}
         buyerId={participantId || ''}
         buyerName={participant.name || 'them'}
         onSent={(r) => { if (participantId) sendMessage(participantId, `Payment request: $${(r.amount_cents / 100).toFixed(2)} for ${r.title}`, undefined, { payment_request: r }); }}
-      />
+      />}
 
       <Modal visible={!!viewerImage} transparent animationType="fade" onRequestClose={() => setViewerImage(null)}>
         <View style={styles.viewerBackdrop}>

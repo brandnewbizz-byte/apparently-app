@@ -46,6 +46,7 @@ import PostGrid from '@/components/profile/PostGrid';
 import PostViewer from '@/components/profile/PostViewer';
 import { QRCode } from '@/components/QRCode';
 import { profileFollowUrl } from '@/lib/profileLink';
+import { useMyPaymentRequests, orderPaymentKey, money as centsMoney } from '@/lib/payments';
 
 const ACCENT = {
   gold: '#FFB800',
@@ -64,6 +65,8 @@ interface Booking {
   pickupTime: string | null;
   status: string;
   bookedAt: string;
+  itemId?: string;
+  providerId?: string;
 }
 
 interface DetailItem {
@@ -151,6 +154,7 @@ export default function ProfileScreen() {
   const [followList, setFollowList] = useState<{ title: string; users: any[]; loading: boolean } | null>(null);
 
   const myId = user?.id;
+  const myPayments = useMyPaymentRequests(myId);
 
   // ── Loaders ────────────────────────────────────────────────────────────────
   const loadPosts = useCallback(async () => {
@@ -209,7 +213,7 @@ export default function ProfileScreen() {
     if (!myId) { setBookingsLoading(false); return; }
     const { data } = await supabase
       .from('user_grabs')
-      .select('id, title, price, pickup_time, status, booked_at')
+      .select('id, title, price, pickup_time, status, booked_at, item_id, provider_id')
       .eq('user_id', myId)
       .order('booked_at', { ascending: false })
       .limit(30);
@@ -220,6 +224,8 @@ export default function ProfileScreen() {
       pickupTime: g.pickup_time || null,
       status: g.status || 'pending',
       bookedAt: g.booked_at || '',
+      itemId: g.item_id || undefined,
+      providerId: g.provider_id || undefined,
     })));
     setBookingsLoading(false);
   }, [myId]);
@@ -370,6 +376,8 @@ export default function ProfileScreen() {
             </View>
           ) : bookings.map((b) => {
             const sc = statusColor(b.status, colors.textTertiary);
+            const pay = b.itemId && b.providerId && myId ? myPayments.byOrder[orderPaymentKey(b.providerId, myId, b.itemId)] : undefined;
+            const chat = () => router.push((b.providerId ? `/inbox/conversation/${b.providerId}` : '/inbox') as any);
             return (
               <TouchableOpacity
                 key={b.id}
@@ -385,12 +393,19 @@ export default function ProfileScreen() {
                     <View style={[styles.chip, { backgroundColor: sc + '1F' }]}>
                       <Text style={[styles.chipText, { color: sc }]}>{b.status.replace('_', ' ')}</Text>
                     </View>
+                    {pay?.status === 'paid' ? (
+                      <View style={[styles.chip, { backgroundColor: '#10B9811F' }]}><Text style={[styles.chipText, { color: '#10B981' }]}>Paid ✓</Text></View>
+                    ) : pay?.status === 'requested' ? (
+                      <TouchableOpacity onPress={chat} style={[styles.chip, { backgroundColor: '#F59E0B1F' }]} accessibilityLabel="Pay in chat">
+                        <Text style={[styles.chipText, { color: '#F59E0B' }]}>Pay {centsMoney(pay.amount_cents)}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     {b.bookedAt ? <Text style={[styles.cardMeta, { color: colors.textTertiary }]}>{new Date(b.bookedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text> : null}
                   </View>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 6 }}>
                   <Text style={[styles.cardPrice, { color: colors.text }]}>${b.price}</Text>
-                  <TouchableOpacity onPress={() => router.push('/inbox' as any)} hitSlop={8} accessibilityLabel="Message about this booking">
+                  <TouchableOpacity onPress={chat} hitSlop={8} accessibilityLabel="Message about this booking">
                     <MessageCircle size={18} color={colors.textTertiary} />
                   </TouchableOpacity>
                 </View>
