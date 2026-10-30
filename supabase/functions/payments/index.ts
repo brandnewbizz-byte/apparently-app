@@ -11,8 +11,10 @@
 // POST { action: 'confirm', request_id }          -> { status } re-check a request with Stripe, mark it paid
 //
 // Needs the secret STRIPE_SECRET_KEY (the platform's Stripe key, with Connect turned on).
-// Apparently's fee: PLATFORM_FEE_PERCENT (default 10) of each payment, sent to the
-// platform automatically; the seller keeps the rest minus Stripe's card fee.
+// Apparently's fees: PLATFORM_FEE_PERCENT (default 10) of the seller's price, plus a buyer
+// service fee of BUYER_FEE_PERCENT (default 5) added on top at checkout. Both go to the
+// platform automatically; the seller keeps their price minus 10% and Stripe's card fee.
+// Checkout shows Apple Pay / Google Pay automatically where the buyer's device supports it.
 import { createClient } from 'npm:@supabase/supabase-js@2.93.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -20,6 +22,8 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Saved in the dashboard as Stripe_Secret_key; accept either spelling.
 const STRIPE_KEY = (Deno.env.get('STRIPE_SECRET_KEY') || Deno.env.get('Stripe_Secret_key') || '').trim();
 const FEE_PERCENT = Number(Deno.env.get('PLATFORM_FEE_PERCENT') || '10');
+// Buyer service fee, added on top of the seller's price and kept by Apparently.
+const BUYER_FEE_PERCENT = Number(Deno.env.get('BUYER_FEE_PERCENT') || '5');
 const WEB_APP = 'https://apparentlyappdashboard.nationalcompliancehub.com/app';
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
@@ -192,12 +196,16 @@ Deno.serve(async (req) => {
       const fresh = await syncAccount(pr.seller_id, sellerAcct);
       if (!fresh.charges_enabled) return json({ error: 'seller_not_ready' }, 409);
 
-      const fee = Math.round(pr.amount_cents * FEE_PERCENT / 100);
+      const serviceFee = Math.round(pr.amount_cents * BUYER_FEE_PERCENT / 100);
+      const fee = Math.round(pr.amount_cents * FEE_PERCENT / 100) + serviceFee;
       const back = safeReturn(body.return_url, `${WEB_APP}/inbox`);
       const sep = back.includes('?') ? '&' : '?';
       const session = await stripe('POST', 'checkout/sessions', {
         mode: 'payment',
-        line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: pr.amount_cents, product_data: { name: pr.title.slice(0, 120) } } }],
+        line_items: [
+          { quantity: 1, price_data: { currency: 'usd', unit_amount: pr.amount_cents, product_data: { name: pr.title.slice(0, 120) } } },
+          ...(serviceFee > 0 ? [{ quantity: 1, price_data: { currency: 'usd', unit_amount: serviceFee, product_data: { name: 'Apparently service fee' } } }] : []),
+        ],
         payment_intent_data: {
           application_fee_amount: fee,
           description: `Apparently: ${pr.title}`.slice(0, 200),
@@ -209,7 +217,7 @@ Deno.serve(async (req) => {
         success_url: `${back}${sep}paid=${pr.id}`,
         cancel_url: back,
       }, sellerAcct);
-      await admin.from('payment_requests').update({ checkout_session_id: session.id, fee_cents: fee }).eq('id', pr.id);
+      await admin.from('payment_requests').update({ checkout_session_id: session.id, fee_cents: fee, service_fee_cents: serviceFee }).eq('id', pr.id);
       return json({ url: session.url });
     }
 

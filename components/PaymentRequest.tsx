@@ -4,7 +4,7 @@ import { DollarSign, CheckCircle2, X } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   usePaymentRequest, payPaymentRequest, cancelPaymentRequest, confirmPaymentRequest, createPaymentRequest,
-  getPayoutStatus, startPayoutSetup, money, sellerGets, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT, isVerifying,
+  getPayoutStatus, startPayoutSetup, money, sellerGets, buyerTotal, buyerServiceFee, BUYER_FEE_PERCENT, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT, isVerifying,
 } from '@/lib/payments';
 
 const say = (title: string, msg: string) => {
@@ -67,10 +67,14 @@ export function PaymentRequestCard({ data, isMe, returnPath }: { data: { id: str
         </View>
       ) : (
         <TouchableOpacity style={[s.payBtn, { backgroundColor: colors.accent, opacity: busy ? 0.6 : 1 }]} onPress={pay} disabled={busy} testID="pay-request">
-          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={s.payText}>Pay {money(amount)}</Text>}
+          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={s.payText}>Pay {money(buyerTotal(amount))}</Text>}
         </TouchableOpacity>
       )}
-      {!paid && !canceled && !iAmSeller && <Text style={[s.fine, { color: colors.textTertiary }]}>Secure checkout by Stripe</Text>}
+      {!paid && !canceled && !iAmSeller && (
+        <Text style={[s.fine, { color: colors.textTertiary }]}>
+          Includes {money(buyerServiceFee(amount))} service fee · {Platform.OS === 'android' ? 'Google Pay' : 'Apple Pay'} or card · Secure checkout by Stripe
+        </Text>
+      )}
     </View>
   );
 }
@@ -145,8 +149,8 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
           ) : (
             <View style={{ gap: 10 }}>
               <Text style={[s.body, { color: colors.textSecondary }]}>{prefill?.itemId
-                  ? `Filled in from ${buyerName}’s order. Change the amount if you agreed on a different price. They’ll see it in your chat and can pay with a card.`
-                  : `Ask ${buyerName} for the price you agreed. They’ll see it in your chat and can pay with a card.`}</Text>
+                  ? `Filled in from ${buyerName}’s order. Change the amount if you agreed on a different price. They’ll see it in your chat and can pay with Apple Pay, Google Pay or a card.`
+                  : `Ask ${buyerName} for the price you agreed. They’ll see it in your chat and can pay with Apple Pay, Google Pay or a card.`}</Text>
               <View style={[s.amountBox, { borderColor: colors.border }]}>
                 <Text style={[s.dollar, { color: colors.text }]}>$</Text>
                 <TextInput
@@ -160,7 +164,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
               />
               {value > 0 && (
                 <Text style={[s.note, { color: colors.textSecondary }]}>
-                  You’ll get about {money(sellerGets(cents))} after Apparently’s {PLATFORM_FEE_PERCENT}% fee and Stripe’s card fee.
+                  You’ll get about {money(sellerGets(cents))} after Apparently’s {PLATFORM_FEE_PERCENT}% fee and Stripe’s card fee. {buyerName} pays {money(buyerTotal(cents))} (includes a {BUYER_FEE_PERCENT}% service fee).
                 </Text>
               )}
               <TouchableOpacity style={[s.payBtn, { backgroundColor: colors.accent, opacity: valid && !busy ? 1 : 0.5 }]} onPress={send} disabled={!valid || busy} testID="send-request">

@@ -10,13 +10,18 @@ import { supabase } from '@/lib/supabase';
 import { WEB_APP_URL } from '@/lib/profileLink';
 
 export const PLATFORM_FEE_PERCENT = 10;
+/** Service fee the buyer pays on top of the price (kept by Apparently). Matches BUYER_FEE_PERCENT on the server. */
+export const BUYER_FEE_PERCENT = 5;
+export const buyerServiceFee = (cents: number) => Math.round(cents * BUYER_FEE_PERCENT / 100);
+/** What the buyer pays in total: the price plus the service fee. */
+export const buyerTotal = (cents: number) => cents + buyerServiceFee(cents);
 export const MIN_PAYMENT = 1;
 export const MAX_PAYMENT = 20000;
 
 export type PaymentStatus = 'requested' | 'paid' | 'canceled';
 export interface PaymentRequest {
   id: string; seller_id: string; buyer_id: string; title: string; amount_cents: number;
-  fee_cents: number; status: PaymentStatus; created_at: string; paid_at: string | null;
+  fee_cents: number; service_fee_cents?: number; status: PaymentStatus; created_at: string; paid_at: string | null;
   /** The listing the payment is for (bundle / skill / service id), when it came from an order. */
   item_id?: string | null; item_type?: string | null;
   /** Set once the buyer has opened Stripe Checkout. */
@@ -120,7 +125,8 @@ export const money = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ==
 export const STRIPE_FEE = { percent: 2.9, fixedCents: 30 };
 /** About what the seller keeps: the price minus Apparently's fee and Stripe's card fee. */
 export const sellerGets = (cents: number) =>
-  Math.max(0, cents - Math.round(cents * PLATFORM_FEE_PERCENT / 100) - Math.round(cents * STRIPE_FEE.percent / 100) - STRIPE_FEE.fixedCents);
+  // Stripe's card fee is on the whole charge, including the buyer's service fee.
+  Math.max(0, cents - Math.round(cents * PLATFORM_FEE_PERCENT / 100) - Math.round(buyerTotal(cents) * STRIPE_FEE.percent / 100) - STRIPE_FEE.fixedCents);
 
 /** Live status of one request (refreshes when asked, and every 15s while it's open). */
 export function usePaymentRequest(id?: string) {
