@@ -81,7 +81,7 @@ export function PaymentRequestCard({ data, isMe, returnPath }: { data: { id: str
 
 /** Sheet the seller fills in to ask for the agreed amount. */
 /** The receipt that shows up in the chat once a payment request is paid. */
-export function PaymentReceiptCard({ data, isMe, otherName }: { data: { amount_cents: number; title: string; paid_at?: string }; isMe: boolean; otherName: string }) {
+export function PaymentReceiptCard({ data, isMe, otherName }: { data: { amount_cents: number; service_fee_cents?: number; title: string; paid_at?: string }; isMe: boolean; otherName: string }) {
   const { colors } = useTheme();
   const when = data.paid_at ? new Date(data.paid_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   return (
@@ -90,10 +90,12 @@ export function PaymentReceiptCard({ data, isMe, otherName }: { data: { amount_c
         <CheckCircle2 size={14} color="#16A34A" />
         <Text style={[s.tag, { color: '#16A34A' }]}>{isMe ? 'You paid' : `${otherName} paid you`}</Text>
       </View>
-      <Text style={[s.amount, { color: colors.text }]}>{money(data.amount_cents)}</Text>
+      <Text style={[s.amount, { color: colors.text }]}>{money(isMe ? data.amount_cents + (data.service_fee_cents || 0) : data.amount_cents)}</Text>
       <Text style={[s.title, { color: colors.textSecondary }]} numberOfLines={2}>{data.title}</Text>
       <Text style={[s.fine, { color: colors.textTertiary, textAlign: 'left', marginTop: 8 }]}>
-        {isMe ? 'Paid by card through Apparently' : `You get about ${money(sellerGets(data.amount_cents))} after fees`}{when ? ` · ${when}` : ''}
+        {isMe
+          ? `Paid through Apparently${data.service_fee_cents ? ` · includes ${money(data.service_fee_cents)} service fee` : ''}`
+          : `You get about ${money(sellerGets(data.amount_cents))} after fees`}{when ? ` · ${when}` : ''}
       </Text>
     </View>
   );

@@ -64,7 +64,7 @@ export interface Message {
     /** A seller's request for the agreed amount; the buyer pays it in the app (see lib/payments.ts). */
     payment_request?: { id: string; amount_cents: number; title: string; item_id?: string | null; item_type?: string | null };
     /** Receipt posted into the chat when a payment request is paid. */
-    payment_paid?: { id: string; amount_cents: number; title: string; paid_at?: string };
+    payment_paid?: { id: string; amount_cents: number; service_fee_cents?: number; title: string; paid_at?: string };
   };
 }
 

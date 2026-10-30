@@ -98,7 +98,7 @@ async function postPaidMessage(pr: Record<string, any>, amount: string) {
   await admin.from('messages').insert({
     conversation_id: conv.id, sender_id: pr.buyer_id, receiver_id: pr.seller_id,
     content: `✅ Paid ${amount} for "${pr.title}"`, read: false,
-    metadata: { payment_paid: { id: pr.id, amount_cents: pr.amount_cents, title: pr.title, paid_at: now } },
+    metadata: { payment_paid: { id: pr.id, amount_cents: pr.amount_cents, service_fee_cents: pr.service_fee_cents || 0, title: pr.title, paid_at: now } },
   });
   await admin.from('conversations').update({ last_message_at: now }).eq('id', conv.id);
 }
