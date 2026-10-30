@@ -1,12 +1,12 @@
 // In-app payments between members, with Stripe Connect: direct charges on the
-// seller's own connected account (Express Dashboard, Stripe-managed risk), so the
+// seller's own connected account (full Stripe Dashboard, Stripe-managed risk), so the
 // seller is the merchant, handles their own refunds/disputes, and pays Stripe's
 // card fee; Apparently takes an application fee. The signed-in user's JWT says who is calling.
 //
 // POST { action: 'health' }                       -> { ok }  is the platform Stripe key valid
 // POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled }
 // POST { action: 'onboard', return_url }          -> { url }  Stripe-hosted payout setup for the caller
-// POST { action: 'dashboard' }                    -> { url }  Stripe Express dashboard (payouts, balance)
+// POST { action: 'dashboard' }                    -> { url }  the seller's Stripe dashboard (payouts, balance, refunds)
 // POST { action: 'checkout', request_id, return_url } -> { url }  buyer pays a payment request
 // POST { action: 'confirm', request_id }          -> { status } re-check a request with Stripe, mark it paid
 //
@@ -116,8 +116,9 @@ Deno.serve(async (req) => {
       if (!accountId) {
         const acct = await stripe('POST', 'accounts', {
           country: 'US', email: user.email,
-          // Express Dashboard; the seller pays Stripe's fees; Stripe manages risk and covers losses.
-          controller: { stripe_dashboard: { type: 'express' }, fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe' },
+          // Full Stripe Dashboard; the seller pays Stripe's fees; Stripe manages risk and covers losses.
+          // (Stripe only allows Stripe-covered losses with the full dashboard, not the Express one.)
+          controller: { stripe_dashboard: { type: 'full' }, fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe' },
           capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
           business_profile: { product_description: 'Services and packages sold on Apparently' },
           metadata: { apparently_user_id: user.id },
@@ -134,8 +135,8 @@ Deno.serve(async (req) => {
 
     if (action === 'dashboard') {
       if (!existing) return json({ error: 'no_payout_account' }, 400);
-      const link = await stripe('POST', `accounts/${existing.stripe_account_id}/login_links`);
-      return json({ url: link.url });
+      // Sellers sign in to their own full Stripe Dashboard.
+      return json({ url: 'https://dashboard.stripe.com/' });
     }
 
     if (action === 'checkout' || action === 'confirm') {
