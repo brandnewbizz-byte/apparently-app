@@ -493,14 +493,14 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
   return (
     <View style={styles.swipeContainer}>
       {nextBundle && (
-        <Animated.View style={[styles.swipeCardWrapper, { transform: [{ scale: nextCardScale }] }]}>
+        <Animated.View style={[styles.swipeCardWrapper, styles.nextCard, { transform: [{ scale: nextCardScale }] }]}>
           <SwipeBundleCardContent bundle={nextBundle} colors={colors} />
         </Animated.View>
       )}
 
       <Animated.View
         style={[
-          styles.swipeCardWrapper,
+          styles.swipeCardWrapper, styles.currentCard,
           {
             transform: [
               { translateX: swipeAnim.x },
@@ -869,14 +869,14 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
   return (
     <View style={styles.skillSwipeContainer}>
       {nextSkill && (
-        <Animated.View style={[styles.skillSwipeCardWrapper, { transform: [{ scale: nextCardScale }] }]}>
+        <Animated.View style={[styles.skillSwipeCardWrapper, styles.nextCard, { transform: [{ scale: nextCardScale }] }]}>
           <SkillDealCard skill={nextSkill} colors={colors} />
         </Animated.View>
       )}
 
       <Animated.View
         style={[
-          styles.skillSwipeCardWrapper,
+          styles.skillSwipeCardWrapper, styles.currentCard,
           { transform: [{ translateX: swipeAnim.x }, { rotate }], opacity: opacityAnim },
         ]}
         {...panResponder.panHandlers}
@@ -2424,8 +2424,13 @@ const styles = StyleSheet.create({
   swipeContainer: {
     paddingHorizontal: 20,
     alignItems: 'center',
-    minHeight: 480,
   },
+  // The front card sits in the normal layout, so the Skip / Grab / Save row
+  // always lands right under it, whatever the card's height. The card behind
+  // it stays absolutely positioned underneath.
+  currentCard: { position: 'relative' },
+  // The card waiting behind never pokes out below the front one.
+  nextCard: { bottom: 0, overflow: 'hidden', borderRadius: 20 },
   swipeCardWrapper: {
     width: SCREEN_WIDTH - 40,
     position: 'absolute',
@@ -2623,8 +2628,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
-    marginTop: 390,
-    paddingTop: 16,
+    paddingTop: 14,
   },
   swipeActionBtn: {
     width: 52,
@@ -2734,7 +2738,6 @@ const styles = StyleSheet.create({
   skillSwipeContainer: {
     paddingHorizontal: 20,
     alignItems: 'center',
-    minHeight: 320,
   },
   skillSwipeCardWrapper: {
     width: SCREEN_WIDTH - 40,
@@ -2847,7 +2850,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 14,
-    marginTop: 245,
     paddingTop: 12,
   },
   skillActionBtn: {
