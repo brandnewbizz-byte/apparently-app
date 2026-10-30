@@ -3,6 +3,7 @@
 // seller is the merchant, handles their own refunds/disputes, and pays Stripe's
 // card fee; Apparently takes an application fee. The signed-in user's JWT says who is calling.
 //
+// POST { action: 'health' }                       -> { ok }  is the platform Stripe key valid
 // POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled }
 // POST { action: 'onboard', return_url }          -> { url }  Stripe-hosted payout setup for the caller
 // POST { action: 'dashboard' }                    -> { url }  Stripe Express dashboard (payouts, balance)
@@ -96,6 +97,12 @@ Deno.serve(async (req) => {
 
   try {
     const { data: existing } = await admin.from('payout_accounts').select('*').eq('user_id', user.id).maybeSingle();
+
+    if (action === 'health') {
+      // Is the platform's Stripe key valid? Reports a yes/no only.
+      const r = await fetch('https://api.stripe.com/v1/balance', { headers: { Authorization: `Bearer ${STRIPE_KEY}` } });
+      return json({ ok: r.ok });
+    }
 
     if (action === 'status') {
       if (!existing) return json({ connected: false, charges_enabled: false, payouts_enabled: false });
