@@ -23,7 +23,8 @@ const WEB_APP = 'https://apparentlyappdashboard.nationalcompliancehub.com/app';
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-region',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -76,7 +77,11 @@ async function syncAccount(userId: string, accountId: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  if (req.method === 'OPTIONS') {
+    // Allow whatever headers the Supabase client asks for (it adds new x-supabase-* ones over time).
+    const asked = req.headers.get('Access-Control-Request-Headers');
+    return new Response('ok', { headers: asked ? { ...cors, 'Access-Control-Allow-Headers': asked } : cors });
+  }
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   if (!STRIPE_KEY) return json({ error: 'payments_not_configured' }, 503);
 
