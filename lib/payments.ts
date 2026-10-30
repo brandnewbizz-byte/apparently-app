@@ -18,7 +18,15 @@ export interface PaymentRequest {
   id: string; seller_id: string; buyer_id: string; title: string; amount_cents: number;
   fee_cents: number; status: PaymentStatus; created_at: string; paid_at: string | null;
 }
-export interface PayoutStatus { connected: boolean; charges_enabled: boolean; payouts_enabled: boolean }
+export interface PayoutStatus {
+  connected: boolean; charges_enabled: boolean; payouts_enabled: boolean;
+  /** The seller finished Stripe's form. */
+  details_submitted?: boolean;
+  /** Stripe still needs something from the seller. */
+  needs_info?: boolean;
+}
+/** Signed up and nothing left to fill in, but Stripe is still verifying (usually minutes). */
+export const isVerifying = (st: PayoutStatus | null) => !!st && st.connected && !st.charges_enabled && !!st.details_submitted && !st.needs_info;
 
 const MESSAGES: Record<string, string> = {
   payments_not_configured: 'Payments aren’t switched on yet. Please try again soon.',

@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, CheckCircle2, Banknote } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { getPayoutStatus, startPayoutSetup, openPayoutDashboard, PayoutStatus, PaymentsError, PLATFORM_FEE_PERCENT } from '@/lib/payments';
+import { getPayoutStatus, startPayoutSetup, openPayoutDashboard, PayoutStatus, PaymentsError, PLATFORM_FEE_PERCENT, isVerifying } from '@/lib/payments';
 
 export default function PayoutsScreen() {
   const { colors } = useTheme();
@@ -48,6 +48,18 @@ export default function PayoutsScreen() {
               {busy ? <ActivityIndicator color="#FFF" /> : <Text style={s.btnText}>See earnings and payouts</Text>}
             </TouchableOpacity>
           </>
+        ) : isVerifying(st) ? (
+          <>
+            <View style={[s.wait, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}>
+              <ActivityIndicator color={colors.accent} />
+              <Text style={[s.waitText, { color: colors.text }]}>
+                You’re all signed up. Stripe is checking your details, which usually takes a few minutes and sometimes up to a day. Payments switch on by themselves when it’s done.
+              </Text>
+            </View>
+            <TouchableOpacity style={[s.btn, { borderWidth: 1, borderColor: colors.border, opacity: busy ? 0.6 : 1 }]} onPress={() => act(async () => {})} disabled={busy}>
+              {busy ? <ActivityIndicator color={colors.accent} /> : <Text style={[s.btnText, { color: colors.text }]}>Check again</Text>}
+            </TouchableOpacity>
+          </>
         ) : (
           <TouchableOpacity style={[s.btn, { backgroundColor: colors.accent, opacity: busy ? 0.6 : 1 }]} onPress={() => act(() => startPayoutSetup('/payouts'))} disabled={busy} testID="payouts-setup">
             {busy ? <ActivityIndicator color="#FFF" /> : <Text style={s.btnText}>{st.connected ? 'Finish setting up payouts' : 'Set up payouts'}</Text>}
@@ -72,4 +84,6 @@ const s = StyleSheet.create({
   btn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
   fine: { fontSize: 12 },
+  wait: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1 },
+  waitText: { flex: 1, fontSize: 14, lineHeight: 20 },
 });

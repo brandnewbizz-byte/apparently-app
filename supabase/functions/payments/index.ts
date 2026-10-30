@@ -4,7 +4,7 @@
 // card fee; Apparently takes an application fee. The signed-in user's JWT says who is calling.
 //
 // POST { action: 'health' }                       -> { ok }  is the platform Stripe key valid
-// POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled }
+// POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled, details_submitted, needs_info }
 // POST { action: 'onboard', return_url }          -> { url }  Stripe-hosted payout setup for the caller
 // POST { action: 'dashboard' }                    -> { url }  the seller's Stripe dashboard (payouts, balance, refunds)
 // POST { action: 'checkout', request_id, return_url } -> { url }  buyer pays a payment request
@@ -75,7 +75,8 @@ async function syncAccount(userId: string, accountId: string) {
     details_submitted: !!acct.details_submitted, updated_at: new Date().toISOString(),
   };
   await admin.from('payout_accounts').upsert(row, { onConflict: 'user_id' });
-  return row;
+  const due = [...(acct.requirements?.currently_due || []), ...(acct.requirements?.past_due || [])];
+  return { ...row, needs_info: due.length > 0 };
 }
 
 Deno.serve(async (req) => {
@@ -106,9 +107,9 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'status') {
-      if (!existing) return json({ connected: false, charges_enabled: false, payouts_enabled: false });
+      if (!existing) return json({ connected: false, charges_enabled: false, payouts_enabled: false, details_submitted: false, needs_info: true });
       const row = await syncAccount(user.id, existing.stripe_account_id);
-      return json({ connected: true, charges_enabled: row.charges_enabled, payouts_enabled: row.payouts_enabled });
+      return json({ connected: true, charges_enabled: row.charges_enabled, payouts_enabled: row.payouts_enabled, details_submitted: row.details_submitted, needs_info: row.needs_info });
     }
 
     if (action === 'onboard') {

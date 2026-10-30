@@ -4,7 +4,7 @@ import { DollarSign, CheckCircle2, X } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   usePaymentRequest, payPaymentRequest, cancelPaymentRequest, confirmPaymentRequest, createPaymentRequest,
-  getPayoutStatus, startPayoutSetup, money, sellerGets, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT,
+  getPayoutStatus, startPayoutSetup, money, sellerGets, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT, isVerifying,
 } from '@/lib/payments';
 
 const say = (title: string, msg: string) => {
@@ -85,10 +85,11 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
-    getPayoutStatus().then((st) => setReady(st.charges_enabled)).catch((e) => { setReady(false); if ((e as PaymentsError).code === 'payments_not_configured') say('Payments are coming soon', errText(e)); });
+    getPayoutStatus().then((st) => { setVerifying(isVerifying(st)); setReady(st.charges_enabled); }).catch((e) => { setReady(false); if ((e as PaymentsError).code === 'payments_not_configured') say('Payments are coming soon', errText(e)); });
   }, [visible]);
 
   const value = Number(amount.replace(/[^0-9.]/g, ''));
@@ -97,7 +98,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
 
   const setup = async () => {
     setBusy(true);
-    try { await startPayoutSetup('/payouts'); const st = await getPayoutStatus(); setReady(st.charges_enabled); }
+    try { await startPayoutSetup('/payouts'); const st = await getPayoutStatus(); setVerifying(isVerifying(st)); setReady(st.charges_enabled); }
     catch (e) { say('Couldn’t open payout setup', errText(e)); }
     finally { setBusy(false); }
   };
@@ -123,6 +124,10 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
           </View>
           {ready === null ? (
             <ActivityIndicator style={{ marginVertical: 30 }} color={colors.accent} />
+          ) : !ready && verifying ? (
+            <Text style={[s.body, { color: colors.textSecondary }]}>
+              You’re signed up. Stripe is still checking your details (usually a few minutes). You can send payment requests as soon as it’s done.
+            </Text>
           ) : !ready ? (
             <View style={{ gap: 12 }}>
               <Text style={[s.body, { color: colors.textSecondary }]}>
