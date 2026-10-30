@@ -15,7 +15,8 @@ const NEW_BUNDLE_COLUMNS = ['tags', 'date_range', 'available_count', 'total_valu
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export const MAX_BUNDLES = 50;
+// Safety net only — real posting limits come from the member's plan (lib/plans.ts).
+export const MAX_BUNDLES = 100;
 
 export interface BundleItem {
   id: string;

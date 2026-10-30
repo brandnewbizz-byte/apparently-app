@@ -11,7 +11,8 @@ import { writeWithFallback } from '@/lib/dbWrite';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export const MAX_SKILLS = 10;
+// Safety net only — real posting limits come from the member's plan (lib/plans.ts).
+export const MAX_SKILLS = 100;
 
 export interface UserSkill {
   id: string;
