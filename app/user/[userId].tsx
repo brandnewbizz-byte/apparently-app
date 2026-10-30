@@ -67,7 +67,10 @@ const ACCENT_COLORS = {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export default function UserProfileScreen() {
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { userId, f } = useLocalSearchParams<{ userId: string; f?: string }>();
+  // Opened from someone's scan-to-follow code.
+  const fromCode = f === '1';
+  const [followedHere, setFollowedHere] = useState(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
@@ -344,6 +347,18 @@ export default function UserProfileScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT_COLORS.gold} />
         }
       >
+        {fromCode && !isOwnProfile && authUser?.id && (!isFollowing || followedHere) ? (
+          <View style={[styles.scanBanner, { backgroundColor: colors.surface, borderColor: colors.border }]} testID="scan-follow-banner">
+            <Text style={[styles.scanBannerText, { color: colors.text }]} numberOfLines={2}>
+              {isFollowing ? `You’re following ${displayName} ✓` : `You scanned ${displayName}’s code`}
+            </Text>
+            {!isFollowing ? (
+              <TouchableOpacity onPress={async () => { await handleFollow(); setFollowedHere(true); }} style={styles.scanBannerBtn} disabled={followLoading} testID="scan-follow-btn">
+                <Text style={styles.scanBannerBtnText}>Follow</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
           {/* Profile Header — EXACT same design as profile tab */}
           <View style={styles.profileHeader}>
@@ -575,6 +590,10 @@ const styles = StyleSheet.create({
   followBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   followBtnText: { fontSize: 14, fontWeight: '600' },
   avatarSection: { alignItems: 'center', paddingTop: 4 },
+  scanBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 10, marginBottom: 6, padding: 12, borderRadius: 16, borderWidth: 1 },
+  scanBannerText: { flex: 1, fontSize: 14.5, fontWeight: '700' },
+  scanBannerBtn: { backgroundColor: '#7B61FF', paddingVertical: 9, paddingHorizontal: 18, borderRadius: 12 },
+  scanBannerBtnText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
   avatarContainer: { marginBottom: 12 },
   avatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: '#FFFFFF' },
   userName: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', textAlign: 'center' },

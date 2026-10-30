@@ -44,6 +44,8 @@ import { useSkills } from '@/contexts/SkillContext';
 import { fetchUserPosts, fetchSavedPosts, type ProfilePost } from '@/lib/profilePosts';
 import PostGrid from '@/components/profile/PostGrid';
 import PostViewer from '@/components/profile/PostViewer';
+import { QRCode } from '@/components/QRCode';
+import { profileFollowUrl } from '@/lib/profileLink';
 
 const ACCENT = {
   gold: '#FFB800',
@@ -145,6 +147,7 @@ export default function ProfileScreen() {
   // Viewer + sheets
   const [viewer, setViewer] = useState<{ list: ProfilePost[]; index: number; title: string } | null>(null);
   const [detail, setDetail] = useState<DetailItem | null>(null);
+  const [showQR, setShowQR] = useState(false);
   const [followList, setFollowList] = useState<{ title: string; users: any[]; loading: boolean } | null>(null);
 
   const myId = user?.id;
@@ -260,7 +263,8 @@ export default function ProfileScreen() {
   const shareProfile = () => {
     tap();
     const handle = user?.username ? `@${user.username}` : (user?.fullName || 'me');
-    Share.share({ message: `Find ${handle} on Apparently` }).catch(() => {});
+    const link = myId ? profileFollowUrl(myId) : '';
+    Share.share({ message: link ? `Follow ${handle} on Apparently: ${link}` : `Find ${handle} on Apparently`, ...(link ? { url: link } : {}) }).catch(() => {});
   };
 
   const openProfile = (id: string) => {
@@ -399,7 +403,15 @@ export default function ProfileScreen() {
   };
 
   // ── Screen ─────────────────────────────────────────────────────────────────
-  const coverHeight = insets.top + 96;
+  // The cover is a "scan to follow" card: a QR code of this profile's link,
+  // with the profile photo overlapping its bottom edge.
+  const QR_SIZE = 140;
+  const CARD_PAD = 12;
+  const CARD_LABEL = 18;
+  const AVATAR_OVERLAP = 52; // matches styles.identity marginTop
+  const cardHeight = CARD_PAD + CARD_LABEL + QR_SIZE + CARD_PAD + AVATAR_OVERLAP + 8;
+  const coverHeight = insets.top + 52 + cardHeight;
+  const followUrl = myId ? profileFollowUrl(myId) : '';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -428,6 +440,18 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+            {followUrl ? (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); setShowQR(true); }}
+                style={[styles.qrCard, { height: cardHeight, padding: CARD_PAD, width: QR_SIZE + CARD_PAD * 2, marginLeft: -(QR_SIZE + CARD_PAD * 2) / 2 }]}
+                accessibilityLabel="Your scan-to-follow code. Tap to make it bigger or share it."
+                testID="profile-qr"
+              >
+                <Text style={styles.qrLabel}>SCAN TO FOLLOW</Text>
+                <QRCode value={followUrl} size={QR_SIZE} />
+              </TouchableOpacity>
+            ) : null}
           </LinearGradient>
 
           <View style={styles.identity}>
@@ -542,6 +566,27 @@ export default function ProfileScreen() {
       />
 
       {/* ── Offer / booking detail ── */}
+      <Modal visible={showQR} animationType="fade" transparent onRequestClose={() => setShowQR(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowQR(false)} style={styles.qrBackdrop}>
+          <TouchableOpacity activeOpacity={1} style={styles.qrSheet}>
+            {avatar ? <Image source={{ uri: avatar }} style={styles.qrSheetAvatar} /> : null}
+            <Text style={styles.qrSheetName} numberOfLines={1}>{name}</Text>
+            {username ? <Text style={styles.qrSheetHandle}>@{username}</Text> : null}
+            {followUrl ? <View style={{ marginTop: 14 }}><QRCode value={followUrl} size={240} /></View> : null}
+            <Text style={styles.qrSheetHint}>Scan with any phone camera to open your page and follow you.</Text>
+            <View style={styles.qrSheetRow}>
+              <TouchableOpacity onPress={shareProfile} style={styles.qrSheetBtn} testID="profile-qr-share">
+                <Share2 size={16} color="#FFF" />
+                <Text style={styles.qrSheetBtnText}>Share link</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowQR(false)} style={[styles.qrSheetBtn, { backgroundColor: '#EEE' }]}>
+                <Text style={[styles.qrSheetBtnText, { color: '#222' }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={!!detail} animationType="slide" transparent onRequestClose={() => setDetail(null)}>
         <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setDetail(null)}>
           <TouchableOpacity activeOpacity={1} style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 20 }]}>
@@ -621,6 +666,17 @@ const styles = StyleSheet.create({
   glassBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
 
   identity: { alignItems: 'center', paddingHorizontal: 24, marginTop: -52 },
+  qrCard: { position: 'absolute', bottom: 0, left: '50%', backgroundColor: '#FFFFFF', borderTopLeftRadius: 18, borderTopRightRadius: 18, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+  qrLabel: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1.4, color: '#7B61FF', height: 18 },
+  qrBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  qrSheet: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 340 },
+  qrSheetAvatar: { width: 56, height: 56, borderRadius: 28, marginBottom: 8 },
+  qrSheetName: { fontSize: 18, fontWeight: '800', color: '#111' },
+  qrSheetHandle: { fontSize: 14, color: '#666', marginTop: 2 },
+  qrSheetHint: { fontSize: 13, color: '#666', textAlign: 'center', marginTop: 14, lineHeight: 18 },
+  qrSheetRow: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  qrSheetBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#7B61FF', paddingVertical: 11, paddingHorizontal: 18, borderRadius: 14 },
+  qrSheetBtnText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
   avatarRing: { padding: 4, borderRadius: 60 },
   avatar: { width: 100, height: 100, borderRadius: 50 },
   avatarInitial: { color: '#FFF', fontSize: 40, fontWeight: '800' },

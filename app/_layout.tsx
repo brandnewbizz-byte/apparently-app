@@ -35,6 +35,8 @@ import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
+
+const AFTER_SIGN_IN_KEY = 'apparently_after_sign_in';
 import {
   configureNotificationHandler,
   ensureNotificationChannel,
@@ -112,6 +114,14 @@ function RootLayoutNav() {
     let targetRoute: string | null = null;
 
     if (!isAuthenticated) {
+      // Opened a shared profile link (e.g. a scanned follow code) while signed
+      // out on the web: remember it and go there after signing in.
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const m = window.location.pathname.match(/\/user\/([0-9a-f-]{36})\/?$/i);
+        if (m) {
+          try { window.sessionStorage.setItem(AFTER_SIGN_IN_KEY, `/user/${m[1]}${window.location.search || ''}`); } catch { /* private mode */ }
+        }
+      }
       if (!inAuthGroup) {
         targetRoute = '/welcome';
       }
@@ -122,6 +132,12 @@ function RootLayoutNav() {
     } else if (isAuthenticated && onboardingCompleted) {
       if (inOnboardingGroup || inAuthGroup || (!currentSegment && !inTabs)) {
         targetRoute = '/(tabs)/(home)';
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          try {
+            const next = window.sessionStorage.getItem(AFTER_SIGN_IN_KEY);
+            if (next) { window.sessionStorage.removeItem(AFTER_SIGN_IN_KEY); targetRoute = next; }
+          } catch { /* private mode */ }
+        }
       }
     }
 
