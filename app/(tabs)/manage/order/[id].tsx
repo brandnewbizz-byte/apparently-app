@@ -30,6 +30,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
 import { RequestPaymentSheet } from '@/components/PaymentRequest';
 import { useMyPaymentRequests, paymentForOrder, money, sellerGets } from '@/lib/payments';
+import { formatMoney } from '@/lib/listingCategories';
 
 const ACCENT = {
   purple: '#8B5CF6',
@@ -145,6 +146,8 @@ export default function OrderDetailScreen() {
     ...(payment?.status === 'paid' && payment.paid_at ? [{ status: 'paid', at: payment.paid_at }] : []),
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
+  // The tab bar floats over the bottom of the screen; keep the action buttons above it.
+  const tabBarH = (Platform.OS === 'ios' ? 56 : 52) + Math.max(insets.bottom, 0);
   const kind = KIND_COLOR[order.kind] || KIND_COLOR.bundle;
   const st = STATUS_STEP[order.status] || STATUS_STEP.requested;
   const isOpen = order.status === 'requested';
@@ -163,7 +166,7 @@ export default function OrderDetailScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarH + 110 }]} showsVerticalScrollIndicator={false}>
         {/* Status banner */}
         <View style={[styles.statusBanner, { backgroundColor: st.bg }]}>
           <View style={[styles.statusDot, { backgroundColor: st.fg }]} />
@@ -204,7 +207,7 @@ export default function OrderDetailScreen() {
               <Text style={[styles.itemTitle, { color: colors.text }]}>{order.itemTitle}</Text>
             </View>
             {typeof order.price === 'number' && order.price > 0 ? (
-              <Text style={[styles.itemPrice, { color: kind.fg }]}>${order.price}</Text>
+              <Text style={[styles.itemPrice, { color: kind.fg }]}>{formatMoney(order.price)}</Text>
             ) : null}
           </View>
         </View>
@@ -309,7 +312,7 @@ export default function OrderDetailScreen() {
 
       {/* Bottom actions */}
       {(isOpen || isActive) && (
-        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.background, borderTopColor: colors.border }]}>
+        <View style={[styles.bottomBar, { bottom: tabBarH, paddingBottom: 12, backgroundColor: colors.background, borderTopColor: colors.border }]}>
           {isOpen && (
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: ACCENT.purple }]} onPress={() => confirmAction('Accept', () => acceptOrder(order))}>
               <Check size={18} color="#fff" />
