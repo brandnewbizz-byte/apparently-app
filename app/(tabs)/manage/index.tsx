@@ -163,7 +163,7 @@ export default function ManageScreen() {
     try { await fn(); haptic('success'); } finally { setBusyOrder(null); }
   };
   const accept = (o: GrabOrder) => { haptic('medium'); runOrder(o, () => acceptOrder(o)); };
-  const decline = (o: GrabOrder) => confirm('Decline this grab?', `${o.buyerName} will be told, and the spot opens up for someone else.`, 'Decline', () => runOrder(o, () => declineOrder(o)), true);
+  const decline = (o: GrabOrder) => confirm('Decline this grab?', `${o.buyerName} will be told, and the spot opens up for someone else.`, 'Decline', () => runOrder(o, async () => { await declineOrder(o); reloadBundles(); reloadSkills(); }), true);
   const fulfill = (o: GrabOrder) => confirm('Mark as done?', `Confirms you delivered "${o.itemTitle}" to ${o.buyerName}.`, 'Mark done', () => runOrder(o, () => fulfillOrder(o)));
   const message = (o: GrabOrder) => { haptic(); router.push((o.buyerId ? `/inbox/conversation/${o.buyerId}` : '/inbox') as never); };
 

@@ -249,13 +249,38 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     [markOrder, setItemStatus, notifyBuyer]
   );
 
+  /**
+   * A declined grab gives its spot back: one less grab on the listing, and a
+   * listing that had closed because it was full opens again.
+   */
+  const releaseSpot = useCallback(async (order: GrabOrder) => {
+    const table = order.kind === 'bundle' ? 'bundles' : order.kind === 'skill' ? 'skill_deals' : null;
+    if (!table || !order.itemId || !user?.id) return;
+    try {
+      const { data, error } = await supabase.from(table).select('grabs, available_count, status').eq('id', order.itemId).maybeSingle();
+      if (error || !data) return;
+      const grabs = Math.max(Number(data.grabs) || 0, 0);
+      const spots = Math.max(Number(data.available_count) || (table === 'bundles' ? 1 : 20), 1);
+      if (grabs <= 0) return;
+      const patch: Record<string, unknown> = { grabs: grabs - 1 };
+      // It closed itself when it filled up, so reopen it now there's room.
+      if (data.status === 'paused' && grabs >= spots) patch.status = 'active';
+      const { error: upErr } = await supabase.from(table).update(patch).eq('id', order.itemId);
+      if (upErr) logger.warn('OrdersContext', 'releaseSpot failed', { error: upErr.message });
+    } catch (e) {
+      logger.warn('OrdersContext', 'releaseSpot failed', { e });
+    }
+  }, [user?.id]);
+
   const declineOrder = useCallback(
     async (order: GrabOrder) => {
+      const wasDeclined = order.status === 'declined';
       markOrder(order.id, 'declined');
       await setItemStatus(order, 'declined');
+      if (!wasDeclined) await releaseSpot(order);
       await notifyBuyer(order, 'declined', `Sorry — the order for "${order.itemTitle}" couldn't be accepted right now.`, '🙏');
     },
-    [markOrder, setItemStatus, notifyBuyer]
+    [markOrder, setItemStatus, notifyBuyer, releaseSpot]
   );
 
   const refresh = useCallback(() => {
