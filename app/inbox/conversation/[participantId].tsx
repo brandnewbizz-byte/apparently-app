@@ -1,5 +1,5 @@
 import { ChevronLeft, Phone, Video, BadgeCheck, Heart, MessageCircle, Mic, Play, Pause, Tag, Image as ImageIcon, Camera, Trash2, ArrowUp, Smile, DollarSign } from 'lucide-react-native';
-import { PaymentRequestCard, RequestPaymentSheet, type PaymentPrefill } from '@/components/PaymentRequest';
+import { PaymentRequestCard, PaymentReceiptCard, RequestPaymentSheet, type PaymentPrefill } from '@/components/PaymentRequest';
 import { useOrders } from '@/contexts/OrdersContext';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
@@ -662,13 +662,15 @@ export default function ConversationScreen() {
       );
     } else if (message.sharedPost) {
       body = renderSharedPost(message.sharedPost);
+    } else if (meta.payment_paid) {
+      body = <PaymentReceiptCard data={meta.payment_paid} isMe={isMe} otherName={(participant.name || 'They').split(' ')[0]} />;
     } else if (meta.payment_request) {
       body = <PaymentRequestCard data={meta.payment_request} isMe={isMe} returnPath={`/inbox/conversation/${participantId}`} />;
     } else if (offer) {
       body = renderOfferCard(offer);
     }
 
-    const bubbleContent = meta.payment_request ? null : meta.voice_note ? renderVoice(meta.voice_note, message, isMe) : text ? (
+    const bubbleContent = meta.payment_request || meta.payment_paid ? null : meta.voice_note ? renderVoice(meta.voice_note, message, isMe) : text ? (
       <Text style={[styles.msgText, { color: isMe ? '#FFFFFF' : colors.text }]}>{renderTextWithMentions(text, isMe)}</Text>
     ) : null;
 

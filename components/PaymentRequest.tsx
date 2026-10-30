@@ -80,6 +80,25 @@ export function PaymentRequestCard({ data, isMe, returnPath }: { data: { id: str
 }
 
 /** Sheet the seller fills in to ask for the agreed amount. */
+/** The receipt that shows up in the chat once a payment request is paid. */
+export function PaymentReceiptCard({ data, isMe, otherName }: { data: { amount_cents: number; title: string; paid_at?: string }; isMe: boolean; otherName: string }) {
+  const { colors } = useTheme();
+  const when = data.paid_at ? new Date(data.paid_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  return (
+    <View style={[s.receipt, { borderColor: '#16A34A' }]} testID="payment-receipt-card">
+      <View style={s.tagRow}>
+        <CheckCircle2 size={14} color="#16A34A" />
+        <Text style={[s.tag, { color: '#16A34A' }]}>{isMe ? 'You paid' : `${otherName} paid you`}</Text>
+      </View>
+      <Text style={[s.amount, { color: colors.text }]}>{money(data.amount_cents)}</Text>
+      <Text style={[s.title, { color: colors.textSecondary }]} numberOfLines={2}>{data.title}</Text>
+      <Text style={[s.fine, { color: colors.textTertiary, textAlign: 'left', marginTop: 8 }]}>
+        {isMe ? 'Paid by card through Apparently' : `You get about ${money(sellerGets(data.amount_cents))} after fees`}{when ? ` · ${when}` : ''}
+      </Text>
+    </View>
+  );
+}
+
 /** An order the request is for: fills in the agreed price and what it's for. */
 export interface PaymentPrefill { amount?: number; title?: string; itemId?: string; itemType?: string }
 
@@ -180,6 +199,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
 
 const s = StyleSheet.create({
   card: { width: 240, borderRadius: 18, borderWidth: 1.5, padding: 14 },
+  receipt: { width: 240, borderRadius: 18, borderWidth: 1.5, padding: 14, backgroundColor: 'rgba(22,163,74,0.06)' },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   tag: { fontSize: 12, fontWeight: '700' },
   amount: { fontSize: 30, fontWeight: '800', marginTop: 4 },

@@ -83,12 +83,34 @@ async function syncAccount(userId: string, accountId: string) {
   return { ...row, needs_info: due.length > 0 };
 }
 
-/** Mark a request paid (once) and tell the seller. */
+/** Put a "Paid" receipt into the buyer↔seller chat, as a message from the buyer. */
+async function postPaidMessage(pr: Record<string, any>, amount: string) {
+  const [pa, pb] = [pr.buyer_id, pr.seller_id].sort();
+  const now = new Date().toISOString();
+  let { data: conv } = await admin.from('conversations').select('id')
+    .or(`and(participant_one.eq.${pa},participant_two.eq.${pb}),and(participant_one.eq.${pb},participant_two.eq.${pa})`)
+    .limit(1).maybeSingle();
+  if (!conv) {
+    const { data: created } = await admin.from('conversations').insert({ participant_one: pa, participant_two: pb, last_message_at: now }).select('id').maybeSingle();
+    conv = created;
+  }
+  if (!conv?.id) return;
+  await admin.from('messages').insert({
+    conversation_id: conv.id, sender_id: pr.buyer_id, receiver_id: pr.seller_id,
+    content: `✅ Paid ${amount} for "${pr.title}"`, read: false,
+    metadata: { payment_paid: { id: pr.id, amount_cents: pr.amount_cents, title: pr.title, paid_at: now } },
+  });
+  await admin.from('conversations').update({ last_message_at: now }).eq('id', conv.id);
+}
+
+/** Mark a request paid (once), post the receipt in their chat, and tell the seller. */
 async function markPaid(pr: Record<string, any>, session: Record<string, any>) {
   const { data: changed } = await admin.from('payment_requests').update({
     status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: session.payment_intent || null,
   }).eq('id', pr.id).eq('status', 'requested').select('id');
   if (!changed || changed.length === 0) return; // someone else already marked it
+  const amountText = `$${(pr.amount_cents / 100).toFixed(pr.amount_cents % 100 === 0 ? 0 : 2)}`;
+  try { await postPaidMessage(pr, amountText); } catch (_) { /* best effort */ }
   try {
     const { data: buyer } = await admin.from('profiles').select('full_name, username, avatar').eq('id', pr.buyer_id).maybeSingle();
     const name = buyer?.full_name || buyer?.username || 'Someone';

@@ -42,6 +42,7 @@ function summarize(m: Message | undefined, myId: string): string {
   const meta: any = m.metadata || {};
   let body = (m.text || m.content || '').trim();
   if (meta.image) body = mine ? 'You sent a photo' : 'Sent a photo';
+  else if (meta.payment_paid) body = mine ? `You paid $${(meta.payment_paid.amount_cents / 100).toFixed(2).replace(/\.00$/, '')} ✅` : `Paid you $${(meta.payment_paid.amount_cents / 100).toFixed(2).replace(/\.00$/, '')} 💸`;
   else if (meta.payment_request) body = mine ? `You requested $${(meta.payment_request.amount_cents / 100).toFixed(2).replace(/\.00$/, '')}` : `Requested $${(meta.payment_request.amount_cents / 100).toFixed(2).replace(/\.00$/, '')} · tap to pay`;
   else if (meta.voice_note) body = mine ? 'You sent a voice message' : 'Sent a voice message';
   else if (meta.bundle_card) body = mine ? `You grabbed "${meta.bundle_card.title}"` : `Grabbed your bundle "${meta.bundle_card.title}"`;
