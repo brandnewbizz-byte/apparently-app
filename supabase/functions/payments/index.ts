@@ -17,7 +17,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.93.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const STRIPE_KEY = Deno.env.get('STRIPE_SECRET_KEY') || '';
+// Saved in the dashboard as Stripe_Secret_key; accept either spelling.
+const STRIPE_KEY = (Deno.env.get('STRIPE_SECRET_KEY') || Deno.env.get('Stripe_Secret_key') || '').trim();
 const FEE_PERCENT = Number(Deno.env.get('PLATFORM_FEE_PERCENT') || '10');
 const WEB_APP = 'https://apparentlyappdashboard.nationalcompliancehub.com/app';
 
