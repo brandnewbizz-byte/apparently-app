@@ -1,5 +1,6 @@
 import { useUsernameCheck } from '@/hooks/useUsernameCheck';
-import { USERNAME_MAX } from '@/constants/app';
+import { USERNAME_MAX, PRIVACY_POLICY_URL, TERMS_URL } from '@/constants/app';
+import { Linking } from 'react-native';
 import {
   ArrowRight, ArrowLeft, User, Lock, AtSign, AlertCircle, Eye, EyeOff, Mail, MailCheck, KeyRound, CheckCircle2,
 } from 'lucide-react-native';
@@ -463,7 +464,12 @@ export default function WelcomeScreen() {
             </Animated.View>
 
             {mode === 'signup' || mode === 'login' ? (
-              <Text style={styles.footerText}>By continuing, you agree to our Terms of Service and Privacy Policy.</Text>
+              <Text style={styles.footerText}>
+                By continuing, you agree to our{' '}
+                <Text style={styles.footerLink} onPress={() => Linking.openURL(TERMS_URL)} accessibilityRole="link">Terms of Use</Text>
+                {' '}(no tolerance for objectionable content or abuse) and{' '}
+                <Text style={styles.footerLink} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)} accessibilityRole="link">Privacy Policy</Text>.
+              </Text>
             ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
@@ -575,4 +581,5 @@ const styles = StyleSheet.create({
   doneBox: { alignItems: 'center', gap: 12, paddingVertical: 18 },
   doneText: { fontSize: 15, fontWeight: '600', color: C.text, textAlign: 'center' },
   footerText: { marginTop: 16, paddingHorizontal: 8, fontSize: 12, lineHeight: 18, color: C.textTertiary, textAlign: 'center' },
+  footerLink: { textDecorationLine: 'underline', fontWeight: '700' },
 });

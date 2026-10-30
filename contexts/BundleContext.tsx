@@ -131,6 +131,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
 
         // 1. Try backend API (service key bypasses RLS)
         try {
+          if (!getApiUrl()) throw new Error('no api server');
           const res = await fastFetch(`${getApiUrl()}/api/home-feed`);
           if (res.ok) {
             const json = await res.json();

@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/logger';
-import { initPurchases, onCustomerInfoChange, resetPurchasesUser } from '@/lib/purchases';
+import { initPurchases, onCustomerInfoChange, resetPurchasesUser, purchasesAvailable } from '@/lib/purchases';
 import { planFor, type PaywallReason, type Tier, type TierLimits } from '@/lib/plans';
 
 export interface PlanState {
@@ -54,7 +54,10 @@ const Ctx = createContext<SubscriptionValue | null>(null);
 function mapPlan(d: any): PlanState {
   return {
     loaded: true,
-    enforced: d?.enforced !== false,
+    // Only gate features where people can actually buy a plan on this device (App Store rule:
+    // never lock a feature behind a purchase that can't be made). Turns on by itself once the
+    // store key for this platform is set in constants/app.ts.
+    enforced: d?.enforced !== false && purchasesAvailable(),
     tier: (d?.tier || 'free') as Tier,
     status: d?.status || 'inactive',
     isTrial: !!d?.is_trial,
@@ -124,6 +127,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
   const spendAction = useCallback(async (action: CardAction, itemType: string, itemId: string) => {
     const p = planRef.current;
+    if (!purchasesAvailable()) return true;
     if (p.loaded && !p.enforced) return true;
     if (p.loaded && p.isAdmin) return true;
     const { data, error } = await supabase.rpc('use_card_action', { p_action: action, p_item_type: itemType, p_item_id: itemId });

@@ -5,6 +5,7 @@
  */
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { purchasesAvailable } from '@/lib/purchases';
 
 export class StorageFullError extends Error {
   constructor() { super('Your storage is full. Upgrade your plan for more space.'); this.name = 'StorageFullError'; }
@@ -14,6 +15,8 @@ let lastPaywall = 0;
 
 export async function ensureUploadSpace(bytes: number): Promise<void> {
   if (!bytes || bytes <= 0) return;
+  // No plans for sale on this device → nothing to upgrade to, so never block.
+  if (!purchasesAvailable()) return;
   const { data, error } = await supabase.rpc('can_upload', { p_bytes: Math.round(bytes) });
   if (error) return; // never block uploads on a check failure
   const r = data as { ok?: boolean; reason?: string } | null;

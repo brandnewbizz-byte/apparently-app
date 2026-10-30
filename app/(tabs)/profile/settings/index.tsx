@@ -20,7 +20,7 @@ import { feedStore } from '@/lib/feedEngine';
 import { VIBES } from '@/lib/vibes';
 import { getPayoutStatus } from '@/lib/payments';
 import { confirmAction, notify } from '@/lib/dialog';
-import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/app';
+import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, SUPPORT_URL, TERMS_URL } from '@/constants/app';
 import { SettingsPage, Group, Item, tap, DANGER } from '@/components/settings/SettingsUI';
 
 interface Entry {
@@ -83,7 +83,7 @@ export default function SettingsHome() {
     { key: 'picks', group: 'How you use Apparently', label: 'Your picks', keywords: 'home feed interests vibes preferences', icon: <Sparkles size={18} color={W} />, color: '#8B5CF6', value: picks || 'Choose', onPress: () => go('/picks?edit=1'), testID: 'settings-your-picks' },
     { key: 'appearance', group: 'How you use Apparently', label: 'Appearance', keywords: 'dark mode light theme display', icon: <Palette size={18} color={W} />, color: '#0EA5E9', value: themeLabel, onPress: () => go('/profile/settings/appearance'), testID: 'settings-appearance' },
     { key: 'blocked', group: 'Privacy & safety', label: 'Blocked accounts', keywords: 'block unblock privacy safety', icon: <ShieldOff size={18} color={W} />, color: '#475569', value: blockedUserIds.length ? String(blockedUserIds.length) : undefined, onPress: () => go('/profile/settings/blocked'), testID: 'settings-blocked' },
-    ...(SUPPORT_EMAIL ? [{ key: 'help', group: 'Support & about', label: 'Help & support', keywords: 'contact email help support problem', icon: <LifeBuoy size={18} color={W} />, color: '#06B6D4', onPress: () => openUrl(`mailto:${SUPPORT_EMAIL}`) }] : []),
+    ...(SUPPORT_EMAIL ? [{ key: 'help', group: 'Support & about', label: 'Help & support', keywords: 'contact email help support problem', icon: <LifeBuoy size={18} color={W} />, color: '#06B6D4', onPress: () => openUrl(SUPPORT_URL || `mailto:${SUPPORT_EMAIL}`) }] : []),
     ...(PRIVACY_POLICY_URL ? [{ key: 'privacy', group: 'Support & about', label: 'Privacy Policy', keywords: 'privacy policy legal data', icon: <Shield size={18} color={W} />, color: '#6366F1', onPress: () => openUrl(PRIVACY_POLICY_URL) }] : []),
     ...(TERMS_URL ? [{ key: 'terms', group: 'Support & about', label: 'Terms of Service', keywords: 'terms legal', icon: <FileText size={18} color={W} />, color: '#6366F1', onPress: () => openUrl(TERMS_URL) }] : []),
     { key: 'about', group: 'Support & about', label: 'About Apparently', keywords: 'version about app', icon: <Info size={18} color={W} />, color: '#94A3B8', value: `Version ${version}${build ? ` (${build})` : ''}` },

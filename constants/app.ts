@@ -3,9 +3,10 @@
  * Fill these in before submitting to the App Store / Play Store — both stores
  * require a privacy policy URL. Rows with an empty value are hidden.
  */
-export const SUPPORT_EMAIL = '';
-export const PRIVACY_POLICY_URL = '';
-export const TERMS_URL = '';
+export const SUPPORT_EMAIL = 'concierge@nationalcompliancehub.com';
+export const PRIVACY_POLICY_URL = 'https://apparentlyappdashboard.nationalcompliancehub.com/privacy.html';
+export const SUPPORT_URL = 'https://apparentlyappdashboard.nationalcompliancehub.com/support.html';
+export const TERMS_URL = 'https://apparentlyappdashboard.nationalcompliancehub.com/terms.html';
 
 /** Username rules — must match the `profiles_username_format` DB check. */
 export const USERNAME_MIN = 3;

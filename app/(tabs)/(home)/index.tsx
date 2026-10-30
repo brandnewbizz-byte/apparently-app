@@ -58,6 +58,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFeedStack, useNeedsPicks, type FeedStack } from '@/hooks/useFeedStack';
 import { vibesOf } from '@/lib/vibes';
 import type { HideReason } from '@/lib/feedEngine';
+import { notify } from '@/lib/dialog';
 import { planFor } from '@/lib/plans';
 import type { FeedItemInfo } from '@/lib/feedEngine';
 import { supabase } from '@/lib/supabase';
@@ -235,8 +236,46 @@ const WHY_NOT: { key: HideReason; label: string; skillLabel?: string }[] = [
 ];
 
 /** "Not interested" → one tap on why, so the feed changes the right thing. */
-function NotInterested({ onHide, noun, colors, testPrefix }: { onHide: (reason?: HideReason) => void; noun: string; colors: any; testPrefix: string }) {
+const REPORT_REASONS: { key: string; label: string }[] = [
+  { key: 'scam', label: 'Scam or fraud' },
+  { key: 'offensive', label: 'Offensive or inappropriate' },
+  { key: 'not_allowed', label: 'Illegal or not allowed' },
+  { key: 'spam', label: 'Spam or misleading' },
+];
+
+/** Report a bundle / skill deal to the moderators (reports.post_id = "<kind>:<id>"). */
+async function reportListing(kind: 'bundle' | 'skill', itemId: string, reason: string) {
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id;
+  if (!uid || !itemId) return false;
+  const { error } = await supabase.from('reports').insert({ post_id: `${kind}:${itemId}`, reported_by: uid, reason: `listing_${reason}` });
+  return !error;
+}
+
+function NotInterested({ onHide, noun, colors, testPrefix, itemId }: { onHide: (reason?: HideReason) => void; noun: string; colors: any; testPrefix: string; itemId?: string }) {
   const [asking, setAsking] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const report = async (reason: string) => {
+    setReporting(false); setAsking(false);
+    const ok = await reportListing(testPrefix === 'skill' ? 'skill' : 'bundle', itemId || '', reason);
+    notify(ok ? 'Thanks for reporting' : 'Couldn’t send your report', ok ? 'Our team reviews reports within 24 hours. We’ve hidden it for you.' : 'Please try again.');
+    if (ok) onHide();
+  };
+  if (reporting) {
+    return (
+      <View style={styles.whyNotWrap} testID={`${testPrefix}-report`}>
+        <Text style={[styles.whyNotTitle, { color: colors.textSecondary }]}>Why are you reporting this {noun}?</Text>
+        <View style={styles.whyNotRow}>
+          {REPORT_REASONS.map((r) => (
+            <TouchableOpacity key={r.key} onPress={() => report(r.key)} style={[styles.whyNotChip, { borderColor: colors.border, backgroundColor: colors.surface }]} testID={`${testPrefix}-report-${r.key}`}>
+              <Text style={[styles.whyNotChipText, { color: colors.text }]}>{r.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity onPress={() => setReporting(false)}><Text style={[styles.whyNotLink, { color: colors.textTertiary }]}>Cancel</Text></TouchableOpacity>
+      </View>
+    );
+  }
   if (!asking) {
     return (
       <TouchableOpacity onPress={() => setAsking(true)} style={styles.notInterestedBtn} accessibilityLabel={`Not interested in this ${noun}`} testID={`${testPrefix}-not-interested`}>
@@ -259,6 +298,8 @@ function NotInterested({ onHide, noun, colors, testPrefix }: { onHide: (reason?:
         <TouchableOpacity onPress={() => pick()} testID={`${testPrefix}-why-none`}><Text style={[styles.whyNotLink, { color: colors.textTertiary }]}>Just hide it</Text></TouchableOpacity>
         <Text style={{ color: colors.textTertiary }}>·</Text>
         <TouchableOpacity onPress={() => setAsking(false)} testID={`${testPrefix}-why-cancel`}><Text style={[styles.whyNotLink, { color: colors.textTertiary }]}>Keep it</Text></TouchableOpacity>
+        <Text style={{ color: colors.textTertiary }}>·</Text>
+        <TouchableOpacity onPress={() => setReporting(true)} testID={`${testPrefix}-why-report`}><Text style={[styles.whyNotLink, { color: '#EF4444' }]}>Report</Text></TouchableOpacity>
       </View>
     </View>
   );
@@ -561,7 +602,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
         </TouchableOpacity>
       </View>
 
-      <NotInterested key={currentBundle.id} onHide={hideBundle} noun="bundle" colors={colors} testPrefix="bundle" />
+      <NotInterested key={currentBundle.id} onHide={hideBundle} noun="bundle" colors={colors} testPrefix="bundle" itemId={currentBundle.id} />
 
       <View style={styles.swipeIndicator}>
         {limitedBundles.map((_, i) => (
@@ -920,7 +961,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
         </TouchableOpacity>
       </View>
 
-      <NotInterested key={currentSkill.id} onHide={hideSkill} noun="skill deal" colors={colors} testPrefix="skill" />
+      <NotInterested key={currentSkill.id} onHide={hideSkill} noun="skill deal" colors={colors} testPrefix="skill" itemId={currentSkill.id} />
 
       <View style={styles.skillSwipeIndicator}>
         {limitedSkills.map((_, i) => (
