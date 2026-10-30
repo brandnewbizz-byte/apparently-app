@@ -1499,7 +1499,7 @@ export default function HomeScreen() {
     Alert.alert(title, msg);
   };
 
-  const money = (n?: number) => (n ? `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '');
+  const money = (n?: number) => (n ? `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}` : '');
 
   // Every grab / skip / save spends one of the day's moves (see lib/plans.ts).
   const { spendAction, plan } = useSubscription();

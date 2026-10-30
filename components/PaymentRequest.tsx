@@ -86,7 +86,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
   prefill?: PaymentPrefill | null;
 }) {
   const { colors } = useTheme();
-  const [amount, setAmount] = useState(prefill?.amount ? String(Math.round(prefill.amount * 100) / 100) : '');
+  const [amount, setAmount] = useState(prefill?.amount ? (prefill.amount % 1 ? prefill.amount.toFixed(2) : String(prefill.amount)) : '');
   const [title, setTitle] = useState(prefill?.title?.slice(0, 120) || '');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState<boolean | null>(null);
