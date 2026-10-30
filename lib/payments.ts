@@ -77,7 +77,7 @@ export async function openStripePage(url: string): Promise<void> {
 
 export const getPayoutStatus = () => call<PayoutStatus>({ action: 'status' });
 
-export async function startPayoutSetup(returnPath = '/profile/settings') {
+export async function startPayoutSetup(returnPath = '/payouts') {
   const { url } = await call<{ url: string }>({ action: 'onboard', return_url: here(returnPath) });
   await openStripePage(url);
 }

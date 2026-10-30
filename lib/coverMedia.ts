@@ -1,3 +1,4 @@
+import { notify } from './dialog';
 import { Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -63,13 +64,7 @@ export async function uploadCover(cover: PickedCover | null, folder: string): Pr
 }
 
 /** A simple message box that also shows on the web (React Native's Alert does nothing there). */
-export function notify(title: string, message?: string) {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined') window.alert(message ? `${title}\n\n${message}` : title);
-    return;
-  }
-  Alert.alert(title, message);
-}
+export { notify };
 
 /** Ask before throwing away unsaved work. Works on web too. */
 export function confirmDiscard(message: string, onDiscard: () => void) {

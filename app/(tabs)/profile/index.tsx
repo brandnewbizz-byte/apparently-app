@@ -472,7 +472,7 @@ export default function ProfileScreen() {
           <View style={styles.identity}>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => router.push('/profile/settings' as any)}
+              onPress={() => router.push('/profile/settings/edit-profile' as any)}
               style={[styles.avatarRing, { backgroundColor: colors.background }]}
               accessibilityLabel="Change profile photo"
             >
@@ -492,7 +492,7 @@ export default function ProfileScreen() {
             {bio ? (
               <Text style={[styles.bio, { color: colors.textSecondary }]}>{bio}</Text>
             ) : (
-              <TouchableOpacity onPress={() => router.push('/profile/settings' as any)}>
+              <TouchableOpacity onPress={() => router.push('/profile/settings/edit-profile' as any)}>
                 <Text style={[styles.bio, { color: colors.accent, fontWeight: '600' }]}>+ Add a bio</Text>
               </TouchableOpacity>
             )}
@@ -515,7 +515,7 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.buttons}>
-              <TouchableOpacity style={[styles.btn, { backgroundColor: colors.surfaceHighlight }]} onPress={() => router.push('/profile/settings' as any)}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: colors.surfaceHighlight }]} onPress={() => router.push('/profile/settings/edit-profile' as any)}>
                 <Edit3 size={15} color={colors.text} />
                 <Text style={[styles.btnText, { color: colors.text }]}>Edit profile</Text>
               </TouchableOpacity>
