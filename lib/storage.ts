@@ -6,6 +6,7 @@
  * `EncodingType` functions — they throw at runtime. We use the new `File`
  * class API (`new File(uri).bytes()` / `.base64()`) instead.
  */
+import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { isLocalFileUri, safeImageUrl } from './media';
 import { ensureUploadSpace, StorageFullError } from './uploadQuota';
@@ -27,6 +28,40 @@ function fileExtension(uri: string): string {
   return m ? m[1].toLowerCase() : '';
 }
 
+/**
+ * On the web, a picked photo or video is a `blob:` (or `data:`) URL that only
+ * lives in this browser tab. It has to be uploaded like a device file.
+ */
+export function isWebLocalUri(uri: string | null | undefined): boolean {
+  return Platform.OS === 'web' && !!uri && (uri.startsWith('blob:') || uri.startsWith('data:'));
+}
+
+const EXT_FOR_MIME: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic',
+  'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/x-m4v': 'm4v',
+};
+
+/** Upload a browser blob:/data: URL to Storage; returns the public URL (throws on failure). */
+async function uploadWebUri(uri: string, bucket: string, folder: string, kind: 'image' | 'video', retries = 3): Promise<string> {
+  const blob = await (await fetch(uri)).blob();
+  const type = blob.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
+  try { await ensureUploadSpace(blob.size || 0); } catch (e) { if (e instanceof StorageFullError) throw e; }
+  const ext = EXT_FOR_MIME[type] || (kind === 'video' ? 'mp4' : 'jpg');
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const { data, error } = await supabase.storage.from(bucket).upload(path, blob, { contentType: type, upsert: true });
+      if (error) throw error;
+      return supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
+    } catch (e) {
+      lastError = e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 500));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Upload failed.');
+}
+
 /** Local file:// URIs that should be uploaded to Supabase Storage instead of stored directly */
 export function shouldUploadToStorage(uri: string | null | undefined): boolean {
   if (!uri) return false;
@@ -45,6 +80,13 @@ export async function uploadImageToStorage(
   retries = 3,
   contentType: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
+  if (isWebLocalUri(localUri)) {
+    try { return await uploadWebUri(localUri, bucket, folder, 'image', retries); } catch (e) {
+      if (e instanceof StorageFullError) throw e;
+      console.warn('[storage] web upload failed:', e);
+      return localUri;
+    }
+  }
   // Safety: never proceed with remote URIs
   if (!isLocalFileUri(localUri)) return localUri;
 
@@ -101,6 +143,13 @@ export async function uploadVideoToStorage(
   folder: string,
   retries = 3,
 ): Promise<string> {
+  if (isWebLocalUri(localUri)) {
+    try { return await uploadWebUri(localUri, bucket, folder, 'video', retries); } catch (e) {
+      if (e instanceof StorageFullError) throw e;
+      console.warn('[storage] web video upload failed:', e);
+      return localUri;
+    }
+  }
   if (!isLocalFileUri(localUri)) return localUri;
 
   const { File } = await import('expo-file-system');
@@ -155,6 +204,13 @@ export async function persistableImageUri(
   bucket: string,
   folder: string,
 ): Promise<string | undefined> {
+  if (localUri && isWebLocalUri(localUri)) {
+    try { return await uploadWebUri(localUri, bucket, folder, 'image'); } catch (e) {
+      if (e instanceof StorageFullError) throw e;
+      // A data: URL can still be stored as-is; a blob: URL dies with the tab.
+      return localUri.startsWith('data:image/') ? localUri : undefined;
+    }
+  }
   if (!localUri || !isLocalFileUri(localUri)) {
     // Already remote/data URI — pass through safe.
     return safeImageUrl(localUri) ?? undefined;

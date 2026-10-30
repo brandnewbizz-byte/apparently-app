@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +13,7 @@ import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSkills, type UserSkill } from '@/contexts/SkillContext';
 import { Section, Field, CategoryGrid, Pills, Stepper, CoverPicker, TagEditor, ReadyList } from '@/components/builder/BuilderKit';
 import { SkillPreview } from '@/components/builder/ListingPreview';
-import { pickCover, uploadCover, confirmDiscard, type PickedCover } from '@/lib/coverMedia';
+import { pickCover, uploadCover, confirmDiscard, notify, type PickedCover } from '@/lib/coverMedia';
 import {
   TAG_IDEAS, SKILL_EMOJIS, DEAL_LENGTHS, categoryMeta, cleanMoneyInput, parseMoney, formatMoney,
 } from '@/lib/listingCategories';
@@ -133,7 +133,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
       imageUrl = (await uploadCover(cover, `skills/${user?.id || 'anon'}`)).imageUrl;
     } catch (e) {
       setSaving(null);
-      Alert.alert('Cover didn’t upload', `${e instanceof Error ? e.message : 'Upload failed.'} Try again, or remove the cover to post without one.`);
+      notify('Cover didn’t upload', `${e instanceof Error ? e.message : 'Upload failed.'} Try again, or remove the cover to post without one.`);
       return;
     }
     setSaving('save');
@@ -167,7 +167,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
       });
       if (!res.success) {
         setSaving(null);
-        Alert.alert('Can’t post right now', res.error || 'Please try again.');
+        notify('Can’t post right now', res.error || 'Please try again.');
         return;
       }
     }

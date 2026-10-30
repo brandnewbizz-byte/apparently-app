@@ -28,7 +28,7 @@ export async function pickCover(allowVideo: boolean): Promise<PickedCover | null
   const a = result.assets[0];
   if (a.type === 'video') {
     if (a.duration && a.duration > MAX_VIDEO_MS) {
-      Alert.alert('Video too long', 'Pick a video under 60 seconds.');
+      notify('Video too long', 'Pick a video under 60 seconds.');
       return null;
     }
     return { uri: a.uri, type: 'video' };
@@ -60,6 +60,15 @@ export async function uploadCover(cover: PickedCover | null, folder: string): Pr
   const imageUrl = (await persistableImageUri(cover.uri, 'user-media', folder)) || '';
   if (!imageUrl) throw new Error('The photo could not be uploaded.');
   return { imageUrl };
+}
+
+/** A simple message box that also shows on the web (React Native's Alert does nothing there). */
+export function notify(title: string, message?: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') window.alert(message ? `${title}\n\n${message}` : title);
+    return;
+  }
+  Alert.alert(title, message);
 }
 
 /** Ask before throwing away unsaved work. Works on web too. */

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +13,7 @@ import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useBundles, type BundleItem, type UserBundle } from '@/contexts/BundleContext';
 import { Section, Field, CategoryGrid, Pills, Stepper, CoverPicker, TagEditor, ReadyList } from '@/components/builder/BuilderKit';
 import { BundlePreview } from '@/components/builder/ListingPreview';
-import { pickCover, uploadCover, confirmDiscard, type PickedCover } from '@/lib/coverMedia';
+import { pickCover, uploadCover, confirmDiscard, notify, type PickedCover } from '@/lib/coverMedia';
 import { TAG_IDEAS, WHEN_IDEAS, cleanMoneyInput, parseMoney, formatMoney } from '@/lib/listingCategories';
 import { VIBES, isVibeTag, vibeTag, type VibeKey } from '@/lib/vibes';
 import { isVideoUrl } from '@/lib/media';
@@ -136,7 +136,7 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
       media = await uploadCover(cover, `bundles/${user?.id || 'anon'}`);
     } catch (e) {
       setSaving(null);
-      Alert.alert('Cover didn’t upload', `${e instanceof Error ? e.message : 'Upload failed.'} Try again, or remove the cover to post without one.`);
+      notify('Cover didn’t upload', `${e instanceof Error ? e.message : 'Upload failed.'} Try again, or remove the cover to post without one.`);
       return;
     }
     setSaving('save');
@@ -180,7 +180,7 @@ function BundleForm({ editing, initialNotes }: { editing?: UserBundle; initialNo
       });
       if (!res.success) {
         setSaving(null);
-        Alert.alert('Can’t post right now', res.error || 'Please try again.');
+        notify('Can’t post right now', res.error || 'Please try again.');
         return;
       }
       savedId = res.id;
