@@ -25,7 +25,7 @@ import { useSocial } from '@/contexts/SocialContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { formatGB, planFor } from '@/lib/plans';
 import { manageSubscriptionsUrl, restore as restorePurchases } from '@/lib/purchases';
-import { Crown, RotateCcw, CreditCard, Sparkles } from 'lucide-react-native';
+import { Crown, RotateCcw, CreditCard, Sparkles, Banknote } from 'lucide-react-native';
 import { feedStore } from '@/lib/feedEngine';
 import { VIBES } from '@/lib/vibes';
 
@@ -514,6 +514,18 @@ export default function SettingsScreen() {
               onPress={() => { tap(); router.push('/picks?edit=1' as never); }}
               last
               testID="settings-your-picks"
+            />
+          </Section>
+
+          <Section colors={colors} title="PAYMENTS">
+            <Row
+              colors={colors}
+              icon={<Banknote size={18} color={colors.accent} />}
+              label="Get paid"
+              value="Set up payouts to take payments in chat"
+              onPress={() => { tap(); router.push('/payouts' as never); }}
+              last
+              testID="settings-get-paid"
             />
           </Section>
 

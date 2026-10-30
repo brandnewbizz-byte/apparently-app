@@ -189,6 +189,7 @@ function RootLayoutNav() {
     />
     <Stack.Screen name="notifications" options={{ headerShown: false }} />
     <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
+    <Stack.Screen name="payouts" options={{ headerShown: false }} />
     <Stack.Screen name="picks" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     </Stack>
   );

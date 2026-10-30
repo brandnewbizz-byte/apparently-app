@@ -1,0 +1,182 @@
+// In-app payments between members, with Stripe Connect (Express accounts,
+// destination charges). The signed-in user's JWT says who is calling.
+//
+// POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled }
+// POST { action: 'onboard', return_url }          -> { url }  Stripe-hosted payout setup for the caller
+// POST { action: 'dashboard' }                    -> { url }  Stripe Express dashboard (payouts, balance)
+// POST { action: 'checkout', request_id, return_url } -> { url }  buyer pays a payment request
+// POST { action: 'confirm', request_id }          -> { status } re-check a request with Stripe, mark it paid
+//
+// Needs the secret STRIPE_SECRET_KEY (the platform's Stripe key, with Connect turned on).
+// Apparently's fee: PLATFORM_FEE_PERCENT (default 10) of each payment, taken by Stripe
+// automatically; the rest goes to the seller's bank.
+import { createClient } from 'npm:@supabase/supabase-js@2.93.1';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const STRIPE_KEY = Deno.env.get('STRIPE_SECRET_KEY') || '';
+const FEE_PERCENT = Number(Deno.env.get('PLATFORM_FEE_PERCENT') || '10');
+const WEB_APP = 'https://apparentlyappdashboard.nationalcompliancehub.com/app';
+
+const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+/** Only send people back to our own app (web, or the native app's scheme). */
+function safeReturn(url: unknown, fallback: string): string {
+  if (typeof url !== 'string') return fallback;
+  if (url.startsWith(WEB_APP) || url.startsWith('rork-app://') || url.startsWith('exp://')) return url;
+  return fallback;
+}
+
+function form(params: Record<string, unknown>, prefix = ''): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (typeof v === 'object' && !Array.isArray(v)) out.push(...form(v as Record<string, unknown>, key));
+    else if (Array.isArray(v)) v.forEach((item, i) => {
+      if (typeof item === 'object') out.push(...form(item as Record<string, unknown>, `${key}[${i}]`));
+      else out.push(`${encodeURIComponent(`${key}[${i}]`)}=${encodeURIComponent(String(item))}`);
+    });
+    else out.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`);
+  }
+  return out;
+}
+
+async function stripe(method: 'GET' | 'POST', path: string, params?: Record<string, unknown>) {
+  const body = params ? form(params).join('&') : undefined;
+  const res = await fetch(`https://api.stripe.com/v1/${path}${method === 'GET' && body ? `?${body}` : ''}`, {
+    method,
+    headers: { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: method === 'POST' ? body : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || `Stripe ${res.status}`);
+  return data;
+}
+
+async function syncAccount(userId: string, accountId: string) {
+  const acct = await stripe('GET', `accounts/${accountId}`);
+  const row = {
+    user_id: userId, stripe_account_id: accountId,
+    charges_enabled: !!acct.charges_enabled, payouts_enabled: !!acct.payouts_enabled,
+    details_submitted: !!acct.details_submitted, updated_at: new Date().toISOString(),
+  };
+  await admin.from('payout_accounts').upsert(row, { onConflict: 'user_id' });
+  return row;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
+  if (!STRIPE_KEY) return json({ error: 'payments_not_configured' }, 503);
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  const { data: auth } = await admin.auth.getUser(token);
+  const user = auth?.user;
+  if (!user) return json({ error: 'not_signed_in' }, 401);
+
+  let body: Record<string, unknown> = {};
+  try { body = await req.json(); } catch { /* empty */ }
+  const action = String(body.action || '');
+
+  try {
+    const { data: existing } = await admin.from('payout_accounts').select('*').eq('user_id', user.id).maybeSingle();
+
+    if (action === 'status') {
+      if (!existing) return json({ connected: false, charges_enabled: false, payouts_enabled: false });
+      const row = await syncAccount(user.id, existing.stripe_account_id);
+      return json({ connected: true, charges_enabled: row.charges_enabled, payouts_enabled: row.payouts_enabled });
+    }
+
+    if (action === 'onboard') {
+      let accountId = existing?.stripe_account_id as string | undefined;
+      if (!accountId) {
+        const acct = await stripe('POST', 'accounts', {
+          type: 'express', country: 'US', email: user.email,
+          capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+          business_profile: { product_description: 'Services and packages sold on Apparently' },
+          metadata: { apparently_user_id: user.id },
+        });
+        accountId = acct.id as string;
+        await admin.from('payout_accounts').upsert({ user_id: user.id, stripe_account_id: accountId, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      }
+      const back = safeReturn(body.return_url, `${WEB_APP}/payouts`);
+      const link = await stripe('POST', 'account_links', {
+        account: accountId, type: 'account_onboarding', refresh_url: back, return_url: back,
+      });
+      return json({ url: link.url });
+    }
+
+    if (action === 'dashboard') {
+      if (!existing) return json({ error: 'no_payout_account' }, 400);
+      const link = await stripe('POST', `accounts/${existing.stripe_account_id}/login_links`);
+      return json({ url: link.url });
+    }
+
+    if (action === 'checkout' || action === 'confirm') {
+      const requestId = String(body.request_id || '');
+      const { data: pr } = await admin.from('payment_requests').select('*').eq('id', requestId).maybeSingle();
+      if (!pr || (pr.buyer_id !== user.id && pr.seller_id !== user.id)) return json({ error: 'not_found' }, 404);
+
+      if (action === 'confirm') {
+        if (pr.status !== 'requested' || !pr.checkout_session_id) return json({ status: pr.status });
+        const session = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`);
+        if (session.payment_status === 'paid') {
+          await admin.from('payment_requests').update({
+            status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: session.payment_intent || null,
+          }).eq('id', pr.id).eq('status', 'requested');
+          return json({ status: 'paid' });
+        }
+        return json({ status: pr.status });
+      }
+
+      // checkout: only the buyer pays an open request
+      if (pr.buyer_id !== user.id) return json({ error: 'only_buyer_pays' }, 403);
+      if (pr.status !== 'requested') return json({ error: `already_${pr.status}` }, 409);
+      // A checkout opened earlier may already have gone through.
+      if (pr.checkout_session_id) {
+        const prev = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`);
+        if (prev.payment_status === 'paid') {
+          await admin.from('payment_requests').update({ status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: prev.payment_intent || null }).eq('id', pr.id).eq('status', 'requested');
+          return json({ error: 'already_paid' }, 409);
+        }
+        if (prev.status === 'open' && prev.url) return json({ url: prev.url });
+      }
+      const { data: seller } = await admin.from('payout_accounts').select('*').eq('user_id', pr.seller_id).maybeSingle();
+      if (!seller) return json({ error: 'seller_not_ready' }, 409);
+      const fresh = await syncAccount(pr.seller_id, seller.stripe_account_id);
+      if (!fresh.charges_enabled) return json({ error: 'seller_not_ready' }, 409);
+
+      const fee = Math.round(pr.amount_cents * FEE_PERCENT / 100);
+      const back = safeReturn(body.return_url, `${WEB_APP}/inbox`);
+      const sep = back.includes('?') ? '&' : '?';
+      const session = await stripe('POST', 'checkout/sessions', {
+        mode: 'payment',
+        line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: pr.amount_cents, product_data: { name: pr.title.slice(0, 120) } } }],
+        payment_intent_data: {
+          application_fee_amount: fee,
+          transfer_data: { destination: seller.stripe_account_id },
+          description: `Apparently: ${pr.title}`.slice(0, 200),
+          metadata: { payment_request_id: pr.id, seller_id: pr.seller_id, buyer_id: pr.buyer_id },
+        },
+        customer_email: user.email,
+        client_reference_id: pr.id,
+        metadata: { payment_request_id: pr.id },
+        success_url: `${back}${sep}paid=${pr.id}`,
+        cancel_url: back,
+      });
+      await admin.from('payment_requests').update({ checkout_session_id: session.id, fee_cents: fee }).eq('id', pr.id);
+      return json({ url: session.url });
+    }
+
+    return json({ error: 'unknown_action' }, 400);
+  } catch (e) {
+    return json({ error: 'stripe_error', message: String((e as Error).message || e) }, 502);
+  }
+});

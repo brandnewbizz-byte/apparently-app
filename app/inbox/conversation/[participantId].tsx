@@ -1,4 +1,5 @@
-import { ChevronLeft, Phone, Video, BadgeCheck, Heart, MessageCircle, Mic, Play, Pause, Tag, Image as ImageIcon, Camera, Trash2, ArrowUp, Smile } from 'lucide-react-native';
+import { ChevronLeft, Phone, Video, BadgeCheck, Heart, MessageCircle, Mic, Play, Pause, Tag, Image as ImageIcon, Camera, Trash2, ArrowUp, Smile, DollarSign } from 'lucide-react-native';
+import { PaymentRequestCard, RequestPaymentSheet } from '@/components/PaymentRequest';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
@@ -85,6 +86,7 @@ export default function ConversationScreen() {
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUrlCache, setImageUrlCache] = useState<Record<string, string>>({});
   const [viewerImage, setViewerImage] = useState<string | null>(null);
+  const [showPaySheet, setShowPaySheet] = useState(false);
   // The recorder must be built from full recording options (useAudioRecorder
   // flattens them per platform). It used to be created with `{}`, which the
   // Android native side rejects (no file extension) — so recording always
@@ -651,11 +653,13 @@ export default function ConversationScreen() {
       );
     } else if (message.sharedPost) {
       body = renderSharedPost(message.sharedPost);
+    } else if (meta.payment_request) {
+      body = <PaymentRequestCard data={meta.payment_request} isMe={isMe} returnPath={`/inbox/conversation/${participantId}`} />;
     } else if (offer) {
       body = renderOfferCard(offer);
     }
 
-    const bubbleContent = meta.voice_note ? renderVoice(meta.voice_note, message, isMe) : text ? (
+    const bubbleContent = meta.payment_request ? null : meta.voice_note ? renderVoice(meta.voice_note, message, isMe) : text ? (
       <Text style={[styles.msgText, { color: isMe ? '#FFFFFF' : colors.text }]}>{renderTextWithMentions(text, isMe)}</Text>
     ) : null;
 
@@ -865,6 +869,9 @@ export default function ConversationScreen() {
                   </TouchableOpacity>
                 ) : (
                   <View style={styles.composerIcons}>
+                    <TouchableOpacity onPress={() => setShowPaySheet(true)} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Request payment" testID="chat-request-payment">
+                      <DollarSign size={23} color={colors.text} strokeWidth={1.9} />
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={startRecording} disabled={voiceSending} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }} accessibilityLabel="Record voice message">
                       <Mic size={23} color={voiceSending ? colors.textTertiary : colors.text} strokeWidth={1.9} />
                     </TouchableOpacity>
@@ -887,6 +894,14 @@ export default function ConversationScreen() {
           {voiceSending && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending voice note…</Text>}
         </View>
       </KeyboardAvoidingView>
+
+      <RequestPaymentSheet
+        visible={showPaySheet}
+        onClose={() => setShowPaySheet(false)}
+        buyerId={participantId || ''}
+        buyerName={participant.name || 'them'}
+        onSent={(r) => { if (participantId) sendMessage(participantId, `Payment request: $${(r.amount_cents / 100).toFixed(2)} for ${r.title}`, undefined, { payment_request: r }); }}
+      />
 
       <Modal visible={!!viewerImage} transparent animationType="fade" onRequestClose={() => setViewerImage(null)}>
         <View style={styles.viewerBackdrop}>
