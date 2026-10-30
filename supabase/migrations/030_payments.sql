@@ -1,7 +1,7 @@
--- In-app payments between members (Stripe Connect, destination charges).
+-- In-app payments between members (Stripe Connect, direct charges on the seller's account).
 -- A seller links a Stripe Express account once (payout_accounts), then sends a
 -- payment request in a chat (payment_requests). The buyer pays on Stripe
--- Checkout; Stripe sends the money to the seller minus Apparently's 10% fee.
+-- Checkout on the seller's account; Apparently takes a 10% application fee.
 -- Only the `payments` edge function (service role) marks requests paid and
 -- writes payout accounts.
 

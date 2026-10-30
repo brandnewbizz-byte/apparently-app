@@ -98,7 +98,11 @@ export async function confirmPaymentRequest(id: string): Promise<PaymentStatus> 
 }
 
 export const money = (cents: number) => `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
-export const sellerGets = (cents: number) => cents - Math.round(cents * PLATFORM_FEE_PERCENT / 100);
+/** Stripe's US card fee, paid by the seller (sellers are the merchant on their own sales). */
+export const STRIPE_FEE = { percent: 2.9, fixedCents: 30 };
+/** About what the seller keeps: the price minus Apparently's fee and Stripe's card fee. */
+export const sellerGets = (cents: number) =>
+  Math.max(0, cents - Math.round(cents * PLATFORM_FEE_PERCENT / 100) - Math.round(cents * STRIPE_FEE.percent / 100) - STRIPE_FEE.fixedCents);
 
 /** Live status of one request (refreshes when asked, and every 15s while it's open). */
 export function usePaymentRequest(id?: string) {

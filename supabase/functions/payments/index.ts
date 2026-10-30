@@ -1,5 +1,7 @@
-// In-app payments between members, with Stripe Connect (Express accounts,
-// destination charges). The signed-in user's JWT says who is calling.
+// In-app payments between members, with Stripe Connect: direct charges on the
+// seller's own connected account (Express Dashboard, Stripe-managed risk), so the
+// seller is the merchant, handles their own refunds/disputes, and pays Stripe's
+// card fee; Apparently takes an application fee. The signed-in user's JWT says who is calling.
 //
 // POST { action: 'status' }                       -> { connected, charges_enabled, payouts_enabled }
 // POST { action: 'onboard', return_url }          -> { url }  Stripe-hosted payout setup for the caller
@@ -8,8 +10,8 @@
 // POST { action: 'confirm', request_id }          -> { status } re-check a request with Stripe, mark it paid
 //
 // Needs the secret STRIPE_SECRET_KEY (the platform's Stripe key, with Connect turned on).
-// Apparently's fee: PLATFORM_FEE_PERCENT (default 10) of each payment, taken by Stripe
-// automatically; the rest goes to the seller's bank.
+// Apparently's fee: PLATFORM_FEE_PERCENT (default 10) of each payment, sent to the
+// platform automatically; the seller keeps the rest minus Stripe's card fee.
 import { createClient } from 'npm:@supabase/supabase-js@2.93.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -48,11 +50,13 @@ function form(params: Record<string, unknown>, prefix = ''): string[] {
   return out;
 }
 
-async function stripe(method: 'GET' | 'POST', path: string, params?: Record<string, unknown>) {
+async function stripe(method: 'GET' | 'POST', path: string, params?: Record<string, unknown>, onAccount?: string) {
   const body = params ? form(params).join('&') : undefined;
+  const headers: Record<string, string> = { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (onAccount) headers['Stripe-Account'] = onAccount;
   const res = await fetch(`https://api.stripe.com/v1/${path}${method === 'GET' && body ? `?${body}` : ''}`, {
     method,
-    headers: { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers,
     body: method === 'POST' ? body : undefined,
   });
   const data = await res.json();
@@ -98,7 +102,9 @@ Deno.serve(async (req) => {
       let accountId = existing?.stripe_account_id as string | undefined;
       if (!accountId) {
         const acct = await stripe('POST', 'accounts', {
-          type: 'express', country: 'US', email: user.email,
+          country: 'US', email: user.email,
+          // Express Dashboard; the seller pays Stripe's fees; Stripe manages risk and covers losses.
+          controller: { stripe_dashboard: { type: 'express' }, fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe' },
           capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
           business_profile: { product_description: 'Services and packages sold on Apparently' },
           metadata: { apparently_user_id: user.id },
@@ -123,10 +129,12 @@ Deno.serve(async (req) => {
       const requestId = String(body.request_id || '');
       const { data: pr } = await admin.from('payment_requests').select('*').eq('id', requestId).maybeSingle();
       if (!pr || (pr.buyer_id !== user.id && pr.seller_id !== user.id)) return json({ error: 'not_found' }, 404);
+      const { data: seller } = await admin.from('payout_accounts').select('*').eq('user_id', pr.seller_id).maybeSingle();
+      const sellerAcct = seller?.stripe_account_id as string | undefined;
 
       if (action === 'confirm') {
-        if (pr.status !== 'requested' || !pr.checkout_session_id) return json({ status: pr.status });
-        const session = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`);
+        if (pr.status !== 'requested' || !pr.checkout_session_id || !sellerAcct) return json({ status: pr.status });
+        const session = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`, undefined, sellerAcct);
         if (session.payment_status === 'paid') {
           await admin.from('payment_requests').update({
             status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: session.payment_intent || null,
@@ -140,17 +148,16 @@ Deno.serve(async (req) => {
       if (pr.buyer_id !== user.id) return json({ error: 'only_buyer_pays' }, 403);
       if (pr.status !== 'requested') return json({ error: `already_${pr.status}` }, 409);
       // A checkout opened earlier may already have gone through.
+      if (!sellerAcct) return json({ error: 'seller_not_ready' }, 409);
       if (pr.checkout_session_id) {
-        const prev = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`);
+        const prev = await stripe('GET', `checkout/sessions/${pr.checkout_session_id}`, undefined, sellerAcct);
         if (prev.payment_status === 'paid') {
           await admin.from('payment_requests').update({ status: 'paid', paid_at: new Date().toISOString(), payment_intent_id: prev.payment_intent || null }).eq('id', pr.id).eq('status', 'requested');
           return json({ error: 'already_paid' }, 409);
         }
         if (prev.status === 'open' && prev.url) return json({ url: prev.url });
       }
-      const { data: seller } = await admin.from('payout_accounts').select('*').eq('user_id', pr.seller_id).maybeSingle();
-      if (!seller) return json({ error: 'seller_not_ready' }, 409);
-      const fresh = await syncAccount(pr.seller_id, seller.stripe_account_id);
+      const fresh = await syncAccount(pr.seller_id, sellerAcct);
       if (!fresh.charges_enabled) return json({ error: 'seller_not_ready' }, 409);
 
       const fee = Math.round(pr.amount_cents * FEE_PERCENT / 100);
@@ -161,7 +168,6 @@ Deno.serve(async (req) => {
         line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: pr.amount_cents, product_data: { name: pr.title.slice(0, 120) } } }],
         payment_intent_data: {
           application_fee_amount: fee,
-          transfer_data: { destination: seller.stripe_account_id },
           description: `Apparently: ${pr.title}`.slice(0, 200),
           metadata: { payment_request_id: pr.id, seller_id: pr.seller_id, buyer_id: pr.buyer_id },
         },
@@ -170,7 +176,7 @@ Deno.serve(async (req) => {
         metadata: { payment_request_id: pr.id },
         success_url: `${back}${sep}paid=${pr.id}`,
         cancel_url: back,
-      });
+      }, sellerAcct);
       await admin.from('payment_requests').update({ checkout_session_id: session.id, fee_cents: fee }).eq('id', pr.id);
       return json({ url: session.url });
     }

@@ -39,7 +39,7 @@ export default function PayoutsScreen() {
         <View style={[s.icon, { backgroundColor: colors.accentGlow }]}><Banknote size={34} color={colors.accent} /></View>
         <Text style={[s.title, { color: colors.text }]}>Get paid for your bundles and skill deals</Text>
         <Text style={[s.body, { color: colors.textSecondary }]}>
-          When you agree on a price with someone, tap $ in your chat to send them a payment request. They pay by card in the app, and Stripe sends the money to your bank. Apparently keeps {PLATFORM_FEE_PERCENT}%.
+          When you agree on a price with someone, tap $ in your chat to send them a payment request. They pay by card in the app, and Stripe sends the money to your bank. Apparently keeps {PLATFORM_FEE_PERCENT}%, and Stripe’s card fee (2.9% + 30¢) comes out of each payment. You handle any refunds from your Stripe dashboard.
         </Text>
         {st === null ? <ActivityIndicator color={colors.accent} /> : ready ? (
           <>

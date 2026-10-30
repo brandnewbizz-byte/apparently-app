@@ -57,12 +57,12 @@ export function PaymentRequestCard({ data, isMe, returnPath }: { data: { id: str
       <Text style={[s.title, { color: colors.textSecondary }]} numberOfLines={2}>{req?.title || data.title}</Text>
 
       {paid ? (
-        <View style={s.paidRow}><CheckCircle2 size={18} color="#16A34A" /><Text style={s.paidText}>Paid{iAmSeller ? ` · you get ${money(sellerGets(amount))}` : ''}</Text></View>
+        <View style={s.paidRow}><CheckCircle2 size={18} color="#16A34A" /><Text style={s.paidText}>Paid{iAmSeller ? ` · you get about ${money(sellerGets(amount))}` : ''}</Text></View>
       ) : canceled ? (
         <Text style={[s.note, { color: colors.textTertiary }]}>Canceled</Text>
       ) : iAmSeller ? (
         <View style={{ gap: 6, marginTop: 8 }}>
-          <Text style={[s.note, { color: colors.textSecondary }]}>Waiting for payment · you’ll get {money(sellerGets(amount))}</Text>
+          <Text style={[s.note, { color: colors.textSecondary }]}>Waiting for payment · you’ll get about {money(sellerGets(amount))}</Text>
           <TouchableOpacity onPress={cancel} disabled={busy}><Text style={[s.link, { color: colors.textTertiary }]}>Cancel request</Text></TouchableOpacity>
         </View>
       ) : (
@@ -148,7 +148,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
               />
               {value > 0 && (
                 <Text style={[s.note, { color: colors.textSecondary }]}>
-                  You’ll get {money(sellerGets(cents))} after Apparently’s {PLATFORM_FEE_PERCENT}% fee.
+                  You’ll get about {money(sellerGets(cents))} after Apparently’s {PLATFORM_FEE_PERCENT}% fee and Stripe’s card fee.
                 </Text>
               )}
               <TouchableOpacity style={[s.payBtn, { backgroundColor: colors.accent, opacity: valid && !busy ? 1 : 0.5 }]} onPress={send} disabled={!valid || busy} testID="send-request">
