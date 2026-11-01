@@ -440,7 +440,11 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
           setUltraWideLens(ULTRA_WIDE_LENSES.find((t) => types.includes(t)) ?? null);
         }}
         onCameraReady={() => setIsReady(true)}
-      >
+      />
+      {/* Everything below sits ON TOP of the camera as siblings: expo-camera
+          doesn't support children inside <CameraView>, which is why the zoom
+          buttons, pinch and the close button stopped responding. */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         {/* Pinch-to-zoom + tap-to-focus + swipe touch layer */}
         <View
           style={StyleSheet.absoluteFill}
@@ -501,8 +505,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
 
         {/* Top controls */}
         <View style={[styles.topBar, topOffset]}>
-          <TouchableOpacity style={styles.topBtn} onPress={onClose} accessibilityLabel="Back" hitSlop={12} testID="camera-back">
-            <ChevronLeft size={28} color="#FFF" />
+          <TouchableOpacity style={styles.topBtn} onPress={onClose} accessibilityLabel="Close camera" hitSlop={12} testID="camera-back">
+            <X size={26} color="#FFF" />
           </TouchableOpacity>
 
           <View style={styles.topRightControls}>
@@ -565,7 +569,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
             <Text style={styles.loadingText}>Camera loading...</Text>
           </View>
         )}
-      </CameraView>
+      </View>
 
       {/* ── Swipe hint ── */}
       <View style={styles.swipeHint} pointerEvents="none">
