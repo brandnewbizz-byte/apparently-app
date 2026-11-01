@@ -7,6 +7,7 @@ import {
   SectionList,
   StyleSheet,
   Text,
+  Platform,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -249,9 +250,11 @@ export default function NotificationsScreen() {
     if (n.type === 'call_request') {
       return (
         <View style={styles.actionPair}>
+          {Platform.OS === 'web' && (
           <TouchableOpacity style={[styles.roundAction, { backgroundColor: '#22C55E' }]} onPress={() => answerCall(n)}>
             <Phone size={16} color="#FFF" />
           </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.roundAction, { backgroundColor: colors.backgroundTertiary }]} onPress={() => remove(n.id)}>
             <X size={16} color={colors.text} />
           </TouchableOpacity>
