@@ -20,6 +20,7 @@ import {
   type SpotPoint, type SpotRoom,
 } from '@/lib/spot';
 import { uploadImageToStorage } from '@/lib/storage';
+import { roomUrl, shareLink } from '@/lib/share';
 import DoodleLayer from '@/components/spot/DoodleLayer';
 import BurstLayer from '@/components/spot/BurstLayer';
 import SpotItemView from '@/components/spot/SpotItemView';
@@ -349,7 +350,7 @@ export default function SpotRoomScreen() {
   const invite = () => {
     tap();
     setShowInvite(false);
-    Share.share({ message: `Come hang out in my room "${info?.name || 'Spot'}" on Apparently 🎈\n${roomLink(roomId || '')}` }).catch(() => {});
+    if (roomId) shareLink(`Come hang out in my room "${info?.name || 'Spot'}" on Apparently 🎈`, roomUrl(roomId));
   };
 
   const changeTheme = async (id: string) => {
