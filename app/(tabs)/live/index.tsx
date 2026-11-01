@@ -104,8 +104,6 @@ export default function SpotLobby() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const mine = rooms.filter((r) => r.creatorId === user?.id);
-  const joinedIds = new Set(joined.map((r) => r.id));
-  const open = rooms.filter((r) => r.creatorId !== user?.id && !joinedIds.has(r.id));
 
   const openRoom = async (id: string, invited = false) => {
     tap();
@@ -213,21 +211,13 @@ export default function SpotLobby() {
 
             {joined.length ? (
               <>
-                <Text style={[styles.section, { color: colors.text }]}>{"Rooms you're in"}</Text>
+                <Text style={[styles.section, { color: colors.text }]}>{"Rooms you're invited to"}</Text>
                 <View style={styles.grid}>
                   {joined.map((r) => <RoomCard key={r.id} room={r} mine={false} colors={colors} onOpen={() => openRoom(r.id)} />)}
                 </View>
               </>
             ) : null}
 
-            {open.length ? (
-              <>
-                <Text style={[styles.section, { color: colors.text }]}>Open rooms</Text>
-                <View style={styles.grid}>
-                  {open.map((r) => <RoomCard key={r.id} room={r} mine={false} colors={colors} onOpen={() => openRoom(r.id)} />)}
-                </View>
-              </>
-            ) : null}
           </View>
         )}
       </ScrollView>
