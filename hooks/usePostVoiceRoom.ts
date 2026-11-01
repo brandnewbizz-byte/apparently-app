@@ -1,16 +1,21 @@
 /**
- * usePostVoiceRoom — Listen / Talk / Mute voice for a single post.
+ * usePostVoiceRoom — hold-to-talk voice on a feed post.
  *
- * Wraps `createAudioRelayClient` with a `post-${postId}` room identity and a
- * listen-only connection model. Listen connects WITHOUT mic permission; Talk
- * requests permission and starts publishing. Every teardown path (scroll-away,
- * unmount, background, network error) fully disconnects so audio can never
- * leak across posts.
+ * Uses the same engine as Spot rooms (hooks/useSpotVoice): while you hold the
+ * mic, short clips are recorded and sent over a live channel; everyone on the
+ * post hears each clip queued back to back, so nothing is cut off or skipped.
+ * (The old version replaced the playing clip with every new one and reused one
+ * file, which is why people heard choppy, broken audio.)
+ *
+ * Listening starts automatically when the post is on screen. The speaker
+ * button turns incoming sound off and on.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState } from 'react-native';
-import { useAudioRecorder } from 'expo-audio';
-import { createAudioRelayClient, RELAY_RECORDING_OPTIONS, type AudioRelayClient, type RemoteSpeaker } from '@/lib/audio-relay';
+import { AppState, Platform } from 'react-native';
+import { setAudioModeAsync } from 'expo-audio';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
+import { useSpotVoice } from '@/hooks/useSpotVoice';
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -23,186 +28,97 @@ interface UsePostVoiceRoomOptions {
 
 export interface UsePostVoiceRoomResult {
   connectionState: VoiceConnectionState;
-  isListening: boolean;
-  isMicActive: boolean;
-  isMuted: boolean;
-  speakers: RemoteSpeaker[];
-  /** Peer ids currently emitting audio (for speaking rings). */
+  /** Incoming sound on. */
+  soundOn: boolean;
+  /** You are holding the mic. */
+  talking: boolean;
+  /** Ids of people talking right now. */
   speakingIds: string[];
   error: string | null;
-  startListening: () => Promise<void>;
-  stopListening: () => void;
-  startTalking: () => Promise<void>;
+  toggleSound: () => void;
+  /** Press the mic. Resolves 'denied' when the mic isn't allowed. */
+  startTalking: () => Promise<'ok' | 'denied' | 'failed'>;
+  /** Let go of the mic. */
   stopTalking: () => void;
-  toggleMute: () => void;
 }
 
-export function usePostVoiceRoom(options: UsePostVoiceRoomOptions): UsePostVoiceRoomResult {
-  const { postId, userId, userName, enabled = true } = options;
-  const roomId = postId ? `post-${postId}` : '';
-  // One recorder per post layer, created the same way as voice notes.
-  const recorder = useAudioRecorder(RELAY_RECORDING_OPTIONS);
+type Handler = (payload: any) => void;
 
-  const clientRef = useRef<AudioRelayClient | null>(null);
-  const autoJoinedRef = useRef<string>('');
+export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: UsePostVoiceRoomOptions): UsePostVoiceRoomResult {
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>('disconnected');
-  const [isListening, setIsListening] = useState(false);
-  const [isMicActive, setIsMicActive] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [speakers, setSpeakers] = useState<RemoteSpeaker[]>([]);
+  const [soundOn, setSoundOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const soundOnRef = useRef(true);
+  useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
 
-  // ── Reset + teardown whenever the post changes ──
-  useEffect(() => {
-    clientRef.current?.disconnect();
-    clientRef.current = null;
-    setIsListening(false);
-    setIsMicActive(false);
-    setIsMuted(false);
-    setSpeakers([]);
-    setError(null);
-    setConnectionState('disconnected');
-    autoJoinedRef.current = '';
-  }, [postId]);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const handlers = useRef<Record<string, Set<Handler>>>({});
 
-  // ── Final cleanup on unmount ──
-  useEffect(() => {
-    return () => {
-      clientRef.current?.disconnect();
-      clientRef.current = null;
-    };
-  }, []);
+  // A tiny "room" adapter over a Supabase broadcast channel, shaped the way
+  // useSpotVoice expects. It stays the same object for the life of the hook.
+  const room = useMemo(() => ({
+    send: (event: string, payload: any) => {
+      channelRef.current?.send({ type: 'broadcast', event, payload }).then(() => {}, () => {});
+    },
+    on: (event: string, fn: Handler) => {
+      (handlers.current[event] ||= new Set()).add(fn);
+      return () => { handlers.current[event]?.delete(fn); };
+    },
+  }), []);
 
-  // ── App backgrounding → leave the voice room completely ──
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') {
-        clientRef.current?.stopSpeaking();
-        clientRef.current?.disconnect();
-        clientRef.current = null;
-        setIsListening(false);
-        setIsMicActive(false);
-        setIsMuted(false);
-        setSpeakers([]);
-        setConnectionState('disconnected');
-      }
-    });
-    return () => sub.remove();
-  }, []);
+  const me = useMemo(() => (userId ? { id: userId, name: userName || 'User' } : null), [userId, userName]);
+  const { talking, speaking, startTalking: spotStart, stopTalking } = useSpotVoice(room, me);
 
-  // ── Lazily create the client (no connection for passive viewing) ──
-  const getClient = useCallback((): AudioRelayClient | null => {
-    if (!enabled || !roomId || !userId) return null;
-    if (!clientRef.current) {
-      clientRef.current = createAudioRelayClient({
-        roomId,
-        peerId: userId,
-        peerName: userName || 'User',
-        requestMicOnConnect: false,
-        recorder,
-        onPeersUpdated: (peers) => setSpeakers(peers),
-      });
-    }
-    return clientRef.current;
-  }, [enabled, roomId, userId, userName, recorder]);
-
-  // ── Listen (no mic) ──
-  const startListening = useCallback(async () => {
-    const client = getClient();
-    if (!client) return;
-    setError(null);
-    try {
-      setConnectionState('connecting');
-      await client.connect();
-      setConnectionState('connected');
-      setIsListening(true);
-    } catch (e) {
-      setConnectionState('error');
-      setError(e instanceof Error && e.message ? e.message : 'Voice connection failed');
-      setIsListening(false);
-    }
-  }, [getClient]);
-
-  const stopListening = useCallback(() => {
-    clientRef.current?.stopSpeaking();
-    clientRef.current?.disconnect();
-    clientRef.current = null;
-    setIsListening(false);
-    setIsMicActive(false);
-    setIsMuted(false);
-    setSpeakers([]);
-    setConnectionState('disconnected');
-  }, []);
-
-  // ── Auto-join: every post is a live room ──
-  // The moment a post becomes the active post, join its voice room as a
-  // listener automatically (no tap required) — so "every post is live" and
-  // Talk is the only explicit action. Once the user leaves a post's room,
-  // we don't re-join until the post changes.
+  // ── Join this post's voice channel while it's on screen ──
   useEffect(() => {
     if (!enabled || !postId || !userId) return;
-    if (autoJoinedRef.current === postId) return;
-    autoJoinedRef.current = postId;
-    startListening().catch(() => {});
-  }, [enabled, postId, userId, startListening]);
-
-  // ── Talk (explicit mic) ──
-  const startTalking = useCallback(async () => {
-    const client = getClient();
-    if (!client) return;
     setError(null);
-    try {
-      if (!client.isConnected()) {
-        setConnectionState('connecting');
-        await client.connect();
-        setConnectionState('connected');
+    setConnectionState('connecting');
+    // Play through the loudspeaker, even with the silent switch on.
+    if (Platform.OS !== 'web') {
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
+    }
+    const ch = supabase.channel(`post-voice:${postId}`, { config: { broadcast: { self: false } } });
+    const dispatch = (event: string) => ({ payload }: any) => {
+      if (event === 'voice' && !soundOnRef.current) return; // sound off: drop clips
+      handlers.current[event]?.forEach((fn) => { try { fn(payload); } catch {} });
+    };
+    ch.on('broadcast', { event: 'voice' }, dispatch('voice'));
+    ch.on('broadcast', { event: 'talk' }, dispatch('talk'));
+    ch.subscribe((status) => {
+      if (status === 'SUBSCRIBED') setConnectionState('connected');
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        setConnectionState('error');
+        setError('Live voice is unavailable right now');
       }
-      // Talking implies you're also in the room listening.
-      setIsListening(true);
-      await client.startSpeaking(); // requests mic permission if needed
-      setIsMicActive(true);
-      setIsMuted(false);
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : 'Microphone unavailable');
-      setIsMicActive(false);
-    }
-  }, [getClient]);
+    });
+    channelRef.current = ch;
+    return () => {
+      stopTalking();
+      channelRef.current = null;
+      supabase.removeChannel(ch).then(() => {}, () => {});
+      setConnectionState('disconnected');
+    };
+  }, [enabled, postId, userId, stopTalking]);
 
-  const stopTalking = useCallback(() => {
-    clientRef.current?.stopSpeaking();
-    setIsMicActive(false);
-    setIsMuted(false);
-  }, []);
+  // Going to the background lets go of the mic.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => { if (s !== 'active') stopTalking(); });
+    return () => sub.remove();
+  }, [stopTalking]);
 
-  const toggleMute = useCallback(() => {
-    const client = clientRef.current;
-    if (!client) return;
-    const next = !isMuted;
-    client.muteSelf(next);
-    setIsMuted(next);
-    if (!next) {
-      // Un-muting → resume publishing.
-      client.startSpeaking().catch(() => {});
-    }
-  }, [isMuted]);
+  const toggleSound = useCallback(() => setSoundOn((v) => !v), []);
 
-  const speakingIds = useMemo(
-    () => speakers.filter((s) => s.isSpeaking).map((s) => s.peerId),
-    [speakers]
-  );
+  const startTalking = useCallback(async () => {
+    if (connectionState !== 'connected') return 'failed' as const;
+    setError(null);
+    const r = await spotStart();
+    if (r === 'denied') setError('Allow microphone access in Settings to talk');
+    else if (r === 'failed') setError('Couldn’t start the mic. Try again.');
+    return r;
+  }, [connectionState, spotStart]);
 
-  return {
-    connectionState,
-    isListening,
-    isMicActive,
-    isMuted,
-    speakers,
-    speakingIds,
-    error,
-    startListening,
-    stopListening,
-    startTalking,
-    stopTalking,
-    toggleMute,
-  };
+  const speakingIds = useMemo(() => Object.keys(speaking), [speaking]);
+
+  return { connectionState, soundOn, talking, speakingIds, error, toggleSound, startTalking, stopTalking };
 }
