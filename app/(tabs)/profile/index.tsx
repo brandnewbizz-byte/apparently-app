@@ -1,5 +1,6 @@
 import {
   Settings,
+  Search,
   Flame,
   DollarSign,
   ChevronRight,
@@ -447,6 +448,9 @@ export default function ProfileScreen() {
             <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
               <Text style={styles.topHandle} numberOfLines={1}>{username ? `@${username}` : ''}</Text>
               <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/(tabs)/search' as any)} accessibilityLabel="Search">
+                  <Search size={20} color="#FFF" />
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/(tabs)/planner' as any)} accessibilityLabel="Planner">
                   <CalendarDays size={20} color="#FFF" />
                 </TouchableOpacity>
