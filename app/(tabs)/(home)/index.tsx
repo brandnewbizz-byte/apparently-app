@@ -1291,7 +1291,7 @@ function ServiceRequestCard({ request, colors }: { request: ServiceRequest; colo
           <Text style={[styles.serviceRequestDesc, { color: colors.textSecondary }]} numberOfLines={2}>{request.description}</Text>
         ) : null}
         <View style={styles.serviceRequestRequester}>
-          <Image source={{ uri: creator.avatar || undefined }} style={styles.requesterAvatar} defaultSource={require('@/assets/images/icon.png')} />
+          <Image source={{ uri: creator.avatar || undefined }} style={styles.requesterAvatar} defaultSource={require('@/assets/images/icon_1.png')} />
           <View style={styles.requesterInfo}>
             <Text style={[styles.requesterName, { color: colors.text }]}>{creator.name}</Text>
           </View>
@@ -1937,7 +1937,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
         <View style={styles.headerMain}>
           <View style={styles.logoContainer}>
-            <Image source={require('@/assets/images/planner-tab.png')} style={styles.logoImage} resizeMode="contain" accessibilityLabel="Apparently logo" />
+            <Image source={require('@/assets/images/planner-tab_1.png')} style={styles.logoImage} resizeMode="contain" accessibilityLabel="Apparently logo" />
             <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
           </View>
           <View style={styles.headerActions}>
