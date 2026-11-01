@@ -34,7 +34,7 @@
  * seeded by their account and the day breaks ties differently for each person.
  *
  * Pace: cards come in rounds; between rounds there is a wait that depends on the
- * plan. Pro never waits.
+ * plan. Pro waits 30 seconds.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Tier } from '@/lib/plans';
@@ -90,13 +90,14 @@ export const FEED_PACE: Record<Tier, FeedPace> = {
   free: { round: 5, waitSec: 10 * 60 },
   basic: { round: 7, waitSec: 3 * 60 },
   plus: { round: 10, waitSec: 60 },
-  pro: { round: null, waitSec: 0 },
+  pro: { round: 10, waitSec: 30 },
 };
-/** Plan limits off (everyone gets everything) → the old 1-minute rhythm. */
+/** Plan limits off (everyone gets everything) → the 1-minute rhythm. */
 export const PACE_WHEN_LIMITS_OFF: FeedPace = FEED_PACE.plus;
 
 export function paceFor(plan: { tier: Tier; enforced: boolean; isAdmin?: boolean; loaded?: boolean }): FeedPace {
-  if (plan.isAdmin) return FEED_PACE.pro;
+  // Pro members (and admins) get a 30-second countdown between rounds.
+  if (plan.isAdmin || plan.tier === 'pro') return FEED_PACE.pro;
   if (!plan.enforced) return PACE_WHEN_LIMITS_OFF;
   return FEED_PACE[plan.tier] || FEED_PACE.free;
 }
