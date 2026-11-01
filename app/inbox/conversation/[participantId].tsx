@@ -34,6 +34,7 @@ import {
   requestRecordingPermissionsAsync,
   IOSOutputFormat,
   AudioQuality,
+  RecordingPresets,
 } from 'expo-audio';
 import type { AudioPlayer, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
@@ -100,7 +101,8 @@ export default function ConversationScreen() {
   // flattens them per platform). It used to be created with `{}`, which the
   // Android native side rejects (no file extension) — so recording always
   // failed with "Could not access microphone".
-  const recorder = useAudioRecorder(RECORDING_OPTIONS);
+  // HIGH_QUALITY is Expo's tested preset (AAC .m4a, 44.1 kHz) on iOS and Android.
+  const recorder = useAudioRecorder(Platform.OS === 'web' ? RECORDING_OPTIONS : RecordingPresets.HIGH_QUALITY);
   const recordingRef = useRef(false);
   const recordStartRef = useRef(0);
   const [voiceSending, setVoiceSending] = useState(false);
@@ -115,7 +117,9 @@ export default function ConversationScreen() {
   // Fetch the participant's profile directly so name/avatar show correctly even
   // for brand-new conversations (where no MessagingContext entry exists yet).
   useEffect(() => {
-    if (!participantId || conversation) return;
+    // Always load the real profile: a conversation saved before the name was
+    // known would otherwise keep showing "Unknown User".
+    if (!participantId) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
@@ -132,16 +136,21 @@ export default function ConversationScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [participantId, conversation]);
+  }, [participantId]);
 
   const participant = {
     id: participantId || '',
-    name: conversation?.participantName || fetchedProfile?.name || 'Unknown',
-    username: conversation?.participantUsername || fetchedProfile?.username || generateUsername(participantId),
-    avatar: conversation?.participantAvatar || fetchedProfile?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
+    name: fetchedProfile?.name || conversation?.participantName || 'Unknown',
+    username: fetchedProfile?.username || conversation?.participantUsername || generateUsername(participantId),
+    avatar: fetchedProfile?.avatar || conversation?.participantAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop',
     isVerified: false,
     followersCount: 0,
   };
+
+  // Sent with every message so a new chat is saved with the person's real name.
+  const participantInfo = fetchedProfile && fetchedProfile.name !== 'Unknown'
+    ? { name: fetchedProfile.name, avatar: fetchedProfile.avatar, username: fetchedProfile.username }
+    : undefined;
 
   const myAvatar = (authUser as any)?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
 
@@ -261,15 +270,19 @@ export default function ConversationScreen() {
       // recipient's id is the 2nd folder, which the bucket policy uses to let
       // them read it.
       const bytes = await readLocalFileBytes(uri);
+      if (!bytes?.length) {
+        Alert.alert('Voice note not sent', 'Nothing was recorded. Please try again.');
+        return;
+      }
       await ensureUploadSpace(bytes.length);
       const filePath = `voice/${participantId}/${Date.now()}.m4a`;
-      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: 'audio/m4a' });
+      const { error: uploadErr } = await supabase.storage.from('messages').upload(filePath, bytes, { contentType: 'audio/mp4' });
       if (uploadErr) {
         console.warn('[Conversation] voice upload failed:', uploadErr.message);
         Alert.alert('Voice note not sent', 'Upload failed. Check your connection and try again.');
         return;
       }
-      sendMessage(participantId, '', undefined, { voice_note: { path: filePath, duration: durSecs } });
+      sendMessage(participantId, '', participantInfo, { voice_note: { path: filePath, duration: durSecs } });
       if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
     } catch (e: any) {
@@ -328,7 +341,7 @@ export default function ConversationScreen() {
         Alert.alert('Error', 'Failed to upload image. Please try again.');
         return;
       }
-      sendMessage(participantId, '', undefined, {
+      sendMessage(participantId, '', participantInfo, {
         image: { path: filePath, width: asset.width, height: asset.height },
       });
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
@@ -387,7 +400,7 @@ export default function ConversationScreen() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
 
-      sendMessage(participantId, messageText.trim());
+      sendMessage(participantId, messageText.trim(), participantInfo);
       setMessageText('');
       stopTyping();
       setShowMentionSuggestions(false);
@@ -757,6 +770,8 @@ export default function ConversationScreen() {
             </Text>
           </View>
         </TouchableOpacity>
+        {/* Voice and video calls need native WebRTC, which isn't in the app builds yet — web only for now. */}
+        {Platform.OS === 'web' && (
         <View style={styles.headerActions}>
           <TouchableOpacity
             onPress={() => Alert.alert('Call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: startCall }])}
@@ -773,6 +788,7 @@ export default function ConversationScreen() {
             <Video size={26} color={colors.text} strokeWidth={1.9} />
           </TouchableOpacity>
         </View>
+        )}
       </View>
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -912,7 +928,7 @@ export default function ConversationScreen() {
         onClose={() => setShowPaySheet(false)}
         buyerId={participantId || ''}
         buyerName={participant.name || 'them'}
-        onSent={(r) => { if (participantId) sendMessage(participantId, `Payment request: $${(r.amount_cents / 100).toFixed(2)} for ${r.title}`, undefined, { payment_request: r }); }}
+        onSent={(r) => { if (participantId) sendMessage(participantId, `Payment request: $${(r.amount_cents / 100).toFixed(2)} for ${r.title}`, participantInfo, { payment_request: r }); }}
       />}
 
       <Modal visible={!!viewerImage} transparent animationType="fade" onRequestClose={() => setViewerImage(null)}>
