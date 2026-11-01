@@ -103,7 +103,8 @@
           "cameraPermission": "Apparently uses your camera so you can take photos and videos for posts and stories, show yourself in Spot rooms, and make video calls.",
           "microphonePermission": "Apparently uses your microphone for voice notes, voice and video calls, and talking with friends in live posts and Spot rooms."
         }
-      ]
+      ],
+      "./plugins/withWebRTCProguard"
     ],
     "experiments": {
       "typedRoutes": true
