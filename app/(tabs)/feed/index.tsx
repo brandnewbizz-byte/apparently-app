@@ -52,6 +52,7 @@ import PostComposer, { POST_CATEGORIES as POST_CATS } from '@/components/PostCom
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import PostLiveLayer from '@/components/PostLiveLayer';
+import { postUrl, shareLink } from '@/lib/share';
 import AppVideo from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 import CommentsPanel from '@/components/comments/CommentsPanel';
@@ -418,11 +419,13 @@ function PostCard({
                 <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]} />
               )
             ) : (
-              <RNImage
-                source={{ uri: post.media }}
-                style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
-                resizeMode="cover"
-              />
+              // Like Instagram: the whole photo is shown (never cropped), centred,
+              // with a soft blurred copy filling any space around it.
+              <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }, { overflow: 'hidden' }]}>
+                <RNImage source={{ uri: post.media }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={Platform.OS === 'android' ? 12 : 30} />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.35)' }]} />
+                <RNImage source={{ uri: post.media }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+              </View>
             )}
             {isVideo && !isActive ? (
               <View style={igCardStyles.playOverlay} pointerEvents="none">
@@ -960,13 +963,11 @@ export default function FeedScreen() {
 
   const handleSharePost = async (post: FeedPost) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const link = post.videoUrl || post.media;
-    const text = [`${post.author.name} on Apparently`, post.caption, link].filter(Boolean).join('\n\n');
-    try {
-      await Share.share(Platform.OS === 'ios' && link ? { message: [`${post.author.name} on Apparently`, post.caption].filter(Boolean).join('\n\n'), url: link } : { message: text });
-    } catch (err) {
-      // user cancelled share — ignore
-    }
+    const authorId = post.author.userId || post.authorId;
+    const text = [`${post.author.name} on Apparently`, post.caption].filter(Boolean).join('\n\n');
+    // A link to the post on the author's page (works in any browser), not the raw image file.
+    const link = authorId ? postUrl(authorId, post.id) : (post.videoUrl || post.media || '');
+    if (link) await shareLink(text, link);
   };
 
   const handleDeletePost = (postId: string) => {
@@ -1408,7 +1409,7 @@ export default function FeedScreen() {
               useNativeControls
             />
           ) : viewerMedia ? (
-            <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="cover" />
+            <RNImage source={{ uri: viewerMedia }} style={styles.viewerImage} resizeMode="contain" />
           ) : null}
         </TouchableOpacity>
       </Modal>
