@@ -1,31 +1,25 @@
 /**
- * useWebRTCCall — 1:1 WebRTC voice calling hook
+ * useWebRTCCall — 1:1 voice and video calls.
  *
- * Signaling now runs over Supabase Realtime Broadcast instead of a custom
- * WebSocket server. The signaling server was just a thin JSON relay
- * (join/leave, offer/answer, ICE candidates) — Supabase Realtime Broadcast
- * already powers text chat + presence in this app, so it can carry the same
- * signaling messages with no additional backend to deploy.
+ * Media: WebRTC (browser on web, react-native-webrtc on phones — see lib/webrtc).
+ * Signalling: Supabase Realtime broadcast on the channel `call:<roomId>`.
  *
- *  - Outgoing calls: send offer, handle answer, ICE exchange
- *  - Incoming calls: listen for offers, send answer
- *  - Mute/unmute local audio
- *  - Speakerphone toggle
- *  - Call duration tracking
- *  - End call cleanup
- *
- * NOTE: The actual WebRTC media (RTCPeerConnection / getUserMedia) is a
- * browser API. On web it works natively. On native it requires the
- * `react-native-webrtc` native module — which is NOT currently installed.
- * This hook degrades gracefully (surfaces `callError`) instead of crashing
- * when WebRTC is unavailable.
+ * Handshake (so nothing is lost while the other phone is still ringing):
+ *   1. Caller joins the channel, opens mic/camera and waits.
+ *   2. The person being called taps Answer, joins and sends `join`
+ *      (repeated every few seconds until the offer arrives).
+ *   3. Caller sends the `offer`, callee replies with the `answer`,
+ *      both trade ICE candidates (queued until the remote description is set).
+ * Either side can send `call_ended`; the callee can send `call_declined`.
  */
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { SafeAudio as Audio } from '@/lib/safe-av';
-import { supabase } from '@/lib/supabase';
+import { setAudioModeAsync } from 'expo-audio';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
+import { getWebRTC } from '@/lib/webrtc';
+import { CALL_RING_MS } from '@/lib/calls';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 
@@ -35,21 +29,18 @@ export interface CallConfig {
   peerName: string;
   targetPeerId: string;
   targetPeerName: string;
+  video?: boolean;
 }
 
 const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
 ];
+const JOIN_WAIT_MS = 25_000; // callee gives up if the caller never sends an offer
+const JOIN_REPEAT_MS = 3_000;
+const CANT_CONNECT = 'The call couldn’t connect. Check your internet connection and try again.';
+const CANT_REACH = 'Couldn’t reach the call service. Check your connection and try again.';
 
-// WebRTC media availability guard (web vs native).
-function webRtcMediaAvailable(): boolean {
-  return (
-    typeof RTCPeerConnection !== 'undefined' &&
-    typeof navigator !== 'undefined' &&
-    !!navigator.mediaDevices &&
-    typeof navigator.mediaDevices.getUserMedia === 'function'
-  );
-}
+const plain = (x: any) => (x && typeof x.toJSON === 'function' ? x.toJSON() : x);
 
 export function useWebRTCCall() {
   const [callState, setCallState] = useState<CallState>('idle');
@@ -57,277 +48,337 @@ export function useWebRTCCall() {
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  const [localStream, setLocalStream] = useState<any | null>(null);
+  const [remoteStream, setRemoteStream] = useState<any | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pcRef = useRef<any | null>(null);
+  const localRef = useRef<any | null>(null);
   const configRef = useRef<CallConfig | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingIce = useRef<any[]>([]);
+  const activeRef = useRef(false);
+  const endedRef = useRef(false);
+  const frontCamRef = useRef(true);
 
-  // ── Timer ──
-  const startTimer = useCallback(() => {
-    clearInterval(timerRef.current!);
-    const start = Date.now();
-    timerRef.current = setInterval(() => {
-      setDuration(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
+  const clearWaits = useCallback(() => {
+    if (waitRef.current) clearTimeout(waitRef.current);
+    if (joinRef.current) clearInterval(joinRef.current);
+    waitRef.current = null;
+    joinRef.current = null;
   }, []);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
-    setDuration(0);
   }, []);
 
-  const sendSignal = useCallback((event: string, payload: Record<string, unknown>) => {
-    channelRef.current?.send({ type: 'broadcast', event, payload }).then(() => {}, () => {});
-  }, []);
-
-  // ── WebRTC Setup ──
-  const createPeerConnection = useCallback(async (config: CallConfig): Promise<RTCPeerConnection> => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && configRef.current) {
-        sendSignal('ice_candidate', {
-          roomId: configRef.current.roomId,
-          peerId: configRef.current.peerId,
-          targetPeerId: configRef.current.targetPeerId,
-          candidate: event.candidate,
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      // Remote audio stream — play through speaker.
-      // In React Native there is no browser <audio> element to construct;
-      // the RTCPeerConnection already emits/consumes the decoded stream natively.
-      Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
-        setCallState('active');
-        startTimer();
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        setCallState('ended');
-        stopTimer();
-      }
-    };
-
-    // Get local audio
+  /** Phones: route call audio to the loudspeaker or the earpiece. */
+  const applySpeaker = useCallback(async (on: boolean) => {
+    if (Platform.OS === 'web') return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldRouteThroughEarpiece: !on,
+      });
     } catch (e) {
-      console.log('[WebRTC] getUserMedia failed:', e);
-      // Continue without local audio — still try the call
+      console.log('[Call] speaker route failed:', e);
     }
+  }, []);
+
+  const sendSignal = useCallback((event: string, extra: Record<string, unknown> = {}) => {
+    const cfg = configRef.current;
+    const ch = channelRef.current;
+    if (!cfg || !ch) return Promise.resolve();
+    return ch
+      .send({ type: 'broadcast', event, payload: { roomId: cfg.roomId, peerId: cfg.peerId, targetPeerId: cfg.targetPeerId, ...extra } })
+      .then(() => {}, () => {});
+  }, []);
+
+  /** Tear everything down locally and show the "Call ended" screen. */
+  const finish = useCallback((error?: string) => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    clearWaits();
+    stopTimer();
+    try { pcRef.current?.close(); } catch {}
+    pcRef.current = null;
+    try { localRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
+    try { localRef.current?.release?.(); } catch {}
+    localRef.current = null;
+    pendingIce.current = [];
+    const ch = channelRef.current;
+    channelRef.current = null;
+    if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
+    setLocalStream(null);
+    setRemoteStream(null);
+    if (error) setCallError(error);
+    setCallState('ended');
+    if (Platform.OS !== 'web') {
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
+    }
+  }, [clearWaits, stopTimer]);
+
+  const markActive = useCallback(() => {
+    if (activeRef.current || endedRef.current) return;
+    activeRef.current = true;
+    clearWaits();
+    setCallState('active');
+    const start = Date.now();
+    setDuration(0);
+    timerRef.current = setInterval(() => setDuration(Math.floor((Date.now() - start) / 1000)), 1000);
+    // Video calls start on the loudspeaker, voice calls on the earpiece.
+    const speaker = !!configRef.current?.video;
+    setIsSpeakerOn(speaker);
+    applySpeaker(speaker);
+  }, [applySpeaker, clearWaits]);
+
+  const addRemoteIce = useCallback(async (candidate: any) => {
+    const rtc = getWebRTC();
+    const pc = pcRef.current;
+    if (!rtc || !candidate) return;
+    if (!pc || !pc.remoteDescription) {
+      pendingIce.current.push(candidate);
+      return;
+    }
+    try {
+      await pc.addIceCandidate(new rtc.RTCIceCandidate(candidate));
+    } catch (e) {
+      console.log('[Call] ICE candidate failed:', e);
+    }
+  }, []);
+
+  const flushIce = useCallback(async () => {
+    const list = pendingIce.current.splice(0);
+    for (const c of list) await addRemoteIce(c);
+  }, [addRemoteIce]);
+
+  /** Opens the mic (and camera for video calls) and creates the connection. */
+  const createPeer = useCallback(async (cfg: CallConfig) => {
+    const rtc = getWebRTC();
+    if (!rtc) throw new Error('Calls need the latest version of Apparently. Update the app and try again.');
+
+    let stream: any;
+    try {
+      stream = await rtc.mediaDevices.getUserMedia({
+        audio: true,
+        video: cfg.video ? { facingMode: 'user', width: 640, height: 480, frameRate: 24 } : false,
+      });
+    } catch {
+      throw new Error(cfg.video
+        ? 'Allow camera and microphone access for Apparently in Settings, then try again.'
+        : 'Allow microphone access for Apparently in Settings, then try again.');
+    }
+    if (endedRef.current) {
+      stream.getTracks().forEach((t: any) => t.stop());
+      throw new Error('cancelled');
+    }
+    localRef.current = stream;
+    setLocalStream(stream);
+
+    const pc = new rtc.RTCPeerConnection({ iceServers: ICE_SERVERS });
+    stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
+
+    pc.addEventListener('icecandidate', (e: any) => {
+      if (e.candidate) sendSignal('ice_candidate', { candidate: plain(e.candidate) });
+    });
+    pc.addEventListener('track', (e: any) => {
+      const s = e.streams && e.streams[0];
+      if (s) setRemoteStream(s);
+    });
+    pc.addEventListener('connectionstatechange', () => {
+      const st = pc.connectionState;
+      if (st === 'connected') markActive();
+      else if (st === 'failed') finish(CANT_CONNECT);
+    });
+    pc.addEventListener('iceconnectionstatechange', () => {
+      const st = pc.iceConnectionState;
+      if (st === 'connected' || st === 'completed') markActive();
+    });
 
     pcRef.current = pc;
     return pc;
-  }, [sendSignal, startTimer, stopTimer]);
+  }, [finish, markActive, sendSignal]);
 
-  // ── Signaling (Supabase Realtime) ──
-  const connectSignaling = useCallback((config: CallConfig): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      configRef.current = config;
+  /** Caller: send (or re-send) the offer once the other person has joined. */
+  const sendOffer = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc || pc.remoteDescription) return;
+    if (!pc.localDescription) {
+      const offer = await pc.createOffer({});
+      await pc.setLocalDescription(offer);
+    }
+    const d = pc.localDescription;
+    await sendSignal('offer', { sdp: { type: d.type, sdp: d.sdp } });
+  }, [sendSignal]);
 
-      const ch = supabase.channel(`call:${config.roomId}`, {
-        config: { broadcast: { self: false } },
-      });
+  const connectSignaling = useCallback((cfg: CallConfig) => new Promise<void>((resolve, reject) => {
+    const ch = supabase.channel(`call:${cfg.roomId}`, { config: { broadcast: { self: false } } });
+    const forMe = (p: any) => !p?.targetPeerId || p.targetPeerId === configRef.current?.peerId;
 
-      ch.on('broadcast', { event: 'offer' }, async ({ payload }: any) => {
-        const cfg = configRef.current;
-        if (!cfg) return;
-        // Only react if this offer is addressed to us (or unaddressed in a 1:1)
-        if (payload?.targetPeerId && payload.targetPeerId !== cfg.peerId) return;
+    ch.on('broadcast', { event: 'join' }, async ({ payload }: any) => {
+      if (!forMe(payload) || endedRef.current) return;
+      if (waitRef.current) clearTimeout(waitRef.current);
+      waitRef.current = null;
+      setCallState((s) => (s === 'active' ? s : 'connecting'));
+      try { await sendOffer(); } catch (e) { console.log('[Call] offer failed:', e); }
+    });
 
-        setCallState('ringing');
-        const pc = pcRef.current || await createPeerConnection(cfg);
-        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+    ch.on('broadcast', { event: 'offer' }, async ({ payload }: any) => {
+      const rtc = getWebRTC();
+      const pc = pcRef.current;
+      if (!forMe(payload) || !rtc || !pc || pc.remoteDescription || !payload?.sdp) return;
+      if (joinRef.current) clearInterval(joinRef.current);
+      joinRef.current = null;
+      try {
+        await pc.setRemoteDescription(new rtc.RTCSessionDescription(payload.sdp));
+        await flushIce();
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        sendSignal('answer', {
-          roomId: cfg.roomId,
-          peerId: cfg.peerId,
-          targetPeerId: payload.peerId || '',
-          sdp: answer,
-        });
-        setCallState('connecting');
-      });
-
-      ch.on('broadcast', { event: 'answer' }, async ({ payload }: any) => {
-        const cfg = configRef.current;
-        if (!cfg) return;
-        if (payload?.targetPeerId && payload.targetPeerId !== cfg.peerId) return;
-        if (!pcRef.current) return;
-        await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-        setCallState('connecting');
-      });
-
-      ch.on('broadcast', { event: 'ice_candidate' }, async ({ payload }: any) => {
-        const cfg = configRef.current;
-        if (!cfg) return;
-        if (payload?.targetPeerId && payload.targetPeerId !== cfg.peerId) return;
-        if (!pcRef.current || !payload.candidate) return;
-        try {
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
-        } catch (e) {
-          console.log('[WebRTC] ICE candidate failed:', e);
-        }
-      });
-
-      ch.on('broadcast', { event: 'call_ended' }, ({ payload }: any) => {
-        const cfg = configRef.current;
-        if (!cfg) return;
-        if (payload?.targetPeerId && payload.targetPeerId !== cfg.peerId) return;
-        setCallState('ended');
-        stopTimer();
-      });
-
-      ch.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          resolve();
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          reject(new Error(`Signaling channel failed: ${status}`));
-        }
-      });
-
-      channelRef.current = ch;
-
-      // Timeout
-      setTimeout(() => {
-        // (no-op timeout — subscribe resolves/rejects on its own)
-      }, 10000);
-    });
-  }, [createPeerConnection, sendSignal, stopTimer]);
-
-  // ── Start Call (outgoing) ──
-  const startCall = useCallback(async (config: CallConfig) => {
-    setCallState('calling');
-    setCallError(null);
-    configRef.current = config;
-    stopTimer();
-
-    if (!webRtcMediaAvailable()) {
-      setCallError('Voice calls are not available on this device (WebRTC media support is missing).');
-      setCallState('ended');
-      return;
-    }
-
-    try {
-      await connectSignaling(config);
-
-      const pc = await createPeerConnection(config);
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      sendSignal('offer', {
-        roomId: config.roomId,
-        peerId: config.peerId,
-        targetPeerId: config.targetPeerId,
-        sdp: offer,
-      });
-
-      setCallState('ringing');
-    } catch (e: any) {
-      console.log('[WebRTC] Start call failed:', e?.message || e);
-      setCallError('Call failed to start.');
-      setCallState('ended');
-    }
-  }, [connectSignaling, createPeerConnection, sendSignal, stopTimer]);
-
-  // ── Accept incoming call ──
-  const acceptCall = useCallback(async (config: CallConfig) => {
-    configRef.current = config;
-    setCallError(null);
-    setCallState('connecting');
-
-    if (!webRtcMediaAvailable()) {
-      setCallError('Voice calls are not available on this device (WebRTC media support is missing).');
-      setCallState('ended');
-      return;
-    }
-
-    try {
-      await connectSignaling(config);
-      // The offer handler in ch.on('broadcast') will create the PC and send answer
-    } catch (e: any) {
-      console.log('[WebRTC] Accept call failed:', e?.message || e);
-      setCallError('Call failed to connect.');
-      setCallState('ended');
-    }
-  }, [connectSignaling]);
-
-  // ── Toggle Mute ──
-  const toggleMute = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (stream) {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
+        const d = pc.localDescription;
+        await sendSignal('answer', { sdp: { type: d.type, sdp: d.sdp } });
+      } catch (e) {
+        console.log('[Call] answer failed:', e);
+        finish(CANT_CONNECT);
       }
+    });
+
+    ch.on('broadcast', { event: 'answer' }, async ({ payload }: any) => {
+      const rtc = getWebRTC();
+      const pc = pcRef.current;
+      if (!forMe(payload) || !rtc || !pc || pc.remoteDescription || !payload?.sdp) return;
+      try {
+        await pc.setRemoteDescription(new rtc.RTCSessionDescription(payload.sdp));
+        await flushIce();
+      } catch (e) {
+        console.log('[Call] remote answer failed:', e);
+      }
+    });
+
+    ch.on('broadcast', { event: 'ice_candidate' }, ({ payload }: any) => {
+      if (forMe(payload)) addRemoteIce(payload?.candidate);
+    });
+
+    ch.on('broadcast', { event: 'call_ended' }, ({ payload }: any) => {
+      if (forMe(payload)) finish();
+    });
+
+    ch.on('broadcast', { event: 'call_declined' }, ({ payload }: any) => {
+      if (forMe(payload)) finish(`${configRef.current?.targetPeerName || 'They'} can’t talk right now.`);
+    });
+
+    const t = setTimeout(() => reject(new Error(CANT_REACH)), 10_000);
+    ch.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        clearTimeout(t);
+        resolve();
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        clearTimeout(t);
+        reject(new Error(CANT_REACH));
+      }
+    });
+    channelRef.current = ch;
+  }), [addRemoteIce, finish, flushIce, sendOffer, sendSignal]);
+
+  const reset = useCallback((cfg: CallConfig) => {
+    configRef.current = cfg;
+    endedRef.current = false;
+    activeRef.current = false;
+    pendingIce.current = [];
+    frontCamRef.current = true;
+    setCallError(null);
+    setDuration(0);
+    setIsMuted(false);
+    setIsCameraOff(false);
+  }, []);
+
+  // ── Outgoing call ──
+  const startCall = useCallback(async (cfg: CallConfig) => {
+    reset(cfg);
+    setCallState('calling');
+    try {
+      await connectSignaling(cfg);
+      await createPeer(cfg);
+    } catch (e: any) {
+      if (e?.message !== 'cancelled') finish(e?.message || CANT_CONNECT);
+      return;
+    }
+    waitRef.current = setTimeout(() => {
+      sendSignal('call_ended');
+      finish('No answer.');
+    }, CALL_RING_MS);
+  }, [connectSignaling, createPeer, finish, reset, sendSignal]);
+
+  // ── Answer an incoming call ──
+  const acceptCall = useCallback(async (cfg: CallConfig) => {
+    reset(cfg);
+    setCallState('connecting');
+    try {
+      await connectSignaling(cfg);
+      await createPeer(cfg);
+    } catch (e: any) {
+      if (e?.message !== 'cancelled') finish(e?.message || CANT_CONNECT);
+      return;
+    }
+    sendSignal('join');
+    joinRef.current = setInterval(() => sendSignal('join'), JOIN_REPEAT_MS);
+    waitRef.current = setTimeout(() => finish('The call has ended.'), JOIN_WAIT_MS);
+  }, [connectSignaling, createPeer, finish, reset, sendSignal]);
+
+  const toggleMute = useCallback(() => {
+    const track = localRef.current?.getAudioTracks?.()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setIsMuted(!track.enabled);
+  }, []);
+
+  const toggleCamera = useCallback(() => {
+    const track = localRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setIsCameraOff(!track.enabled);
+  }, []);
+
+  const switchCamera = useCallback(() => {
+    const track: any = localRef.current?.getVideoTracks?.()[0];
+    if (!track) return;
+    frontCamRef.current = !frontCamRef.current;
+    try {
+      if (typeof track._switchCamera === 'function') track._switchCamera();
+      else track.applyConstraints?.({ facingMode: frontCamRef.current ? 'user' : 'environment' });
+    } catch (e) {
+      console.log('[Call] switch camera failed:', e);
     }
   }, []);
 
-  // ── Toggle Speaker ──
-  const toggleSpeaker = useCallback(async () => {
-    try {
-      if (Platform.OS === 'ios' || Platform.OS === 'android') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: isSpeakerOn,
-        });
-        setIsSpeakerOn(!isSpeakerOn);
-      }
-    } catch (e) {
-      console.log('[WebRTC] Speaker toggle failed:', e);
-    }
-  }, [isSpeakerOn]);
+  const toggleSpeaker = useCallback(() => {
+    setIsSpeakerOn((on) => {
+      applySpeaker(!on);
+      return !on;
+    });
+  }, [applySpeaker]);
 
-  // ── End Call ──
+  // ── Hang up ──
   const endCall = useCallback(() => {
-    setCallState('ended');
-    stopTimer();
-
-    // Close peer connection
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-
-    // Stop local stream
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(t => t.stop());
-      localStreamRef.current = null;
-    }
-
-    // Signal + leave channel
+    if (endedRef.current) return;
+    const ch = channelRef.current;
     const cfg = configRef.current;
-    if (cfg && channelRef.current) {
-      sendSignal('call_ended', {
-        roomId: cfg.roomId,
-        peerId: cfg.peerId,
-        targetPeerId: cfg.targetPeerId,
-      });
-      supabase.removeChannel(channelRef.current).then(() => {}, () => {});
+    if (ch && cfg) {
+      // Send "ended" first, then leave the channel.
       channelRef.current = null;
+      ch.send({ type: 'broadcast', event: 'call_ended', payload: { roomId: cfg.roomId, peerId: cfg.peerId, targetPeerId: cfg.targetPeerId } })
+        .then(() => {}, () => {})
+        .finally(() => { supabase.removeChannel(ch).then(() => {}, () => {}); });
     }
+    finish();
+  }, [finish]);
 
-    configRef.current = null;
-  }, [sendSignal, stopTimer]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      endCall();
-    };
-  }, [endCall]);
+  // Leaving the screen hangs up.
+  useEffect(() => () => endCall(), [endCall]);
 
   return {
     callState,
@@ -335,10 +386,15 @@ export function useWebRTCCall() {
     duration,
     isMuted,
     isSpeakerOn,
+    isCameraOff,
+    localStream,
+    remoteStream,
     startCall,
     acceptCall,
     endCall,
     toggleMute,
     toggleSpeaker,
+    toggleCamera,
+    switchCamera,
   };
 }
