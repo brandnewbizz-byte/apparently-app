@@ -147,7 +147,7 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
             .from('bundles')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(50);
+            .limit(200);
           if (!error && data?.length) liveBundles = data.map(mapRow);
         }
 
