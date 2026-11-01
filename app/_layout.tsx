@@ -34,6 +34,7 @@ import { PlannerProvider } from '@/contexts/PlannerContext';
 import { OrdersProvider } from '@/contexts/OrdersContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
+import IncomingCallWatcher from '@/components/IncomingCallWatcher';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
 
@@ -164,6 +165,8 @@ function RootLayoutNav() {
   }, [isAuthenticated, onboardingCompleted, segments, isLoading, router, authLoading, onboardingLoading]);
 
   return (
+    <>
+    <IncomingCallWatcher />
     <Stack
       screenOptions={{
         headerShown: false,
@@ -193,6 +196,7 @@ function RootLayoutNav() {
     <Stack.Screen name="payouts" options={{ headerShown: false }} />
     <Stack.Screen name="picks" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     </Stack>
+    </>
   );
 }
 
