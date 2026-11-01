@@ -55,7 +55,9 @@ import { usePlanner } from '@/contexts/PlannerContext';
 import { localDateKey, formatTime12 } from '@/lib/dates';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useFeedStack, useNeedsPicks, type FeedStack } from '@/hooks/useFeedStack';
+import { useFeedStack, useNeedsPicks, useRankedFeed, type FeedStack } from '@/hooks/useFeedStack';
+import { feedStore } from '@/lib/feedEngine';
+import { parseWhen } from '@/lib/nearby';
 import { vibesOf } from '@/lib/vibes';
 import type { HideReason } from '@/lib/feedEngine';
 import { notify } from '@/lib/dialog';
@@ -113,6 +115,8 @@ interface BundlePlan {
   location?: string;
   tags?: string[];
   createdAt?: string;
+  /** When it happens, as the creator wrote it ("Tue Dec 22"). */
+  dateRange?: string;
 }
 
 interface LifestyleCategory {
@@ -149,6 +153,7 @@ function userBundleToPlan(b: UserBundle): BundlePlan {
     location: b.location,
     tags: b.tags,
     createdAt: b.createdAt,
+    dateRange: b.dateRange,
   };
 }
 
@@ -188,6 +193,8 @@ interface SkillDeal {
   category?: string;
   grabCount?: number;
   createdAt?: string;
+  /** Where the seller is (from their profile). */
+  location?: string;
 }
 
 // All skill deals, service requests, and live updates now come from live Supabase.
@@ -213,11 +220,23 @@ const describeBundle = (b: BundlePlan): FeedItemInfo => ({
   creatorId: b.creatorId, createdAt: b.createdAt, price: b.price,
   spotsLeft: b.availableCount ? Math.max(b.availableCount - (b.grabCount || 0), 0) : undefined,
   grabCount: b.grabCount, hasImage: !!(b.imageUrl || b.image || b.videoUrl), description: b.description,
+  startsAt: parseWhen(b.dateRange),
 });
 const describeSkill = (k: SkillDeal): FeedItemInfo => ({
   id: k.id, category: k.category, types: k.category ? [k.category] : undefined, creatorId: k.creatorId, createdAt: k.createdAt, price: k.price, originalPrice: k.originalPrice,
   spotsLeft: k.spotsLeft, expiresIn: k.expiresIn, grabCount: k.grabCount, hasImage: !!(k.imageUrl || k.image), description: k.description,
+  location: k.location,
 });
+const describeRequest = (r: ServiceRequest): FeedItemInfo => ({
+  id: r.id, category: r.category, types: [r.source === 'job' ? (r.jobType || 'job') : (r.category || 'other')],
+  creatorId: r.creatorId, createdAt: r.createdAt, price: r.budgetMax || r.budgetMin, expiresIn: r.expiresIn,
+  hasImage: !!r.image, description: r.description, location: r.location || r.pickupLocation,
+  startsAt: parseWhen(r.date), grabCount: r.responders,
+});
+/** Remember what this person did with a service request (taste + hides it next time). */
+const markRequest = (uid: string | undefined, r: ServiceRequest, v: 'skip' | 'save' | 'grab') => {
+  if (uid && feedStore.uid === uid && feedStore.loaded) feedStore.mark('request', describeRequest(r), v);
+};
 
 /** The welcome picks open once per app session at most. */
 let picksAsked = false;
@@ -1639,6 +1658,7 @@ export default function HomeScreen() {
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
     }
     const res = await grabRequest(request.id);
+    if (res.ok) markRequest(user?.id, request, 'grab');
     setGrabbing(false);
     if (!res.ok) { grabFailed('Request unavailable', res.reason); return; }
 
@@ -1696,19 +1716,19 @@ export default function HomeScreen() {
         },
       },
     );
-  }, [grabRequest, grabbing, openGrabChat, createPlan]);
+  }, [grabRequest, grabbing, openGrabChat, createPlan, user?.id]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
-    console.log('Card action:', 'skip_request', request.id);
-  }, []);
+    markRequest(user?.id, request, 'skip');
+  }, [user?.id]);
 
   const handleSaveRequest = useCallback((request: ServiceRequest) => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    console.log('Card action:', 'save_request', request.id);
+    markRequest(user?.id, request, 'save');
     setSavedRequests(prev => [...prev, request]);
-  }, []);
+  }, [user?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1790,6 +1810,7 @@ export default function HomeScreen() {
         category: s.category,
         grabCount: s.grabCount,
         createdAt: s.createdAt,
+        location: s.location,
       }));
     const merged = [...convertedSkills, ...createdSkills];
     // Exclude own skills
@@ -1810,6 +1831,8 @@ export default function HomeScreen() {
         })
       : (serviceRequests || []);
   }, [serviceRequests, user?.id]);
+  // Ranked per person: near them, soon, and what they like first (lib/feedEngine.ts).
+  const { items: rankedRequests } = useRankedFeed('request', allRequests, describeRequest);
 
   // ─── Create Handlers ───
   const resetDealForm = () => {
@@ -1918,7 +1941,7 @@ export default function HomeScreen() {
             <Text style={[styles.appName, { color: colors.text }]}>Apparently</Text>
           </View>
           <View style={styles.headerActions}>
-            <HeaderActivityButtons size={24} />
+            <HeaderActivityButtons size={24} search />
           </View>
         </View>
 
@@ -2052,7 +2075,7 @@ export default function HomeScreen() {
             )}
           </View>
           <SwipeableServiceRequests
-            requests={allRequests}
+            requests={rankedRequests}
             onGrab={handleGrabRequest}
             onSkip={handleSkipRequest}
             onSave={handleSaveRequest}

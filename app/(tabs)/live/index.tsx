@@ -7,7 +7,7 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ChevronLeft, Plus, Lock, Globe, X, Sparkles, Check } from 'lucide-react-native';
+import { ChevronLeft, Plus, Lock, Globe, X, Sparkles, Check, Trash2 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -27,7 +27,7 @@ function ago(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function RoomCard({ room, mine, onOpen, onLongPress, colors }: { room: SpotRoom; mine: boolean; onOpen: () => void; onLongPress?: () => void; colors: any }) {
+function RoomCard({ room, mine, onOpen, onLongPress, onDelete, colors }: { room: SpotRoom; mine: boolean; onOpen: () => void; onLongPress?: () => void; onDelete?: () => void; colors: any }) {
   const t = themeFor(room.theme);
   return (
     <TouchableOpacity activeOpacity={0.85} onPress={onOpen} onLongPress={onLongPress} style={styles.card} accessibilityLabel={`Open ${room.name}`}>
@@ -35,6 +35,11 @@ function RoomCard({ room, mine, onOpen, onLongPress, colors }: { room: SpotRoom;
         <Text style={styles.cardEmoji}>{t.emoji}</Text>
         {room.visibility !== 'public' ? (
           <View style={styles.lock}><Lock size={11} color="#FFF" /></View>
+        ) : null}
+        {onDelete ? (
+          <TouchableOpacity onPress={onDelete} style={styles.trash} hitSlop={8} accessibilityLabel={`Delete ${room.name}`}>
+            <Trash2 size={14} color="#FFF" />
+          </TouchableOpacity>
         ) : null}
       </LinearGradient>
       <View style={styles.cardBody}>
@@ -133,7 +138,7 @@ export default function SpotLobby() {
 
   const manage = (room: SpotRoom) => {
     tap();
-    Alert.alert(room.name, undefined, [
+    Alert.alert(`Delete "${room.name}"?`, 'Everything in this room will be removed for everyone. This can’t be undone.', [
       {
         text: 'Delete room', style: 'destructive',
         onPress: async () => {
@@ -202,7 +207,7 @@ export default function SpotLobby() {
               </TouchableOpacity>
             ) : (
               <View style={styles.grid}>
-                {mine.map((r) => <RoomCard key={r.id} room={r} mine colors={colors} onOpen={() => openRoom(r.id)} onLongPress={() => manage(r)} />)}
+                {mine.map((r) => <RoomCard key={r.id} room={r} mine colors={colors} onOpen={() => openRoom(r.id)} onLongPress={() => manage(r)} onDelete={() => manage(r)} />)}
               </View>
             )}
 
@@ -299,6 +304,7 @@ const styles = StyleSheet.create({
   cardArt: { height: 110, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   cardEmoji: { fontSize: 40 },
   lock: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 10, padding: 4 },
+  trash: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 6 },
   cardBody: { paddingTop: 8, paddingHorizontal: 2 },
   cardTitle: { fontSize: 15, fontWeight: '800' },
   cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },

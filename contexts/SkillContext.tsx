@@ -36,6 +36,8 @@ export interface UserSkill {
   expiresIn?: number; // seconds until deal expires (only when the deal has an end)
   /** When the deal ends (ISO). null/undefined = no end. */
   expiresAt?: string | null;
+  /** Where the seller is (their profile city), for "near you" ranking. */
+  location?: string;
 }
 
 /** Columns added after launch; writes retry without them on older databases. */
@@ -116,7 +118,7 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
             .from('skill_deals')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(50);
+            .limit(200);
           if (!error && data?.length) liveSkills = data.map(mapRow);
         }
 
@@ -135,11 +137,12 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
           try {
             const ids = [...new Set(liveSkills.map((x) => x.creatorId).filter(Boolean))];
             if (ids.length) {
-              const { data: profs } = await supabase.from('profiles').select('id, full_name, username, avatar').in('id', ids);
+              const { data: profs } = await supabase.from('profiles').select('id, full_name, username, avatar, location').in('id', ids);
               const byId = new Map((profs || []).map((p: any) => [p.id, p]));
               for (const x of liveSkills) {
                 const pr: any = byId.get(x.creatorId || '');
                 if (pr) x.creator = { ...x.creator, name: x.creator?.name && x.creator.name !== 'Unknown' ? x.creator.name : (pr.full_name || pr.username || 'Someone'), avatar: x.creator?.avatar || pr.avatar || '' };
+                if (pr?.location) x.location = pr.location;
               }
             }
           } catch { /* names are optional */ }

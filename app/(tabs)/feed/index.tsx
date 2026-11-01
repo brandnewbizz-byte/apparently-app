@@ -487,6 +487,7 @@ function PostCard({
           </View>
 
           {/* Bottom caption — tap to open the post + comments */}
+          {post.caption || commentCount > 0 ? (
           <TouchableOpacity activeOpacity={0.85} style={[igCardStyles.commentPreview, { bottom: height ? tabBarSpace : 0 }]} onPress={onPress}>
             {post.caption ? (
               <Text style={igCardStyles.commentPreviewCaption} numberOfLines={2}>
@@ -494,10 +495,13 @@ function PostCard({
                 {post.caption}
               </Text>
             ) : null}
-            <Text style={igCardStyles.commentPreviewLinkText}>
-              {commentCount > 0 ? `View all ${commentCount} comment${commentCount === 1 ? '' : 's'}` : 'Add a comment…'}
-            </Text>
+            {commentCount > 0 ? (
+              <Text style={igCardStyles.commentPreviewLinkText}>
+                {`View all ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+              </Text>
+            ) : null}
           </TouchableOpacity>
+          ) : null}
 
           {/* Live voice layer — only the active post holds a connection */}
           {isActive ? (
@@ -564,11 +568,13 @@ function PostCard({
             </Text>
           </View>
 
-          <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
-            <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
-              {commentCount > 0 ? `View all ${commentCount} comment${commentCount === 1 ? '' : 's'}` : 'Add a comment…'}
-            </Text>
-          </TouchableOpacity>
+          {commentCount > 0 ? (
+            <TouchableOpacity style={igCardStyles.commentsLink} onPress={() => onComment(post)}>
+              <Text style={[igCardStyles.commentsLinkText, { color: colors.textTertiary }]}>
+                {`View all ${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <View style={{ height: 10 }} />
         </>
       ) : null}
