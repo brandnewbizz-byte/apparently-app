@@ -40,6 +40,8 @@ import type { AudioPlayer, RecordingOptions } from 'expo-audio';
 import { supabase } from '@/lib/supabase';
 import { ensureUploadSpace } from '@/lib/uploadQuota';
 import { generateUsername } from '@/lib/sanitize';
+import { ringUser } from '@/lib/calls';
+import { callsAvailable } from '@/lib/webrtc';
 
 // Voice notes are recorded as AAC/M4A so they decode natively on both iOS and
 // Android (mirrors lib/audio-relay.ts, which already migrated off expo-av).
@@ -160,19 +162,16 @@ export default function ConversationScreen() {
     }
   }, [participantId, markConversationAsRead]);
 
-  const startCall = async () => {
+  const startCall = async (video: boolean) => {
     if (!authUser?.id || !participantId) return;
     const callRoomId = `call-${Date.now()}`;
+    const myName = (authUser as any)?.fullName || (authUser as any)?.username || 'Someone';
     try {
-      await supabase.from('notifications').insert({
-        user_id: participantId,
-        actor_id: authUser.id,
-        type: 'call_request',
-        title: `${(authUser as any)?.fullName || 'Someone'} is calling you`,
-        body: 'is calling you...',
-        data: { room_id: callRoomId, caller_id: authUser.id },
-        read: false,
-        created_at: new Date().toISOString(),
+      await ringUser({
+        me: { id: authUser.id, name: myName, avatar: (authUser as any)?.avatar },
+        targetId: participantId,
+        roomId: callRoomId,
+        video,
       });
     } catch (e) {
       console.warn('[Call] notification insert failed', e);
@@ -182,12 +181,14 @@ export default function ConversationScreen() {
       params: {
         roomId: callRoomId,
         callerId: authUser.id,
-        callerName: (authUser as any)?.fullName || 'You',
+        callerName: myName,
         targetId: participantId,
         targetName: participant.name,
         isOutgoing: '1',
         currentUserId: authUser.id,
-        currentUserName: (authUser as any)?.fullName || 'You',
+        currentUserName: myName,
+        video: video ? '1' : '0',
+        peerAvatar: participant.avatar,
       },
     } as any);
   };
@@ -770,18 +771,18 @@ export default function ConversationScreen() {
             </Text>
           </View>
         </TouchableOpacity>
-        {/* Voice and video calls need native WebRTC, which isn't in the app builds yet — web only for now. */}
-        {Platform.OS === 'web' && (
+        {/* Voice and video calls (hidden on app builds without WebRTC) */}
+        {callsAvailable() && (
         <View style={styles.headerActions}>
           <TouchableOpacity
-            onPress={() => Alert.alert('Call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: startCall }])}
+            onPress={() => Alert.alert('Call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: () => startCall(false) }])}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             accessibilityLabel="Audio call"
           >
             <Phone size={24} color={colors.text} strokeWidth={1.9} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => Alert.alert('Video call', `Call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: startCall }])}
+            onPress={() => Alert.alert('Video call', `Video call ${participant.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Call', onPress: () => startCall(true) }])}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             accessibilityLabel="Video call"
           >
