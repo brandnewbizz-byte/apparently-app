@@ -3,7 +3,7 @@ import { Home, Newspaper, User, LayoutGrid } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform, Image } from 'react-native';
 
-const PLANNER_ICON = require('@/assets/images/planner-tab.png');
+const PLANNER_ICON = require('@/assets/images/planner-tab_1.png');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
