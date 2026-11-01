@@ -1,4 +1,4 @@
-/** Edit profile: photo, name, username and bio. */
+/** Edit profile: photo, name, username, bio and city. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -21,6 +21,7 @@ export default function EditProfile() {
   const [name, setName] = useState(user?.fullName || '');
   const [username, setUsername] = useState(user?.username || '');
   const [bio, setBio] = useState(user?.bio || '');
+  const [city, setCity] = useState(user?.location || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,7 +32,7 @@ export default function EditProfile() {
   const [filled, setFilled] = useState(!!user?.id);
   useEffect(() => {
     if (filled || !user?.id) return;
-    setName(user.fullName || ''); setUsername(user.username || ''); setBio(user.bio || ''); setAvatar(user.avatar || ''); // eslint-disable-line react-hooks/set-state-in-effect
+    setName(user.fullName || ''); setUsername(user.username || ''); setBio(user.bio || ''); setCity(user.location || ''); setAvatar(user.avatar || ''); // eslint-disable-line react-hooks/set-state-in-effect
     setFilled(true);
   }, [filled, user]);
 
@@ -40,8 +41,9 @@ export default function EditProfile() {
     name.trim() !== (user?.fullName || '')
     || username.trim().toLowerCase() !== (user?.username || '')
     || bio.trim() !== (user?.bio || '')
+    || city.trim() !== (user?.location || '')
     || avatar !== (user?.avatar || '')
-  ), [name, username, bio, avatar, user]);
+  ), [name, username, bio, city, avatar, user]);
   const canSave = dirty && !saving && !!name.trim() && usernameCheck.ok;
 
   const touch = () => { setSaved(false); setError(null); };
@@ -83,6 +85,7 @@ export default function EditProfile() {
       }
       const updates = {
         full_name: sanitizeFullName(name), username: sanitizeUsername(username), bio: sanitizeBio(bio),
+        location: city.trim().replace(/\s+/g, ' ').slice(0, 60) || null,
         avatar: finalAvatar, updated_at: new Date().toISOString(),
       };
       const { error: saveErr } = await supabase.from('profiles').update(updates).eq('id', user.id);
@@ -149,6 +152,14 @@ export default function EditProfile() {
           multiline maxLength={150} accessibilityLabel="Bio"
         />
         <Text style={[styles.helper, { color: colors.textTertiary, textAlign: 'right' }]}>{bio.length}/150</Text>
+
+        <Text style={[styles.label, { color: colors.textSecondary }]}>City</Text>
+        <TextInput
+          style={input} value={city} onChangeText={(t) => { setCity(t); touch(); }}
+          placeholder="e.g. Newark, NJ" placeholderTextColor={colors.textTertiary}
+          autoCapitalize="words" maxLength={60} accessibilityLabel="City"
+        />
+        <Text style={[styles.helper, { color: colors.textTertiary }]}>Used to show you bundles, deals and requests near you first.</Text>
 
         {error ? <Text style={[styles.note, { color: '#EF4444' }]}>{error}</Text> : null}
         {saved ? <Text style={[styles.note, { color: '#16A34A' }]}>✓ Profile saved</Text> : null}
