@@ -441,7 +441,7 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
     const existing = conversations.find(c => c.participantId === participantId);
     if (existing) {
       // Update participant info if it was previously unknown
-      if (existing.participantName === 'Unknown User' && participantInfo?.name) {
+      if (['Unknown', 'Unknown User', 'User', ''].includes(existing.participantName || '') && participantInfo?.name) {
         return {
           ...existing,
           participantName: participantInfo.name,
@@ -525,6 +525,13 @@ export const [MessagingProvider, useMessaging] = createContextHook<MessagingStat
 
     if (existingIndex >= 0) {
       conversation = { ...updatedConversations[existingIndex] };
+      // Replace a placeholder name once the real profile is known.
+      const placeholder = !conversation.participantName || ['Unknown', 'Unknown User', 'User'].includes(conversation.participantName);
+      if (placeholder && participantInfo?.name) {
+        conversation.participantName = participantInfo.name;
+        conversation.participantAvatar = participantInfo.avatar || conversation.participantAvatar;
+        conversation.participantUsername = participantInfo.username || conversation.participantUsername;
+      }
     } else {
       conversation = getOrCreateConversation(participantId, participantInfo);
     }
