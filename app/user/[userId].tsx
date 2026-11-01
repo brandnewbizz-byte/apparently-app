@@ -48,6 +48,7 @@ import { useSocial } from '@/contexts/SocialContext';
 import { fetchUserPosts, type ProfilePost } from '@/lib/profilePosts';
 import PostGrid from '@/components/profile/PostGrid';
 import PostViewer from '@/components/profile/PostViewer';
+import { profileUrl, shareLink } from '@/lib/share';
 
 const ACCENT_COLORS = {
   gold: '#FFB800',
@@ -67,7 +68,7 @@ const ACCENT_COLORS = {
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export default function UserProfileScreen() {
-  const { userId, f } = useLocalSearchParams<{ userId: string; f?: string }>();
+  const { userId, f, post: openPostId } = useLocalSearchParams<{ userId: string; f?: string; post?: string }>();
   // Opened from someone's scan-to-follow code.
   const fromCode = f === '1';
   const [followedHere, setFollowedHere] = useState(false);
@@ -224,6 +225,14 @@ export default function UserProfileScreen() {
     return () => { active = false; };
   }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Opened from a shared post link (?post=<id>): show that post once posts load.
+  const openedPost = useRef(false);
+  useEffect(() => {
+    if (!openPostId || openedPost.current || !allPosts.length) return;
+    const i = allPosts.findIndex((p) => p.id === openPostId);
+    if (i >= 0) { openedPost.current = true; setViewerIndex(i); }
+  }, [openPostId, allPosts]);
+
   // The signed-in user can load after this screen opens (e.g. from a link),
   // so re-check the follow button once we know who's looking.
   useEffect(() => { checkFollowStatus(); }, [checkFollowStatus]);
@@ -296,7 +305,7 @@ export default function UserProfileScreen() {
 
   const shareProfile = () => {
     const handle = displayUsername ? `@${displayUsername}` : displayName;
-    Share.share({ message: `Check out ${handle} on Apparently` }).catch(() => {});
+    if (userId) shareLink(`Check out ${handle} on Apparently`, profileUrl(userId));
   };
 
   const onRefresh = useCallback(async () => {
