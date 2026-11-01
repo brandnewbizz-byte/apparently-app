@@ -340,7 +340,7 @@ function FeedPausePanel({ feed, noun, accent, colors, compact }: { feed: FeedSta
           <Text style={[compact ? styles.skillCooldownTimer : styles.cooldownTimer, { color: colors.text }]}>{fmtWait(feed.waitLeft)}</Text>
           <Text style={[styles.swipeEmptyText, { color: colors.text }]}>That’s this round of {noun}</Text>
           <Text style={[styles.swipeEmptySubtext, { color: colors.textSecondary }]}>
-            {plan.enforced ? `${planFor(plan.tier).name} plan: ` : ''}a new round every {Math.round(total / 60)} min
+            {plan.enforced || plan.tier === 'pro' ? `${planFor(plan.tier).name} plan: ` : ''}a new round every {total < 60 ? `${total} sec` : `${Math.round(total / 60)} min`}
           </Text>
           <View style={compact ? styles.skillCooldownProgressContainer : styles.cooldownProgressContainer}>
             <View style={[styles.cooldownProgressBg, { backgroundColor: colors.border }]}>
@@ -349,7 +349,7 @@ function FeedPausePanel({ feed, noun, accent, colors, compact }: { feed: FeedSta
           </View>
           {showUpsell ? (
             <TouchableOpacity onPress={() => openPaywall('upgrade')} style={{ marginTop: 12 }} testID={`feed-upgrade-${noun}`}>
-              <Text style={{ color: accent, fontWeight: '700', fontSize: 14 }}>Pro members never wait · Upgrade</Text>
+              <Text style={{ color: accent, fontWeight: '700', fontSize: 14 }}>Pro members wait only 30 sec · Upgrade</Text>
             </TouchableOpacity>
           ) : null}
         </>
