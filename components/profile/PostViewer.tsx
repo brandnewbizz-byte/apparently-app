@@ -33,6 +33,7 @@ import { CommentAvatar } from '@/components/comments/CommentsPanel';
 import { shortTimeAgo } from '@/components/comments/useComments';
 import { setSaved, type ProfilePost } from '@/lib/profilePosts';
 import { textGradientFor } from './PostGrid';
+import { postUrl, shareLink } from '@/lib/share';
 
 const haptic = (style = Haptics.ImpactFeedbackStyle.Light) => { if (Platform.OS !== 'web') Haptics.impactAsync(style); };
 
@@ -140,9 +141,9 @@ function Page({
 
   const sharePost = () => {
     haptic();
-    const link = post.videoUrl || post.imageUrl || '';
     const header = `${post.author.username ? '@' + post.author.username : post.author.name} on Apparently`;
-    Share.share({ message: [header, post.caption, link].filter(Boolean).join('\n\n') }).catch(() => {});
+    const link = post.author.id ? postUrl(post.author.id, post.id) : (post.videoUrl || post.imageUrl || '');
+    if (link) shareLink([header, post.caption].filter(Boolean).join('\n\n'), link);
   };
 
   const isTextOnly = !post.imageUrl && !post.videoUrl;
