@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette, Mic, Video, VideoOff } from 'lucide-react-native';
+import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette, Mic, Video, VideoOff, Trash2 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -16,7 +16,7 @@ import { useSpotRoom } from '@/hooks/useSpotRoom';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
 import { useCameraPermissions } from '@/lib/safe-camera';
 import {
-  getRoom, listInvites, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
+  deleteRoom, getRoom, listInvites, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
   type SpotPoint, type SpotRoom,
 } from '@/lib/spot';
 import { uploadImageToStorage } from '@/lib/storage';
@@ -360,6 +360,21 @@ export default function SpotRoomScreen() {
     try { await updateRoom(info.id, { theme: id }); } catch { setInfo(prev); }
   };
 
+  const removeRoom = () => {
+    if (!info) return;
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(`Delete "${info.name}"?`, 'Everything in this room will be removed for everyone. This can’t be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete room', style: 'destructive',
+        onPress: async () => {
+          try { await deleteRoom(info.id); router.replace('/(tabs)/live' as any); }
+          catch { Alert.alert('Not deleted', 'Please try again.'); }
+        },
+      },
+    ]);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   const fg = theme.dark ? '#FFF' : '#111827';
   const glass = theme.dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.75)';
@@ -461,6 +476,11 @@ export default function SpotRoomScreen() {
         {isHost ? (
           <TouchableOpacity onPress={() => setShowThemes((v) => !v)} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Change room theme">
             <Palette size={19} color={fg} />
+          </TouchableOpacity>
+        ) : null}
+        {isHost ? (
+          <TouchableOpacity onPress={removeRoom} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Delete room">
+            <Trash2 size={18} color={fg} />
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity onPress={() => { tap(); setShowInvite(true); }} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Invite friends">
