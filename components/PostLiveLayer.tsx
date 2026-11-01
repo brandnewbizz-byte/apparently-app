@@ -27,9 +27,9 @@ interface PostLiveLayerProps {
 export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0, topOffset = 0 }: PostLiveLayerProps) {
   const voice = usePostVoiceRoom({ postId, userId, userName, enabled: !!userId });
 
-  // Our mic is "talking" when it's on and unmuted — bridged into presence so
+  // While you hold the mic you're "talking" — bridged into presence so
   // other viewers see "N here now · M talking" without subscribing to audio.
-  const isTalking = voice.isMicActive && !voice.isMuted;
+  const isTalking = voice.talking;
   const presence = usePostPresence({
     postId,
     userId,
@@ -60,14 +60,13 @@ export default function PostLiveLayer({ postId, userId, userName, avatar, bottom
       {/* Voice controls — bottom-center, above the comment preview (which reaches ~102px tall) */}
       <View style={{ position: 'absolute', bottom: 60 + bottomOffset, left: 0, right: 0, alignItems: 'center', zIndex: 13 }}>
         <PostVoiceControls
-          listening={voice.isListening}
-          micActive={voice.isMicActive}
-          muted={voice.isMuted}
+          soundOn={voice.soundOn}
+          talking={voice.talking}
           connectionState={voice.connectionState}
           error={voice.error}
-          onToggleListen={voice.isListening ? voice.stopListening : voice.startListening}
-          onToggleTalk={voice.isMicActive ? voice.stopTalking : voice.startTalking}
-          onToggleMute={voice.toggleMute}
+          onToggleSound={voice.toggleSound}
+          onStartTalking={voice.startTalking}
+          onStopTalking={voice.stopTalking}
         />
       </View>
     </>
