@@ -13,6 +13,7 @@ import {
   Bookmark,
   Grid3x3,
   Share2,
+  ScanLine,
   Plus,
   MessageCircle,
   Package,
@@ -47,6 +48,8 @@ import PostGrid from '@/components/profile/PostGrid';
 import PostViewer from '@/components/profile/PostViewer';
 import { QRCode } from '@/components/QRCode';
 import { profileFollowUrl } from '@/lib/profileLink';
+import { shareLink } from '@/lib/share';
+import QRScanner from '@/components/QRScanner';
 import { useMyPaymentRequests, orderPaymentKey, money as centsMoney } from '@/lib/payments';
 
 const ACCENT = {
@@ -152,6 +155,7 @@ export default function ProfileScreen() {
   const [viewer, setViewer] = useState<{ list: ProfilePost[]; index: number; title: string } | null>(null);
   const [detail, setDetail] = useState<DetailItem | null>(null);
   const [showQR, setShowQR] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [followList, setFollowList] = useState<{ title: string; users: any[]; loading: boolean } | null>(null);
 
   const myId = user?.id;
@@ -271,7 +275,7 @@ export default function ProfileScreen() {
     tap();
     const handle = user?.username ? `@${user.username}` : (user?.fullName || 'me');
     const link = myId ? profileFollowUrl(myId) : '';
-    Share.share({ message: link ? `Follow ${handle} on Apparently: ${link}` : `Find ${handle} on Apparently`, ...(link ? { url: link } : {}) }).catch(() => {});
+    if (link) shareLink(`Follow ${handle} on Apparently`, link);
   };
 
   const openProfile = (id: string) => {
@@ -593,6 +597,16 @@ export default function ProfileScreen() {
             {username ? <Text style={styles.qrSheetHandle}>@{username}</Text> : null}
             {followUrl ? <View style={{ marginTop: 14 }}><QRCode value={followUrl} size={240} /></View> : null}
             <Text style={styles.qrSheetHint}>Scan with any phone camera to open your page and follow you.</Text>
+            {Platform.OS !== 'web' ? (
+              <TouchableOpacity
+                onPress={() => { setShowQR(false); setTimeout(() => setShowScanner(true), 250); }}
+                style={[styles.qrSheetBtn, { marginTop: 14, backgroundColor: '#111' }]}
+                testID="profile-qr-scan"
+              >
+                <ScanLine size={16} color="#FFF" />
+                <Text style={styles.qrSheetBtnText}>Scan someone’s code</Text>
+              </TouchableOpacity>
+            ) : null}
             <View style={styles.qrSheetRow}>
               <TouchableOpacity onPress={shareProfile} style={styles.qrSheetBtn} testID="profile-qr-share">
                 <Share2 size={16} color="#FFF" />
@@ -605,6 +619,16 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <QRScanner
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onOpen={(path) => {
+          setShowScanner(false);
+          const me = myId ? `/user/${myId}` : '';
+          if (path !== me) setTimeout(() => router.push(path as any), 300);
+        }}
+      />
 
       <Modal visible={!!detail} animationType="slide" transparent onRequestClose={() => setDetail(null)}>
         <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setDetail(null)}>
