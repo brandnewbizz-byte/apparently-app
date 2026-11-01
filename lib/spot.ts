@@ -143,15 +143,17 @@ export const clamp01 = (n: number) => Math.min(1, Math.max(0, Number.isFinite(n)
 // ── Rooms ─────────────────────────────────────────────────────────────────
 /** Rooms you made + open rooms from others, most recently active first. */
 export async function listRooms(myId?: string): Promise<SpotRoom[]> {
+  // The lobby lists only your own rooms; rooms you're invited to come from your invites.
+  if (!myId) return [];
   const { data, error } = await supabase
     .from('rooms')
     .select('id, name, environment, creator_id, creator_name, creator_avatar, visibility, created_at, updated_at')
+    .eq('creator_id', myId)
     .order('updated_at', { ascending: false, nullsFirst: false })
     .limit(60);
   if (error) throw error;
   return (data || [])
-    .map(mapRoom)
-    .filter((r) => r.creatorId === myId || r.visibility === 'public');
+    .map(mapRoom);
 }
 
 export async function getRoom(id: string): Promise<SpotRoom | null> {
