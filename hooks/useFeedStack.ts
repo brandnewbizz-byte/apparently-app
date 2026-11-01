@@ -5,6 +5,7 @@ import {
   feedKey, feedStore, isEligible, paceFor, rankItems,
   type FeedItemInfo, type FeedKind, type FeedPace, type FeedVerdict, type HideReason,
 } from '@/lib/feedEngine';
+import { nearness } from '@/lib/nearby';
 
 export type FeedStackState = 'loading' | 'cards' | 'wait' | 'empty';
 
@@ -43,19 +44,13 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
   const round = st.rounds[kind];
   const waitUntil = st.waitUntil[kind] || 0;
 
-  const infos = useMemo(() => {
-    const m = new Map<string, FeedItemInfo>();
-    for (const it of items) m.set(it.id, describe(it));
-    return m;
-    // describe is a pure mapper supplied inline by the caller
-  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
+  const viewerPlace = user?.location || '';
+  const infos = useMemo(() => describeAll(items, describe, viewerPlace), [items, viewerPlace]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const eligible = useMemo(() => {
-    const list = items.filter((it) => isEligible(marks[feedKey(kind, it.id)], infos.get(it.id)!, now));
-    const ranked = rankItems(list.map((it) => infos.get(it.id)!), marks, kind, now, profile);
-    const byId = new Map(items.map((it) => [it.id, it] as const));
-    return ranked.map((r) => byId.get(r.id)!).filter(Boolean);
-  }, [items, infos, marks, kind, now, profile]);
+  const eligible = useMemo(
+    () => rankEligible(items, infos, marks, kind, now, profile, user?.id || ''),
+    [items, infos, marks, kind, now, profile, user?.id],
+  );
 
   const eligibleIds = useMemo(() => new Set(eligible.map((e) => e.id)), [eligible]);
   const remaining = useMemo(() => (round ? round.ids.filter((id) => eligibleIds.has(id)) : []), [round, eligibleIds]);
@@ -119,6 +114,53 @@ export function useFeedStack<T extends { id: string }>(kind: FeedKind, items: T[
     state: 'cards', current: ordered[0], next: ordered[1],
     round: roundItems, done: roundItems.length - ordered.length, waitLeft: 0, pace, record,
   };
+}
+
+function describeAll<T extends { id: string }>(items: T[], describe: (t: T) => FeedItemInfo, viewerPlace: string): Map<string, FeedItemInfo> {
+  const m = new Map<string, FeedItemInfo>();
+  for (const it of items) {
+    const info = describe(it);
+    if (info.near == null) info.near = nearness(viewerPlace, info.location);
+    m.set(it.id, info);
+  }
+  return m;
+}
+
+function rankEligible<T extends { id: string }>(
+  items: T[], infos: Map<string, FeedItemInfo>, marks: typeof feedStore.state.marks, kind: FeedKind,
+  now: number, profile: typeof feedStore.state.profile, seed: string,
+): T[] {
+  const list = items.filter((it) => isEligible(marks[feedKey(kind, it.id)], infos.get(it.id)!, now));
+  const ranked = rankItems(list.map((it) => infos.get(it.id)!), marks, kind, now, profile, seed);
+  const byId = new Map(items.map((it) => [it.id, it] as const));
+  return ranked.map((r) => byId.get(r.id)!).filter(Boolean);
+}
+
+/**
+ * A ranked list without rounds (service requests): same taste, place and
+ * per-person order as the swipe stacks. `record` remembers grabs/skips/saves.
+ */
+export function useRankedFeed<T extends { id: string }>(kind: FeedKind, items: T[], describe: (t: T) => FeedItemInfo) {
+  const { user } = useAuth();
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => feedStore.subscribe(rerender), []);
+  useEffect(() => { feedStore.load(user?.id || null); }, [user?.id]);
+  const loaded = !!user?.id && feedStore.loaded && feedStore.uid === user.id;
+  const marks = feedStore.state.marks;
+  const profile = feedStore.state.profile;
+  const viewerPlace = user?.location || '';
+  const infos = useMemo(() => describeAll(items, describe, viewerPlace), [items, viewerPlace]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Ordered once per visit (and when the list changes), so cards don't jump while swiping.
+  const [now] = useState(() => Date.now());
+  const ranked = useMemo(
+    () => (loaded ? rankEligible(items, infos, marks, kind, now, profile, user?.id || '') : items),
+    // marks left out on purpose: acting on a card shouldn't reshuffle the rest mid-swipe
+    [loaded, items, infos, kind, now, profile, user?.id], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const record = useCallback((item: T, verdict: FeedVerdict, reason?: HideReason) => {
+    if (loaded) feedStore.mark(kind, describe(item), verdict, reason);
+  }, [kind, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { items: ranked, record };
 }
 
 /**
