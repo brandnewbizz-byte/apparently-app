@@ -262,7 +262,7 @@ export default function WelcomeScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <Animated.View style={[styles.hero, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-              <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} accessibilityLabel="Apparently logo" />
+              <Image source={require('@/assets/images/icon_1.png')} style={styles.logoImage} accessibilityLabel="Apparently logo" />
               <Text style={styles.title}>Apparently</Text>
             </Animated.View>
 
