@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Heart, Send } from 'lucide-react-native';
+import { Heart, Search, Send } from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
@@ -12,8 +12,9 @@ import { useMessaging } from '@/contexts/MessagingContext';
  * Instagram-style header actions:
  *  ♡  Activity (notifications) — red dot when there's anything new
  *  ✈  Messages — red count badge for unread conversations
+ *  🔍 Search (optional, first) — same as the Feed page
  */
-export default function HeaderActivityButtons({ size = 25, color, gap }: { size?: number; color?: string; gap?: number }) {
+export default function HeaderActivityButtons({ size = 25, color, gap, search }: { size?: number; color?: string; gap?: number; search?: boolean }) {
   const router = useRouter();
   const { colors } = useTheme();
   const iconColor = color || colors.text;
@@ -41,6 +42,11 @@ export default function HeaderActivityButtons({ size = 25, color, gap }: { size?
 
   return (
     <View style={[styles.row, gap !== undefined && { gap }]}>
+      {search ? (
+        <TouchableOpacity onPress={() => go('/(tabs)/search')} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityLabel="Search" testID="header-search">
+          <Search size={size - 1} color={iconColor} strokeWidth={2.2} />
+        </TouchableOpacity>
+      ) : null}
       <TouchableOpacity
         onPress={() => go('/notifications')}
         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
