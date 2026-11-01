@@ -601,6 +601,9 @@ export default function PlannerScreen() {
           ),
           headerRight: () => (
             <View style={styles.headerRight}>
+              <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/search' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Search">
+                <Search size={17} color={colors.text} />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/live' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Live rooms">
                 <Radio size={17} color={colors.text} />
               </TouchableOpacity>
