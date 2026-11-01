@@ -51,7 +51,7 @@ export const PLANS: PlanInfo[] = [
   },
   {
     tier: 'pro', name: 'Pro', fallbackPrice: '$19.99', tagline: 'No limits',
-    perks: ['Unlimited grabs, skips & saves', 'Unlimited bundles, skills & jobs', 'Unlimited Spot rooms', '200 GB of space', 'Everything in Plus'],
+    perks: ['Unlimited grabs, skips & saves', 'New cards every 30 seconds', 'Unlimited bundles, skills & jobs', 'Unlimited Spot rooms', '200 GB of space', 'Everything in Plus'],
     limits: { actions: null, can_save: true, listings: null, spot_rooms: null, storage_gb: 200 },
     productId: 'apparently_pro_monthly', entitlement: 'pro', accent: ['#F59E0B', '#EF4444'],
   },
