@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
   BellRing, Package, Zap, Check, CheckCheck, X, MessageCircle, Plus, Trash2, CalendarDays, Pause, Play, Pencil,
-  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck,
+  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck, Search,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
@@ -478,6 +478,9 @@ export default function ManageScreen() {
             <Text style={[styles.h1, { color: colors.text }]}>Manage</Text>
             <Text style={[styles.muted, { color: colors.textTertiary }]}>Your listings, orders and plans</Text>
           </View>
+          <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/search' as any); }} hitSlop={10} style={styles.searchBtn} accessibilityLabel="Search">
+            <Search size={22} color={colors.text} strokeWidth={2.2} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => { haptic(); setCreateOpen(true); }} style={[styles.newBtn, { backgroundColor: colors.text }]} testID="manage-new">
             <Plus size={16} color={colors.background} strokeWidth={3} />
             <Text style={[styles.newText, { color: colors.background }]}>New</Text>
@@ -728,6 +731,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   h1: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   muted: { fontSize: 12, lineHeight: 17 },
+  searchBtn: { padding: 6 },
   newBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
   newText: { fontSize: 14, fontWeight: '800' },
   summary: { borderRadius: 22, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
