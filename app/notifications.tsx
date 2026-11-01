@@ -20,6 +20,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications, AppNotification } from '@/contexts/NotificationsContext';
 import { answerInvite } from '@/lib/spot';
+import { answerParams, declineCall } from '@/lib/calls';
+import { callsAvailable } from '@/lib/webrtc';
 import { useConnections, ConnectionRequest } from '@/contexts/ConnectionsContext';
 import { supabase } from '@/lib/supabase';
 
@@ -74,7 +76,7 @@ function describe(n: AppNotification): string {
       ? `took your request${d.request_title ? ` "${d.request_title}"` : ''}.`
       : `offered to help with${d.request_title ? ` "${d.request_title}"` : ' your request'}.`;
     case 'job_grabbed': return `grabbed your ${d.job_label || 'job'}${d.job_title ? ` "${d.job_title}"` : ''}.`;
-    case 'call_request': return 'is calling you.';
+    case 'call_request': return d.video ? 'video called you.' : 'called you.';
     case 'room_invite': return d.status === 'declined'
       ? `invited you to "${d.room_name || 'a Spot room'}" · declined`
       : `invited you to hang out in "${d.room_name || 'a Spot room'}" on Spot.`;
@@ -207,19 +209,13 @@ export default function NotificationsScreen() {
   const answerCall = (n: AppNotification) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     markRead(n.id);
-    router.push({
-      pathname: '/call/[roomId]' as any,
-      params: {
-        roomId: n.data?.room_id || `call-${Date.now()}`,
-        callerId: n.actorId,
-        callerName: n.actorName,
-        targetId: user?.id,
-        targetName: user?.fullName || 'You',
-        isOutgoing: '0',
-        currentUserId: user?.id,
-        currentUserName: user?.fullName || 'You',
-      } as any,
-    } as any);
+    const me = { id: user?.id || '', name: user?.fullName || 'You' };
+    router.push({ pathname: '/call/[roomId]' as any, params: answerParams(n, me) as any } as any);
+  };
+
+  const declineIncoming = (n: AppNotification) => {
+    declineCall(n.data?.room_id, user?.id, n.actorId);
+    remove(n.id);
   };
 
   const confirmRemove = (n: AppNotification) => {
@@ -250,12 +246,12 @@ export default function NotificationsScreen() {
     if (n.type === 'call_request') {
       return (
         <View style={styles.actionPair}>
-          {Platform.OS === 'web' && (
+          {callsAvailable() && (
           <TouchableOpacity style={[styles.roundAction, { backgroundColor: '#22C55E' }]} onPress={() => answerCall(n)}>
             <Phone size={16} color="#FFF" />
           </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.roundAction, { backgroundColor: colors.backgroundTertiary }]} onPress={() => remove(n.id)}>
+          <TouchableOpacity style={[styles.roundAction, { backgroundColor: colors.backgroundTertiary }]} onPress={() => declineIncoming(n)}>
             <X size={16} color={colors.text} />
           </TouchableOpacity>
         </View>
