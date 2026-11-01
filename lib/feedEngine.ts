@@ -20,9 +20,18 @@
  * Starting picks: the 4 kinds of plans picked on the welcome screen get a head start
  * that fades as real grabs and skips come in.
  *
- * Order: cards are scored (new, ending soon, few spots, popular, photo, taste…), then
- * mixed so each 7 cards hold ~4 from favourite types, ~2 from types we're unsure about
- * and ~1 new or trending card, never the same seller twice in a row.
+ * Order: cards are scored (near you, happening soon, taste, new, ending soon, few spots,
+ * popular, photo…), then mixed so each 7 cards hold ~4 from favourite types or nearby,
+ * ~2 from types we're unsure about and ~1 new or trending card, never the same seller
+ * twice in a row. Anyone's listings can show — following isn't needed.
+ *
+ * Near you: the card's place vs the city on the viewer's profile (lib/nearby.ts):
+ * same city counts most, "comes to you"/online next, then same state; another state sinks.
+ * Happening soon: dated cards (service requests, dated bundles) rise as the day nears and
+ * drop out once it has passed.
+ *
+ * Everyone sees a different order: besides their own taste and place, a small shuffle
+ * seeded by their account and the day breaks ties differently for each person.
  *
  * Pace: cards come in rounds; between rounds there is a wait that depends on the
  * plan. Pro never waits.
@@ -32,7 +41,7 @@ import type { Tier } from '@/lib/plans';
 import { supabase } from '@/lib/supabase';
 import { GOING_WITH_VIBE, type GoingWith } from '@/lib/vibes';
 
-export type FeedKind = 'bundle' | 'skill';
+export type FeedKind = 'bundle' | 'skill' | 'request';
 export type FeedVerdict = 'skip' | 'save' | 'grab' | 'hide';
 export type HideReason = 'pricey' | 'not_for_me' | 'far' | 'dates';
 
@@ -52,6 +61,10 @@ export interface FeedItemInfo {
   grabCount?: number;
   hasImage?: boolean;
   description?: string;
+  /** How close to the viewer: 1 same city · 0.7 comes to you/online · 0.5 same state · 0 elsewhere. */
+  near?: number;
+  /** When it happens (ms), for dated cards. */
+  startsAt?: number;
 }
 
 interface Mark {
@@ -101,6 +114,7 @@ const norm = (s?: string) => (s || '').trim().toLowerCase();
 
 /** Can this card be shown in the stack now? */
 export function isEligible(m: Mark | undefined, item: FeedItemInfo, now = Date.now()): boolean {
+  if (item.startsAt != null && item.startsAt < now - DAY) return false; // already happened
   if (!m) return true;
   if (m.v !== 'skip') return false;
   if (m.skips >= SKIPS_UNTIL_GONE) return false;
@@ -213,8 +227,13 @@ function likingOf(item: FeedItemInfo, taste: Taste): number {
   return best === -Infinity ? 0 : best;
 }
 
-export function scoreItem(item: FeedItemInfo, taste: Taste, mark: Mark | undefined, now = Date.now()): number {
+export function scoreItem(item: FeedItemInfo, taste: Taste, mark: Mark | undefined, now = Date.now(), seed = ''): number {
   let score = 0;
+  if (item.near != null) score += item.near > 0 ? 3 * item.near : -1.5;                         // near you
+  if (item.startsAt != null) {                                                                  // happening soon
+    const days = (item.startsAt - now) / DAY;
+    if (days >= -1 && days <= 14) score += 2 * (1 - Math.max(0, days) / 14);
+  }
   const created = item.createdAt ? Date.parse(item.createdAt) : NaN;
   if (!Number.isNaN(created)) score += 3 * Math.exp(-Math.max(0, now - created) / (5 * DAY)); // new first
   if (item.expiresIn && item.expiresIn > 0 && item.expiresIn < 48 * 3600) score += 1.5;       // ending soon
@@ -229,7 +248,7 @@ export function scoreItem(item: FeedItemInfo, taste: Taste, mark: Mark | undefin
   if (item.location && taste.farPlaces.has(norm(item.location))) score -= 2;                    // "too far"
   if (!mark) score += 1;                                                                        // never seen
   const day = new Date(now).toISOString().slice(0, 10);
-  score += 0.6 * hash01(`${item.id}|${day}`);                                                   // daily shuffle
+  score += 1.2 * hash01(`${seed}|${item.id}|${day}`);                                           // per-person daily shuffle
   return score;
 }
 
@@ -245,10 +264,10 @@ const CHECK_IN_EVERY = 30;
  * Best first, mixed by type, and never the same seller twice in a row when
  * there's another choice.
  */
-export function rankItems<T extends FeedItemInfo>(items: T[], marks: Record<string, Mark>, kind: FeedKind, now = Date.now(), profile?: FeedProfile): T[] {
+export function rankItems<T extends FeedItemInfo>(items: T[], marks: Record<string, Mark>, kind: FeedKind, now = Date.now(), profile?: FeedProfile, seed = ''): T[] {
   const taste = buildTaste(marks, kind, profile, now);
   const scored = items
-    .map((it) => ({ it, s: scoreItem(it, taste, marks[key(kind, it.id)], now) }))
+    .map((it) => ({ it, s: scoreItem(it, taste, marks[key(kind, it.id)], now, seed) }))
     .sort((a, b) => b.s - a.s);
 
   const buckets: Record<Bucket, T[]> = { top: [], unsure: [], discovery: [] };
@@ -273,7 +292,7 @@ export function rankItems<T extends FeedItemInfo>(items: T[], marks: Record<stri
     const created = it.createdAt ? Date.parse(it.createdAt) : NaN;
     const fresh = !Number.isNaN(created) && now - created < 3 * DAY;
     const unseen = !marks[key(kind, it.id)];
-    if (liking > 0.15) buckets.top.push(it);
+    if (liking > 0.15 || (it.near ?? 0) >= 1) buckets.top.push(it);
     else if (unseen && (fresh || (it.grabCount || 0) >= 3)) buckets.discovery.push(it);
     else buckets.unsure.push(it);
   }
