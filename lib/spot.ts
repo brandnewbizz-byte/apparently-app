@@ -199,9 +199,11 @@ export async function updateRoom(id: string, patch: { name?: string; theme?: str
   if (error) throw error;
 }
 
+/** Deletes a room you made (public or locked). Throws if nothing was deleted. */
 export async function deleteRoom(id: string) {
-  const { error } = await supabase.from('rooms').delete().eq('id', id);
+  const { data, error } = await supabase.from('rooms').delete().eq('id', id).select('id');
   if (error) throw error;
+  if (!data?.length) throw new Error('Room not deleted');
 }
 
 /** Bump the room so it rises to the top of the lobby (only the owner can). */
