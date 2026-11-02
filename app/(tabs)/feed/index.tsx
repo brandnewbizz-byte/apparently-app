@@ -39,6 +39,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useCreatePost } from '@/contexts/CreatePostContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
+import type { VideoClip } from '@/lib/videoClip';
 import StoriesViewer, { type StoryUser, type StoryMedia } from '@/components/StoriesViewer';
 import StoryRing from '@/components/StoryRing';
 import CreateStory from '@/components/CreateStory';
@@ -630,6 +631,7 @@ export default function FeedScreen() {
   const [createPreloadMediaWidth, setCreatePreloadMediaWidth] = useState<number | undefined>(undefined);
   const [createPreloadMediaHeight, setCreatePreloadMediaHeight] = useState<number | undefined>(undefined);
   const [createMediaType, setCreateMediaType] = useState<'photo' | 'video'>('photo');
+  const [createNeedsTrim, setCreateNeedsTrim] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [createCategory, setCreateCategory] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
@@ -998,12 +1000,13 @@ export default function FeedScreen() {
   // expo-av was removed in Expo SDK 58 — video now plays through expo-video.
   const VideoPlayer = AppVideo;
 
-  const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string }) => {
+  const handleCreatePost = (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category?: string; clip?: VideoClip }) => {
     const isVideoPost = !!data.mediaUri && createMediaType === 'video';
     const run = async () => {
       setPosting({ thumb: isVideoPost ? undefined : data.mediaUri });
       const id = await createPost(data.caption, data.mediaUri, {
         mediaType: data.mediaUri ? (isVideoPost ? 'video' : 'image') : undefined,
+        clip: isVideoPost ? data.clip : undefined,
       });
       if (id) {
         setPosting(null);
@@ -1050,6 +1053,7 @@ export default function FeedScreen() {
   const handleCameraCapture = (media: CapturedMedia) => {
     // Photo or a video recorded in the camera's Video mode.
     setCreateMediaType(media.type === 'video' ? 'video' : 'photo');
+    setCreateNeedsTrim(false);
     setCreatePreloadMedia(media.uri);
     setCreatePreloadMediaWidth(media.width || undefined);
     setCreatePreloadMediaHeight(media.height || undefined);
@@ -1067,14 +1071,15 @@ export default function FeedScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.8,
       allowsEditing: false,
-      videoMaxDuration: 60,
     });
     if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
-      if (asset.type === 'video' && asset.duration && asset.duration > 60000) {
-        Alert.alert('Video too long', 'Please select a video under 60 seconds.');
+      // Up to 3 minutes can be picked; anything over 60 seconds opens the trimmer.
+      if (asset.type === 'video' && asset.duration && asset.duration > 180000) {
+        Alert.alert('Video too long', 'Please pick a video under 3 minutes, then trim it to 60 seconds.');
         return;
       }
+      setCreateNeedsTrim(asset.type === 'video' && !!asset.duration && asset.duration > 60500);
       if (asset.fileSize && asset.fileSize > 100 * 1024 * 1024) {
         Alert.alert('File too large', 'Please pick something under 100 MB.');
         return;
@@ -1363,6 +1368,7 @@ export default function FeedScreen() {
         preloadMediaWidth={createPreloadMediaWidth}
         preloadMediaHeight={createPreloadMediaHeight}
         preloadIsVideo={createMediaType === 'video'}
+        preloadNeedsTrim={createNeedsTrim}
         backgroundColor={colors.background}
         textColor={colors.text}
         accentColor={colors.accent}
