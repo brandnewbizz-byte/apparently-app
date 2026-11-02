@@ -61,12 +61,14 @@ export default function PostLiveLayer({ postId, userId, userName, avatar, bottom
       <View style={{ position: 'absolute', bottom: 60 + bottomOffset, left: 0, right: 0, alignItems: 'center', zIndex: 13 }}>
         <PostVoiceControls
           soundOn={voice.soundOn}
-          talking={voice.talking}
+          live={voice.live}
+          micMuted={voice.micMuted}
           connectionState={voice.connectionState}
           error={voice.error}
           onToggleSound={voice.toggleSound}
-          onStartTalking={voice.startTalking}
-          onStopTalking={voice.stopTalking}
+          onGoLive={voice.goLive}
+          onEndLive={voice.endLive}
+          onToggleMic={voice.toggleMic}
         />
       </View>
     </>
