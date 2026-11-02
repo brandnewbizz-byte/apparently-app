@@ -65,6 +65,8 @@ export interface FeedItemInfo {
   near?: number;
   /** When it happens (ms), for dated cards. */
   startsAt?: number;
+  /** Bundles / skill deals leave Home at this time (ms) unless re-shared. */
+  liveUntil?: number;
 }
 
 interface Mark {
@@ -116,7 +118,11 @@ const norm = (s?: string) => (s || '').trim().toLowerCase();
 /** Can this card be shown in the stack now? */
 export function isEligible(m: Mark | undefined, item: FeedItemInfo, now = Date.now()): boolean {
   if (item.startsAt != null && item.startsAt < now - DAY) return false; // already happened
+  if (item.liveUntil != null && item.liveUntil <= now) return false; // 3 days up, not re-shared
   if (!m) return true;
+  // Re-shared after this person skipped it → treat it as new again.
+  const posted = item.createdAt ? Date.parse(item.createdAt) : NaN;
+  if (m.v === 'skip' && Number.isFinite(posted) && posted > m.at) return true;
   if (m.v !== 'skip') return false;
   if (m.skips >= SKIPS_UNTIL_GONE) return false;
   if (m.price != null && item.price != null && item.price < m.price) return true; // price dropped
