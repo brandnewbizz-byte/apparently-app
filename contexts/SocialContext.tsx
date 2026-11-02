@@ -15,6 +15,7 @@ import { queueAction, dequeueAction } from '@/lib/offlineQueue';
 import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
+import { withClip, type VideoClip } from '@/lib/videoClip';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -157,7 +158,7 @@ interface SocialState {
   updatePost: (postId: string, content: string) => void;
   deletePost: (postId: string) => void;
   /** Uploads media, saves the post and resolves with its id (null on failure). */
-  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }) => Promise<string | null>;
+  createPost: (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video'; clip?: VideoClip }) => Promise<string | null>;
   /** Uploads (if needed) and saves a story; resolves true once it's saved. */
   createStory: (imageUrl?: string, backgroundColor?: string, textContent?: string) => Promise<boolean>;
   deleteStory: (storyId: string) => Promise<boolean>;
@@ -921,7 +922,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     return run;
   }, []);
 
-  const createPost = useCallback(async (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video' }): Promise<string | null> => {
+  const createPost = useCallback(async (content: string, imageUrl?: string, options?: { postKind?: 'post'; category?: string; mediaType?: 'image' | 'video'; clip?: VideoClip }): Promise<string | null> => {
     const isVideo = options?.mediaType === 'video';
     const safeContent = sanitizeCaption(content);
 
@@ -944,7 +945,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           logger.warn('SocialContext', 'Video upload failed — post not created');
           return null;
         }
-        mediaUrl = hosted;
+        // The trim / fit choice rides along on the link (lib/videoClip).
+        mediaUrl = withClip(hosted, options?.clip);
       } else {
         mediaUrl = await persistableImageUri(imageUrl, 'user-media', `posts/${userId}`);
         if (!mediaUrl) {
