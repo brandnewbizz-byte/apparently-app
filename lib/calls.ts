@@ -52,17 +52,28 @@ export async function ringUser(opts: {
   video: boolean;
 }): Promise<void> {
   const { me, targetId, roomId, video } = opts;
-  await supabase.from('notifications').insert({
+  const row = (type: string) => ({
     user_id: targetId,
     actor_id: me.id,
-    type: 'call_request',
+    actor_name: me.name,
+    actor_avatar: me.avatar || null,
+    type,
     title: video ? `${me.name} is video calling you` : `${me.name} is calling you`,
     body: video ? 'Incoming video call' : 'Incoming call',
     data: { room_id: roomId, caller_id: me.id, caller_name: me.name, caller_avatar: me.avatar || '', video },
     read: false,
     created_at: new Date().toISOString(),
   });
+  const { error } = await supabase.from('notifications').insert(row('call_request'));
+  // Older databases only allow the type 'call'.
+  if (error) {
+    const { error: e2 } = await supabase.from('notifications').insert(row('call'));
+    if (e2) throw e2;
+  }
 }
+
+/** Both names are used for call notifications. */
+export const isCallNotification = (type?: string | null) => type === 'call_request' || type === 'call';
 
 /** Screen params for answering a call notification. */
 export function answerParams(
