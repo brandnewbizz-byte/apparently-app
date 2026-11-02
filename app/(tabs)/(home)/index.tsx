@@ -455,31 +455,10 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
   const grabCurrentBundle = useCallback(() => {
     if (!currentBundle || grabPreviewActive) return;
     setGrabPreviewActive(true);
-    const timeout = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(opacityAnim, {
-          toValue: 0,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.timing(swipeAnim.y, {
-          toValue: -30,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.spring(nextCardScale, {
-          toValue: 1,
-          friction: 6,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        setGrabPreviewActive(false);
-        completeAction('grab');
-      });
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [completeAction, currentBundle, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
+    // Start the grab right away (no waiting on an animation); the GRABBED
+    // badge stays up until the grab is under way, then the chat opens.
+    completeAction('grab').finally(() => setGrabPreviewActive(false));
+  }, [completeAction, currentBundle, grabPreviewActive]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => !grabPreviewActive,
@@ -877,19 +856,10 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
   const grabCurrentSkill = useCallback(() => {
     if (!currentSkill || grabPreviewActive) return;
     setGrabPreviewActive(true);
-    const timeout = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
-        Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
-        Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
-      ]).start(() => {
-        setGrabPreviewActive(false);
-        completeAction('grab');
-      });
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [completeAction, currentSkill, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
+    // Start the grab right away (no waiting on an animation); the GRABBED
+    // badge stays up until the grab is under way, then the chat opens.
+    completeAction('grab').finally(() => setGrabPreviewActive(false));
+  }, [completeAction, currentSkill, grabPreviewActive]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => !grabPreviewActive,
@@ -1130,19 +1100,10 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, beforeActi
   const grabCurrentRequest = useCallback(() => {
     if (!currentRequest || grabPreviewActive) return;
     setGrabPreviewActive(true);
-    const timeout = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(opacityAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
-        Animated.timing(swipeAnim.y, { toValue: -30, duration: 180, useNativeDriver: true }),
-        Animated.spring(nextCardScale, { toValue: 1, friction: 6, useNativeDriver: true }),
-      ]).start(() => {
-        setGrabPreviewActive(false);
-        completeAction('grab');
-      });
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [completeAction, currentRequest, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
+    // Start the grab right away (no waiting on an animation); the GRABBED
+    // badge stays up until the grab is under way, then the chat opens.
+    completeAction('grab').finally(() => setGrabPreviewActive(false));
+  }, [completeAction, currentRequest, grabPreviewActive]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => !grabPreviewActive,
@@ -1549,12 +1510,8 @@ export default function HomeScreen() {
     if (!info?.name && knownName) info = { ...(info || {}), name: knownName };
     const first = (info?.name || '').trim().split(/\s+/)[0] || 'there';
     sendMessage(ownerId, text(first), info, metadata as any);
-    // Open the chat right away (short burst of confetti first).
-    setShowConfetti(true);
-    setTimeout(() => {
-      setShowConfetti(false);
-      router.push(`/inbox/conversation/${ownerId}` as any);
-    }, 450);
+    // Open the chat right away.
+    router.push(`/inbox/conversation/${ownerId}` as any);
   }, [sendMessage, router]);
 
   const grabFailed = (title: string, reason?: string) => {
