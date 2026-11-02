@@ -20,7 +20,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications, AppNotification } from '@/contexts/NotificationsContext';
 import { answerInvite } from '@/lib/spot';
-import { answerParams, declineCall } from '@/lib/calls';
+import { answerParams, declineCall, isCallNotification } from '@/lib/calls';
 import { callsAvailable } from '@/lib/webrtc';
 import { useConnections, ConnectionRequest } from '@/contexts/ConnectionsContext';
 import { supabase } from '@/lib/supabase';
@@ -76,6 +76,7 @@ function describe(n: AppNotification): string {
       ? `took your request${d.request_title ? ` "${d.request_title}"` : ''}.`
       : `offered to help with${d.request_title ? ` "${d.request_title}"` : ' your request'}.`;
     case 'job_grabbed': return `grabbed your ${d.job_label || 'job'}${d.job_title ? ` "${d.job_title}"` : ''}.`;
+    case 'call':
     case 'call_request': return d.video ? 'video called you.' : 'called you.';
     case 'room_invite': return d.status === 'declined'
       ? `invited you to "${d.room_name || 'a Spot room'}" · declined`
@@ -202,7 +203,7 @@ export default function NotificationsScreen() {
       router.push(`/(tabs)/live/room/${n.data.room_id}` as any);
       return;
     }
-    if (n.type === 'call_request') return;
+    if (isCallNotification(n.type)) return;
     if (n.actorId) router.push(`/user/${n.actorId}` as any);
   };
 
@@ -243,7 +244,7 @@ export default function NotificationsScreen() {
         </TouchableOpacity>
       );
     }
-    if (n.type === 'call_request') {
+    if (isCallNotification(n.type)) {
       return (
         <View style={styles.actionPair}>
           {callsAvailable() && (
