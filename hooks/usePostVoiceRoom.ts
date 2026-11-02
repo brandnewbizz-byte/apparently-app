@@ -1,14 +1,14 @@
 /**
- * usePostVoiceRoom — hold-to-talk voice on a feed post.
+ * usePostVoiceRoom — live voice on a feed post.
  *
- * Uses the same engine as Spot rooms (hooks/useSpotVoice): while you hold the
- * mic, short clips are recorded and sent over a live channel; everyone on the
- * post hears each clip queued back to back, so nothing is cut off or skipped.
- * (The old version replaced the playing clip with every new one and reused one
- * file, which is why people heard choppy, broken audio.)
+ * Press and hold the mic to go live: your mic turns on and STAYS on (you can
+ * let go and keep talking). While live, a mic-mute button pauses your mic and
+ * an end button goes off-air. Uses the same clip engine as Spot rooms
+ * (hooks/useSpotVoice), so listeners hear clips back to back, never cut off.
  *
- * Listening starts automatically when the post is on screen. The speaker
- * button turns incoming sound off and on.
+ * Listening starts by itself when a post is on screen. The speaker switch is
+ * shared by every post (lib/liveSound): mute once and it stays muted while you
+ * scroll, until you unmute.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
@@ -16,8 +16,12 @@ import { setAudioModeAsync } from 'expo-audio';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
+import { useLiveSound } from '@/lib/liveSound';
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+/** Longest single live stretch before the mic turns itself off. */
+const MAX_LIVE_MS = 15 * 60_000;
 
 interface UsePostVoiceRoomOptions {
   postId: string | null;
@@ -28,34 +32,37 @@ interface UsePostVoiceRoomOptions {
 
 export interface UsePostVoiceRoomResult {
   connectionState: VoiceConnectionState;
-  /** Incoming sound on. */
+  /** Other people's voices on (shared by every post). */
   soundOn: boolean;
-  /** You are holding the mic. */
+  /** You're live on this post (mic may be muted). */
+  live: boolean;
+  /** Your mic is muted while live. */
+  micMuted: boolean;
+  /** Your voice is going out right now. */
   talking: boolean;
-  /** Ids of people talking right now. */
   speakingIds: string[];
   error: string | null;
   toggleSound: () => void;
-  /** Press the mic. Resolves 'denied' when the mic isn't allowed. */
-  startTalking: () => Promise<'ok' | 'denied' | 'failed'>;
-  /** Let go of the mic. */
-  stopTalking: () => void;
+  goLive: () => Promise<'ok' | 'denied' | 'failed'>;
+  endLive: () => void;
+  toggleMic: () => void;
 }
 
 type Handler = (payload: any) => void;
 
 export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: UsePostVoiceRoomOptions): UsePostVoiceRoomResult {
   const [connectionState, setConnectionState] = useState<VoiceConnectionState>('disconnected');
-  const [soundOn, setSoundOn] = useState(true);
+  const [soundOn, setSoundOn] = useLiveSound();
+  const [live, setLive] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const soundOnRef = useRef(true);
+  const soundOnRef = useRef(soundOn);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const handlers = useRef<Record<string, Set<Handler>>>({});
 
-  // A tiny "room" adapter over a Supabase broadcast channel, shaped the way
-  // useSpotVoice expects. It stays the same object for the life of the hook.
+  // A tiny "room" over a Supabase broadcast channel, the shape useSpotVoice expects.
   const room = useMemo(() => ({
     send: (event: string, payload: any) => {
       channelRef.current?.send({ type: 'broadcast', event, payload }).then(() => {}, () => {});
@@ -67,14 +74,13 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
   }), []);
 
   const me = useMemo(() => (userId ? { id: userId, name: userName || 'User' } : null), [userId, userName]);
-  const { talking, speaking, startTalking: spotStart, stopTalking } = useSpotVoice(room, me);
+  const { talking, speaking, startTalking, stopTalking } = useSpotVoice(room, me, { maxTalkMs: MAX_LIVE_MS });
 
   // ── Join this post's voice channel while it's on screen ──
   useEffect(() => {
     if (!enabled || !postId || !userId) return;
     setError(null);
     setConnectionState('connecting');
-    // Play through the loudspeaker, even with the silent switch on.
     if (Platform.OS !== 'web') {
       setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
     }
@@ -95,30 +101,59 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
     channelRef.current = ch;
     return () => {
       stopTalking();
+      setLive(false);
+      setMicMuted(false);
       channelRef.current = null;
       supabase.removeChannel(ch).then(() => {}, () => {});
       setConnectionState('disconnected');
     };
   }, [enabled, postId, userId, stopTalking]);
 
-  // Going to the background lets go of the mic.
+  // Leaving the app ends your live mic.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => { if (s !== 'active') stopTalking(); });
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') { stopTalking(); setLive(false); setMicMuted(false); }
+    });
     return () => sub.remove();
   }, [stopTalking]);
 
-  const toggleSound = useCallback(() => setSoundOn((v) => !v), []);
+  // The mic loop stopped by itself (time limit / error) while not muted → off-air.
+  const wasTalking = useRef(false);
+  useEffect(() => {
+    if (wasTalking.current && !talking && live && !micMuted) setLive(false);
+    wasTalking.current = talking;
+  }, [talking, live, micMuted]);
 
-  const startTalking = useCallback(async () => {
+  const toggleSound = useCallback(() => setSoundOn(!soundOnRef.current), [setSoundOn]);
+
+  const goLive = useCallback(async () => {
     if (connectionState !== 'connected') return 'failed' as const;
     setError(null);
-    const r = await spotStart();
-    if (r === 'denied') setError('Allow microphone access in Settings to talk');
-    else if (r === 'failed') setError('Couldn’t start the mic. Try again.');
+    const r = await startTalking();
+    if (r === 'ok') { setLive(true); setMicMuted(false); }
+    else if (r === 'denied') setError('Allow microphone access in Settings to talk');
+    else setError('Couldn’t start the mic. Try again.');
     return r;
-  }, [connectionState, spotStart]);
+  }, [connectionState, startTalking]);
+
+  const endLive = useCallback(() => {
+    stopTalking();
+    setLive(false);
+    setMicMuted(false);
+  }, [stopTalking]);
+
+  const toggleMic = useCallback(() => {
+    if (!live) return;
+    if (micMuted) {
+      setMicMuted(false);
+      startTalking().then((r) => { if (r !== 'ok') { setLive(false); setError('Couldn’t turn the mic back on.'); } });
+    } else {
+      setMicMuted(true);
+      stopTalking();
+    }
+  }, [live, micMuted, startTalking, stopTalking]);
 
   const speakingIds = useMemo(() => Object.keys(speaking), [speaking]);
 
-  return { connectionState, soundOn, talking, speakingIds, error, toggleSound, startTalking, stopTalking };
+  return { connectionState, soundOn, live, micMuted, talking, speakingIds, error, toggleSound, goLive, endLive, toggleMic };
 }
