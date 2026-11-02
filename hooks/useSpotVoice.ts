@@ -63,12 +63,14 @@ async function clipSource(uid: string, b64: string, mime: string): Promise<strin
   return file.uri;
 }
 
-export function useSpotVoice(room: Room, me: Me | null) {
+export function useSpotVoice(room: Room, me: Me | null, opts?: { maxTalkMs?: number }) {
+  const maxTalkMs = opts?.maxTalkMs ?? MAX_TALK_MS;
   const recorder = useAudioRecorder(OPTIONS);
   const [talking, setTalking] = useState(false);
   /** uid → last time we heard them */
   const [speaking, setSpeaking] = useState<Record<string, number>>({});
   const holding = useRef(false);
+  const loopDone = useRef<Promise<void> | null>(null);
   const startedAt = useRef(0);
   const seq = useRef(0);
 
@@ -176,15 +178,18 @@ export function useSpotVoice(room: Room, me: Me | null) {
     try {
       const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) return 'denied';
+      // A previous mic session may still be finishing its last clip — let it end first.
+      if (loopDone.current) await Promise.race([loopDone.current, new Promise((r) => setTimeout(r, 2500))]);
+      if (holding.current) return 'failed';
       holding.current = true;
       startedAt.current = Date.now();
       setTalking(true);
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldRouteThroughEarpiece: false });
       room.send('talk', { uid: me.id, on: true });
       // Loop clips while the mic is held.
-      (async () => {
+      loopDone.current = (async () => {
         try {
-          while (holding.current && Date.now() - startedAt.current < MAX_TALK_MS) {
+          while (holding.current && Date.now() - startedAt.current < maxTalkMs) {
             await recordClip();
           }
         } catch (e: any) {
@@ -194,6 +199,7 @@ export function useSpotVoice(room: Room, me: Me | null) {
           setTalking(false);
           room.send('talk', { uid: me.id, on: false });
           setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
+          loopDone.current = null;
         }
       })();
       return 'ok';
@@ -203,7 +209,7 @@ export function useSpotVoice(room: Room, me: Me | null) {
       setTalking(false);
       return 'failed';
     }
-  }, [me, room, recordClip]);
+  }, [me, room, recordClip, maxTalkMs]);
 
   const stopTalking = useCallback(() => { holding.current = false; }, []);
 
