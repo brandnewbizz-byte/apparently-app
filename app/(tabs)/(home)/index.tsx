@@ -476,7 +476,7 @@ function SwipeableBundles({ bundles, onGrab, onSkip, onSave, beforeAction, color
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 800);
+    }, 300);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentBundle, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
@@ -886,7 +886,7 @@ function SwipeableSkills({ skills, onGrab, onSkip, onSave, beforeAction, colors 
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 800);
+    }, 300);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentSkill, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
@@ -1139,7 +1139,7 @@ function SwipeableServiceRequests({ requests, onGrab, onSkip, onSave, beforeActi
         setGrabPreviewActive(false);
         completeAction('grab');
       });
-    }, 800);
+    }, 300);
 
     return () => clearTimeout(timeout);
   }, [completeAction, currentRequest, grabPreviewActive, nextCardScale, opacityAnim, swipeAnim.y]);
@@ -1529,23 +1529,32 @@ export default function HomeScreen() {
    * can decide how it's delivered. Uses the normal messaging path, so the
    * conversation is found-or-created and shows up live for the lister.
    */
+  /** Look up the lister's name — started alongside the grab so it's ready when the grab is. */
+  const lookupOwner = useCallback((ownerId: string): Promise<{ name?: string; avatar?: string; username?: string } | undefined> => {
+    const lookup = Promise.resolve(supabase.from('profiles').select('full_name, username, avatar').eq('id', ownerId).maybeSingle())
+      .then(({ data }: any) => (data ? { name: data.full_name || data.username || undefined, avatar: data.avatar || undefined, username: data.username || undefined } : undefined))
+      .catch(() => undefined);
+    const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), 1500));
+    return Promise.race([lookup, timeout]);
+  }, []);
+
   const openGrabChat = useCallback(async (
     ownerId: string,
     text: (firstName: string) => string,
     metadata: Record<string, any>,
+    owner?: Promise<{ name?: string; avatar?: string; username?: string } | undefined>,
+    knownName?: string,
   ) => {
-    let info: { name?: string; avatar?: string; username?: string } | undefined;
-    try {
-      const { data } = await supabase.from('profiles').select('full_name, username, avatar').eq('id', ownerId).maybeSingle();
-      if (data) info = { name: data.full_name || data.username || undefined, avatar: data.avatar || undefined, username: data.username || undefined };
-    } catch { /* name is optional */ }
+    let info = owner ? await owner : undefined;
+    if (!info?.name && knownName) info = { ...(info || {}), name: knownName };
     const first = (info?.name || '').trim().split(/\s+/)[0] || 'there';
     sendMessage(ownerId, text(first), info, metadata as any);
+    // Open the chat right away (short burst of confetti first).
     setShowConfetti(true);
     setTimeout(() => {
       setShowConfetti(false);
       router.push(`/inbox/conversation/${ownerId}` as any);
-    }, 1100);
+    }, 450);
   }, [sendMessage, router]);
 
   const grabFailed = (title: string, reason?: string) => {
@@ -1575,6 +1584,7 @@ export default function HomeScreen() {
     if (!creatorId || creatorId.startsWith('u-')) { grabFailed('Bundle unavailable'); return; }
     setGrabbing(true);
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const owner = lookupOwner(creatorId);
     const res = await grabBundle(bundle.id);
     setGrabbing(false);
     if (!res.ok) { grabFailed('Bundle unavailable', res.reason); return; }
@@ -1595,8 +1605,10 @@ export default function HomeScreen() {
           creator_name: bundle.creatorName || bundle.creator?.name || '',
         },
       },
+      owner,
+      bundle.creatorName || bundle.creator?.name || undefined,
     );
-  }, [grabBundle, grabbing, openGrabChat, queryClient]);
+  }, [grabBundle, grabbing, openGrabChat, queryClient, lookupOwner]);
 
   const handleSkipBundle = useCallback((bundle: BundlePlan) => {
     console.log('Card action:', 'skip_bundle', bundle.id);
@@ -1616,6 +1628,7 @@ export default function HomeScreen() {
     if (!creatorId || creatorId.startsWith('u-')) { grabFailed('Skill unavailable'); return; }
     setGrabbing(true);
     if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const owner = lookupOwner(creatorId);
     const res = await grabSkill(skill.id);
     setGrabbing(false);
     if (!res.ok) { grabFailed('Skill unavailable', res.reason); return; }
@@ -1635,8 +1648,10 @@ export default function HomeScreen() {
           creator_name: skill.creatorName || skill.provider?.name || '',
         },
       },
+      owner,
+      skill.creatorName || skill.provider?.name || undefined,
     );
-  }, [grabSkill, grabbing, openGrabChat]);
+  }, [grabSkill, grabbing, openGrabChat, lookupOwner]);
 
   const handleSkipSkill = useCallback((skill: SkillDeal) => {
     console.log('Card action:', 'skip_skill', skill.id);
@@ -1658,6 +1673,7 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web') {
       try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) {}
     }
+    const owner = lookupOwner(requesterId);
     const res = await grabRequest(request.id);
     if (res.ok) markRequest(user?.id, request, 'grab');
     setGrabbing(false);
@@ -1716,8 +1732,10 @@ export default function HomeScreen() {
           source: request.source || 'request',
         },
       },
+      owner,
+      request.createdBy?.name && !['Unknown', 'User'].includes(request.createdBy.name) ? request.createdBy.name : undefined,
     );
-  }, [grabRequest, grabbing, openGrabChat, createPlan, user?.id]);
+  }, [grabRequest, grabbing, openGrabChat, createPlan, user?.id, lookupOwner]);
 
   const handleSkipRequest = useCallback((request: ServiceRequest) => {
     markRequest(user?.id, request, 'skip');
@@ -2228,6 +2246,15 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      {grabbing && (
+        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 24 }}>
+            <ActivityIndicator color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700' }}>Grabbing…</Text>
+          </View>
+        </View>
+      )}
 
       <ConfettiModal
         visible={showConfetti}
