@@ -53,6 +53,7 @@ import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import { postUrl, shareLink } from '@/lib/share';
+import FeedPhoto from '@/components/FeedPhoto';
 import AppVideo from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 import CommentsPanel from '@/components/comments/CommentsPanel';
@@ -419,13 +420,14 @@ function PostCard({
                 <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]} />
               )
             ) : (
-              // Like Instagram: the whole photo is shown (never cropped), centred,
-              // with a soft blurred copy filling any space around it.
-              <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }, { overflow: 'hidden' }]}>
-                <RNImage source={{ uri: post.media }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={Platform.OS === 'android' ? 12 : 30} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.35)' }]} />
-                <RNImage source={{ uri: post.media }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-              </View>
+              // Tall photos (e.g. from the in-app camera) fill the screen; wider ones
+              // show whole over a soft blurred fill (components/FeedPhoto).
+              <FeedPhoto
+                uri={post.media}
+                width={post.mediaWidth}
+                height={post.mediaHeight}
+                style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
+              />
             )}
             {isVideo && !isActive ? (
               <View style={igCardStyles.playOverlay} pointerEvents="none">
@@ -1046,11 +1048,11 @@ export default function FeedScreen() {
   const [composerFromCamera, setComposerFromCamera] = useState(false);
 
   const handleCameraCapture = (media: CapturedMedia) => {
-    // The camera captures photos; reset in case a video was picked earlier.
-    setCreateMediaType('photo');
+    // Photo or a video recorded in the camera's Video mode.
+    setCreateMediaType(media.type === 'video' ? 'video' : 'photo');
     setCreatePreloadMedia(media.uri);
-    setCreatePreloadMediaWidth(media.width);
-    setCreatePreloadMediaHeight(media.height);
+    setCreatePreloadMediaWidth(media.width || undefined);
+    setCreatePreloadMediaHeight(media.height || undefined);
     setShowCamera(false);
     showTabBar();
     setComposerFromCamera(true);
@@ -1341,6 +1343,7 @@ export default function FeedScreen() {
           onClose={handleCameraClose}
           onCapture={handleCameraCapture}
           onPickFromGallery={handlePickFromGallery}
+          allowVideo
         />
       </Modal>
 
@@ -1359,6 +1362,7 @@ export default function FeedScreen() {
         preloadMediaUri={createPreloadMedia}
         preloadMediaWidth={createPreloadMediaWidth}
         preloadMediaHeight={createPreloadMediaHeight}
+        preloadIsVideo={createMediaType === 'video'}
         backgroundColor={colors.background}
         textColor={colors.text}
         accentColor={colors.accent}
