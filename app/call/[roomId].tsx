@@ -10,6 +10,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebRTCCall, type CallConfig } from '@/hooks/useWebRTCCall';
 import CallVideo from '@/components/CallVideo';
+import { playTone, stopTone } from '@/lib/callTones';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -61,6 +62,13 @@ export default function CallScreen() {
     if (isOutgoing) startCall(callConfig);
     else acceptCall(callConfig);
   }, [isOutgoing, callConfig, startCall, acceptCall]);
+
+  // Ringback for the caller until the other person picks up.
+  useEffect(() => {
+    if (isOutgoing && callState === 'calling') playTone('ringback');
+    else stopTone();
+  }, [isOutgoing, callState]);
+  useEffect(() => () => stopTone(), []);
 
   // Ring animation while waiting for the other person
   const ringAnim = useRef(new Animated.Value(1)).current;
