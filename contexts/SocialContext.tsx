@@ -16,6 +16,7 @@ import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 import { withClip, type VideoClip } from '@/lib/videoClip';
+import { makeVideoCover } from '@/lib/videoThumb';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -938,9 +939,15 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     // database only exists on the poster's phone, so everyone else would see
     // a black card (this is what happened to video posts before).
     let mediaUrl: string | undefined = imageUrl;
+    let coverUrl: string | undefined;
     if (imageUrl && isLocalFileUri(imageUrl)) {
       if (isVideo) {
+        // Cover frame (1 second into the posted part), made and uploaded alongside the video.
+        const coverJob = makeVideoCover(withClip(imageUrl, options?.clip))
+          .then((local) => (local ? persistableImageUri(local, 'user-media', `posts/${userId}`) : undefined))
+          .catch(() => undefined);
         const hosted = await uploadVideoToStorage(imageUrl, 'user-media', `posts/${userId}`);
+        coverUrl = (await coverJob) || undefined;
         if (!hosted || isLocalFileUri(hosted)) {
           logger.warn('SocialContext', 'Video upload failed — post not created');
           return null;
@@ -957,7 +964,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     }
 
     try {
-      const saved = await localApi.createPost(userId, safeContent, mediaUrl, options);
+      const saved = await localApi.createPost(userId, safeContent, mediaUrl, { ...options, coverUrl });
       logger.info('SocialContext', 'Post saved to backend', { id: saved?.id });
       if (saved?.id) {
         processMentions(userId, safeContent, saved.id, 'post').catch((e) =>
