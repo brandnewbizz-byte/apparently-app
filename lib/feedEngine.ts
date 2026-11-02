@@ -89,7 +89,7 @@ interface FeedState {
 // ── Pace per plan ────────────────────────────────────────────────────────────
 export interface FeedPace { round: number | null; waitSec: number }
 export const FEED_PACE: Record<Tier, FeedPace> = {
-  free: { round: 5, waitSec: 10 * 60 },
+  free: { round: 5, waitSec: 5 * 60 },
   basic: { round: 7, waitSec: 3 * 60 },
   plus: { round: 10, waitSec: 60 },
   pro: { round: 10, waitSec: 30 },
