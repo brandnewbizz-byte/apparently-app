@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppVideo from '@/components/AppVideo';
 import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Move,
 } from 'lucide-react-native';
@@ -50,6 +51,8 @@ interface PostComposerProps {
   preloadMediaUri?: string | null;
   preloadMediaWidth?: number;
   preloadMediaHeight?: number;
+  /** The preloaded media is a video (recorded in the camera). */
+  preloadIsVideo?: boolean;
   backgroundColor?: string;
   textColor?: string;
   accentColor?: string;
@@ -63,6 +66,7 @@ export default function PostComposer({
   preloadMediaUri,
   preloadMediaWidth,
   preloadMediaHeight,
+  preloadIsVideo = false,
   backgroundColor = '#000',
   textColor = '#FFF',
   accentColor = '#2196F3',
@@ -214,7 +218,9 @@ export default function PostComposer({
               <View style={styles.photoSection}>
                 {/* 9:16 clipped container */}
                 <View style={styles.cropContainer}>
-                  {mediaDims && coverCalc.displayW > 0 ? (
+                  {preloadIsVideo && mediaUri === preloadMediaUri ? (
+                    <AppVideo source={{ uri: mediaUri }} style={styles.coverPreview} resizeMode="cover" shouldPlay isLooping isMuted />
+                  ) : mediaDims && coverCalc.displayW > 0 ? (
                     <RNImage
                       source={{ uri: mediaUri }}
                       style={{
