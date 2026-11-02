@@ -3,6 +3,7 @@ import { Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, MessageCircle, Play } from 'lucide-react-native';
 import type { ProfilePost } from '@/lib/profilePosts';
+import VideoPoster from '@/components/VideoPoster';
 
 const COLS = 3;
 const GAP = 2;
@@ -29,9 +30,8 @@ function Tile({ post, size, onPress }: { post: ProfilePost; size: number; onPres
       {post.imageUrl ? (
         <Image source={{ uri: post.imageUrl }} style={styles.fill} resizeMode="cover" />
       ) : post.isVideo ? (
-        <View style={[styles.fill, styles.videoTile]}>
-          <Play size={28} color="rgba(255,255,255,0.9)" fill="rgba(255,255,255,0.9)" />
-        </View>
+        // No saved cover (older post): make one from the video itself.
+        <VideoPoster videoUrl={post.videoUrl} style={[styles.fill, styles.videoTile]} />
       ) : (
         <LinearGradient colors={textGradientFor(post.id)} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.fill, styles.textTile]}>
           <Text style={styles.textTileText} numberOfLines={5}>{post.caption}</Text>
