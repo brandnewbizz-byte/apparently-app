@@ -350,21 +350,28 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         const dbStories = await DatabaseService.fetchStories({ signal });
         if (dbStories && dbStories.length > 0) {
           logger.info('SocialContext', 'Fetched stories from Supabase', { length: dbStories.length });
-          const users = await DatabaseService.fetchUsers({ signal });
-          const userMap = new Map(users.map(u => [u.id, u]));
-          
+          // Only the people who posted stories (the old "load every profile" call
+          // could fail and then every story was labelled "You" with no real owner,
+          // so your own story ring never showed).
+          const ids = Array.from(new Set(dbStories.map((x) => x.user_id).filter(Boolean)));
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id, full_name, username, avatar')
+            .in('id', ids);
+          const userMap = new Map((profs || []).map((u: any) => [u.id, u]));
+
           return dbStories.map(s => {
-            const user = userMap.get(s.user_id);
+            const user: any = userMap.get(s.user_id);
             return {
               id: s.id,
-              user: user ? {
-                id: user.id,
-                name: user.full_name || user.name,
-                username: user.username,
-                avatar: user.avatar,
-                isVerified: user.is_verified ?? false,
-                followersCount: user.followers_count ?? 0,
-              } : currentUser,
+              user: {
+                id: s.user_id,
+                name: user?.full_name || user?.username || 'User',
+                username: user?.username || '',
+                avatar: user?.avatar || '',
+                isVerified: false,
+                followersCount: 0,
+              },
               imageUrl: s.image_url,
               timestamp: s.timestamp,
               viewed: s.viewed,
