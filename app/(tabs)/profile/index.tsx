@@ -14,6 +14,7 @@ import {
   Grid3x3,
   Share2,
   ScanLine,
+  QrCode,
   Plus,
   MessageCircle,
   Package,
@@ -429,7 +430,8 @@ export default function ProfileScreen() {
   const CARD_PAD = 12;
   const CARD_LABEL = 18;
   const AVATAR_OVERLAP = 52; // matches styles.identity marginTop
-  const cardHeight = CARD_PAD + CARD_LABEL + QR_SIZE + CARD_PAD + AVATAR_OVERLAP + 8;
+  // The QR code now lives behind a button (top right), so the cover is shorter.
+  const cardHeight = AVATAR_OVERLAP + 56;
   const coverHeight = insets.top + 52 + cardHeight;
   const followUrl = myId ? profileFollowUrl(myId) : '';
 
@@ -455,6 +457,16 @@ export default function ProfileScreen() {
                 <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/(tabs)/search' as any)} accessibilityLabel="Search">
                   <Search size={20} color="#FFF" />
                 </TouchableOpacity>
+                {followUrl ? (
+                  <TouchableOpacity
+                    style={styles.glassBtn}
+                    onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); setShowQR(true); }}
+                    accessibilityLabel="My QR code and scanner"
+                    testID="profile-qr"
+                  >
+                    <QrCode size={20} color="#FFF" />
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity style={styles.glassBtn} onPress={() => router.push('/(tabs)/planner' as any)} accessibilityLabel="Planner">
                   <CalendarDays size={20} color="#FFF" />
                 </TouchableOpacity>
@@ -463,18 +475,6 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-            {followUrl ? (
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => { if (Platform.OS !== 'web') Haptics.selectionAsync(); setShowQR(true); }}
-                style={[styles.qrCard, { height: cardHeight, padding: CARD_PAD, width: QR_SIZE + CARD_PAD * 2, marginLeft: -(QR_SIZE + CARD_PAD * 2) / 2 }]}
-                accessibilityLabel="Your scan-to-follow code. Tap to make it bigger or share it."
-                testID="profile-qr"
-              >
-                <Text style={styles.qrLabel}>SCAN TO FOLLOW</Text>
-                <QRCode value={followUrl} size={QR_SIZE} />
-              </TouchableOpacity>
-            ) : null}
           </LinearGradient>
 
           <View style={styles.identity}>
