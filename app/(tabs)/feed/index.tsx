@@ -40,6 +40,8 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useCreatePost } from '@/contexts/CreatePostContext';
 import InstagramCamera, { type CapturedMedia } from '@/components/InstagramCamera';
 import type { VideoClip } from '@/lib/videoClip';
+import VideoPoster from '@/components/VideoPoster';
+import { isVideoUrl } from '@/lib/media';
 import StoriesViewer, { type StoryUser, type StoryMedia } from '@/components/StoriesViewer';
 import StoryRing from '@/components/StoryRing';
 import CreateStory from '@/components/CreateStory';
@@ -417,8 +419,12 @@ function PostCard({
                   isMuted={muted}
                 />
               ) : (
-                // Off-screen videos don't hold a player (saves memory/battery).
-                <View style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]} />
+                // Off-screen videos don't hold a player (saves memory/battery) — show the cover frame instead.
+                <VideoPoster
+                  videoUrl={post.videoUrl}
+                  coverUrl={post.media && post.media !== post.videoUrl && !isVideoUrl(post.media) ? post.media : undefined}
+                  style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
+                />
               )
             ) : (
               // Tall photos (e.g. from the in-app camera) fill the screen; wider ones
