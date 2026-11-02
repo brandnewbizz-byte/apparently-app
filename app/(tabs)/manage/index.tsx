@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
   BellRing, Package, Zap, Check, CheckCheck, X, MessageCircle, Plus, Trash2, CalendarDays, Pause, Play, Pencil,
-  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck, Search,
+  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck, Search, RefreshCw,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
@@ -22,6 +22,7 @@ import { useBundles, type UserBundle } from '@/contexts/BundleContext';
 import { usePlanner, type Plan } from '@/contexts/PlannerContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { categoryMeta, formatMoney } from '@/lib/listingCategories';
+import { listingExpired, listingNeedsReshare, listingTimeLeft, reshareListing } from '@/lib/listingLife';
 
 const C = {
   purple: '#8B5CF6', purpleDim: 'rgba(139,92,246,0.14)',
@@ -92,7 +93,8 @@ function toListing(s: UserSkill): Listing;
 function toListing(x: UserBundle | UserSkill): Listing {
   const isBundle = 'items' in x;
   const spots = Math.max(x.availableCount || 1, 1);
-  const ended = !isBundle && (x as UserSkill).expiresAt ? Date.parse((x as UserSkill).expiresAt as string) <= Date.now() : false;
+  const ended = (!isBundle && (x as UserSkill).expiresAt ? Date.parse((x as UserSkill).expiresAt as string) <= Date.now() : false)
+    || listingExpired(x.createdAt); // 3 days on Home are up
   const status: Listing['status'] = x.status === 'grabbed' || (x.grabCount || 0) >= spots ? 'full'
     : x.status === 'draft' ? 'paused' : ended ? 'ended' : 'live';
   const media = isBundle ? ((x as UserBundle).videoUrl || x.imageUrl) : x.imageUrl;
@@ -210,6 +212,23 @@ export default function ManageScreen() {
     () => { if (l.kind === 'bundle') deleteBundle(l.id); else deleteSkill(l.id); haptic('success'); },
     true,
   );
+
+  const [resharing, setResharing] = useState<string | null>(null);
+  const reshare = async (l: Listing) => {
+    if (resharing) return;
+    haptic('medium');
+    setResharing(l.id);
+    try {
+      await reshareListing(l.kind, l.id);
+      if (l.kind === 'bundle') await reloadBundles(); else await reloadSkills();
+      haptic('success');
+      Alert.alert('Re-shared', `"${l.title}" is back on Home for 3 more days.`);
+    } catch (e: any) {
+      Alert.alert('Couldn’t re-share', e?.message || 'Please try again.');
+    } finally {
+      setResharing(null);
+    }
+  };
 
   const create = (kind: 'bundle' | 'skill' | 'plan') => {
     setCreateOpen(false);
@@ -404,10 +423,18 @@ export default function ManageScreen() {
               {l.grabs} of {l.spots} grabbed
               {l.endsAt && l.status === 'live' ? ` · ends ${new Date(l.endsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
             </Text>
+            {l.status === 'live' || l.status === 'ended' ? (
+              <Text style={[styles.muted, { color: listingNeedsReshare(l.createdAt) ? C.gold : colors.textTertiary }]}>{listingTimeLeft(l.createdAt)}</Text>
+            ) : null}
           </View>
         </TouchableOpacity>
         <View style={[styles.listingActions, { borderTopColor: colors.border }]}>
-          {l.status === 'live' || l.status === 'paused' ? (
+          {(l.status === 'ended' || (l.status === 'live' && listingNeedsReshare(l.createdAt))) && listingExpired(l.createdAt, Date.now() + 86_400_000) ? (
+            <TouchableOpacity onPress={() => reshare(l)} disabled={resharing === l.id} style={styles.listingAct} testID={`listing-reshare-${l.id}`}>
+              <RefreshCw size={15} color={C.gold} />
+              <Text style={[styles.listingActText, { color: C.gold }]}>{resharing === l.id ? 'Re-sharing…' : 'Re-share'}</Text>
+            </TouchableOpacity>
+          ) : l.status === 'live' || l.status === 'paused' ? (
             <TouchableOpacity onPress={() => togglePause(l)} style={styles.listingAct} testID={`listing-toggle-${l.id}`}>
               {l.status === 'paused' ? <Play size={15} color={C.green} /> : <Pause size={15} color={colors.textSecondary} />}
               <Text style={[styles.listingActText, { color: l.status === 'paused' ? C.green : colors.textSecondary }]}>{l.status === 'paused' ? 'Resume' : 'Pause'}</Text>
