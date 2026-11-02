@@ -15,8 +15,10 @@ import {
   Platform,
   GestureResponderEvent,
   Animated,
+  Alert,
 } from 'react-native';
-import { CameraView, CameraType, FlashMode } from 'expo-camera';
+import { Camera, CameraView, CameraType, FlashMode } from 'expo-camera';
+import AppVideo from '@/components/AppVideo';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,6 +43,10 @@ export interface CapturedMedia {
   uri: string;
   width: number;
   height: number;
+  /** 'video' when recorded in Video mode. */
+  type?: 'photo' | 'video';
+  /** Video length in ms. */
+  duration?: number;
 }
 
 interface Props {
@@ -48,7 +54,11 @@ interface Props {
   onClose: () => void;
   onCapture: (media: CapturedMedia) => void;
   onPickFromGallery: () => void;
+  /** Show the Video mode (record and post videos). */
+  allowVideo?: boolean;
 }
+
+const MAX_VIDEO_SECS = 60;
 
 // ── Zoom model (iPhone-style "0.5× / 1× / 2×" factors) ──
 // expo-camera takes a 0–1 `zoom`. On iOS it is exponential:
@@ -82,7 +92,7 @@ function factorToCameraZoom(factor: number, onUltraWide: boolean): number {
 const LENS_PRESETS = [0.5, 1, 2] as const;
 
 // ── Component ──
-export default function InstagramCamera({ visible, onClose, onCapture, onPickFromGallery }: Props) {
+export default function InstagramCamera({ visible, onClose, onCapture, onPickFromGallery, allowVideo = false }: Props) {
   const cameraRef = useRef<CameraView>(null);
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
@@ -91,6 +101,15 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   const [capturedDimensions, setCapturedDimensions] = useState({ width: 0, height: 0 });
   const [isReady, setIsReady] = useState(false);
   const [permission, setPermission] = useState(false);
+
+  // ── Video mode (like the iPhone camera: PHOTO · VIDEO under the shutter) ──
+  const [captureMode, setCaptureMode] = useState<'photo' | 'video'>('photo');
+  const [recording, setRecording] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const [capturedVideo, setCapturedVideo] = useState<{ uri: string; secs: number } | null>(null);
+  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recStarted = useRef(0);
+  const dragZoom = useRef({ startY: 0, startZoom: 1, active: false });
 
   // ── Zoom: tracked as an iPhone-style factor (1 = normal, 0.5 = ultra-wide) ──
   const DEFAULT_ZOOM = 1;
@@ -137,6 +156,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   useEffect(() => {
     if (visible) {
       setCapturedUri(null);
+      setCapturedVideo(null);
+      setRecording(false);
       setIsReady(false);
       setZoom(DEFAULT_ZOOM);
       setFocusPoint(null);
@@ -207,6 +228,11 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
 
+      if (recording) {
+        // While recording: slide a finger up/down to zoom (like the iPhone).
+        dragZoom.current = { startY: pageY, startZoom: zoom, active: true };
+        return;
+      }
       // Also track swipe
       swipeRef.current.startX = pageX;
       swipeRef.current.currentX = pageX;
@@ -225,6 +251,9 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
       // Pinching scales the zoom proportionally (spread fingers 2× → 2× zoom),
       // the way the iPhone camera feels.
       setZoom(clampZoom(pinchRef.current.initialZoom * scale));
+    } else if (touches && touches.length === 1 && dragZoom.current.active) {
+      const dy = dragZoom.current.startY - touches[0].pageY; // up = zoom in
+      setZoom(clampZoom(dragZoom.current.startZoom * Math.pow(2, dy / 180)));
     } else if (touches && touches.length === 1 && swipeRef.current.active) {
       // Single-finger swipe
       swipeRef.current.currentX = touches[0].pageX;
@@ -235,6 +264,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
   };
 
   const handleTouchEnd = () => {
+    dragZoom.current.active = false;
     // Check swipe for dismiss
     if (swipeRef.current.active) {
       const dx = swipeRef.current.currentX - swipeRef.current.startX;
@@ -319,6 +349,62 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
     }
   }, [isReady]);
 
+  // ── Record video (Video mode) ──
+  const stopRecTimer = () => { if (recTimer.current) clearInterval(recTimer.current); recTimer.current = null; };
+
+  const startRecording = useCallback(async () => {
+    if (!cameraRef.current || !isReady || recording) return;
+    try {
+      const mic = await Camera.requestMicrophonePermissionsAsync();
+      if (!mic.granted) {
+        Alert.alert('Microphone needed', 'Allow microphone access in Settings to record videos with sound.');
+        return;
+      }
+    } catch {}
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setRecording(true);
+    setRecSecs(0);
+    recStarted.current = Date.now();
+    recTimer.current = setInterval(() => setRecSecs(Math.floor((Date.now() - recStarted.current) / 1000)), 250);
+    try {
+      const res = await cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECS });
+      const secs = Math.max(1, Math.round((Date.now() - recStarted.current) / 1000));
+      if (res?.uri) setCapturedVideo({ uri: res.uri, secs });
+    } catch (e: any) {
+      Alert.alert('Couldn’t record', e?.message || 'Please try again.');
+    } finally {
+      stopRecTimer();
+      setRecording(false);
+      dragZoom.current.active = false;
+    }
+  }, [isReady, recording]);
+
+  const stopRecording = useCallback(() => {
+    if (!recording) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try { cameraRef.current?.stopRecording(); } catch {}
+  }, [recording]);
+
+  useEffect(() => () => stopRecTimer(), []);
+
+  const onShutter = () => {
+    if (captureMode === 'photo') handleCapture();
+    else if (recording) stopRecording();
+    else startRecording();
+  };
+
+  const switchMode = (m: 'photo' | 'video') => {
+    if (recording || m === captureMode) return;
+    Haptics.selectionAsync();
+    setCaptureMode(m);
+  };
+
+  const handleUseVideo = () => {
+    if (!capturedVideo) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onCapture({ uri: capturedVideo.uri, width: 0, height: 0, type: 'video', duration: capturedVideo.secs * 1000 });
+  };
+
   // ── Use captured photo ──
   const handleUsePhoto = () => {
     if (!capturedUri) return;
@@ -345,6 +431,7 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
 
   // ── Flip camera ──
   const flipCamera = () => {
+    if (recording) return; // flipping stops a recording
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
     // Front camera has no ultra-wide — start it at 1×, like the iPhone.
@@ -376,6 +463,32 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
           <TouchableOpacity style={styles.galleryBtnLarge} onPress={onPickFromGallery}>
             <ImageIcon size={20} color="#000" />
             <Text style={styles.galleryBtnLargeText}>Choose from Gallery</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Video preview (after recording) ──
+  if (capturedVideo) {
+    return (
+      <View style={styles.fullScreen}>
+        <StatusBar barStyle="light-content" />
+        <AppVideo source={{ uri: capturedVideo.uri }} style={styles.fullScreen} resizeMode="contain" shouldPlay isLooping />
+        <View style={[styles.previewTopBar, topOffset]}>
+          <TouchableOpacity style={styles.previewBtn} onPress={() => setCapturedVideo(null)} accessibilityLabel="Back to camera" hitSlop={12}>
+            <ChevronLeft size={28} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.previewTitle}>Video · {capturedVideo.secs}s</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.previewBottom}>
+          <TouchableOpacity style={styles.retakeRow} onPress={() => setCapturedVideo(null)}>
+            <RefreshCw size={20} color="#FFF" />
+            <Text style={styles.retakeText}>Retake</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.usePhotoBtn} onPress={handleUseVideo}>
+            <Text style={styles.usePhotoText}>Use Video</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -427,8 +540,8 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         style={styles.fullScreen}
         facing={facing}
         flash={flash}
-        mode="picture"
-        ratio="4:3"
+        mode={captureMode === 'video' ? 'video' : 'picture'}
+        ratio={captureMode === 'video' ? undefined : '4:3'}
         zoom={cameraZoom}
         // 'on' = continuous autofocus like the iPhone camera ('off' locked focus,
         // which made close-ups and moving subjects blurry).
@@ -576,6 +689,27 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         <Text style={styles.swipeHintText}>← Swipe to go back</Text>
       </View>
 
+      {/* Recording timer */}
+      {recording ? (
+        <View style={[styles.recBadge, { top: topOffset.top + 52 }]} pointerEvents="none">
+          <View style={styles.recDot} />
+          <Text style={styles.recText}>
+            {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, '0')} / 1:00 · slide up to zoom
+          </Text>
+        </View>
+      ) : null}
+
+      {/* PHOTO · VIDEO (like the iPhone camera) */}
+      {allowVideo && !recording ? (
+        <View style={styles.modeRow}>
+          {(['photo', 'video'] as const).map((m) => (
+            <TouchableOpacity key={m} onPress={() => switchMode(m)} hitSlop={10} accessibilityLabel={`${m} mode`}>
+              <Text style={[styles.modeText, captureMode === m && styles.modeTextOn]}>{m.toUpperCase()}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+
       {/* Bottom bar — gallery thumb + capture button only */}
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.galleryThumb} onPress={onPickFromGallery}>
@@ -585,12 +719,19 @@ export default function InstagramCamera({ visible, onClose, onCapture, onPickFro
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.captureBtn, { opacity: isReady ? 1 : 0.5 }]}
-          onPress={handleCapture}
-          disabled={!isReady}
+          style={[styles.captureBtn, { opacity: isReady || recording ? 1 : 0.5 }, captureMode === 'video' && { borderColor: recording ? '#EF4444' : '#FFF' }]}
+          onPress={onShutter}
+          disabled={!isReady && !recording}
           activeOpacity={0.7}
+          accessibilityLabel={captureMode === 'photo' ? 'Take photo' : recording ? 'Stop recording' : 'Start recording'}
         >
-          <View style={styles.captureBtnInner} />
+          {captureMode === 'photo' ? (
+            <View style={styles.captureBtnInner} />
+          ) : (
+            <View style={recording
+              ? { width: 30, height: 30, borderRadius: 6, backgroundColor: '#EF4444' }
+              : { width: 60, height: 60, borderRadius: 30, backgroundColor: '#EF4444' }} />
+          )}
         </TouchableOpacity>
 
         {/* Empty spacer to center the capture button */}
@@ -862,6 +1003,32 @@ const styles = StyleSheet.create({
   },
 
   // ── Bottom bar ──
+  modeRow: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 142 : 124,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 28,
+    zIndex: 21,
+  },
+  modeText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
+  modeTextOn: { color: '#FFD60A' },
+  recBadge: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    zIndex: 22,
+  },
+  recDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#EF4444' },
+  recText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   bottomBar: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 52 : 36,
