@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,8 +21,10 @@ import {
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppVideo from '@/components/AppVideo';
+import VideoTrimmer from '@/components/VideoTrimmer';
+import { fmtSecs, withClip, type VideoClip } from '@/lib/videoClip';
 import {
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Move,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Move, Play, Scissors, Volume2, VolumeX,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -47,12 +50,14 @@ interface PostComposerProps {
   onClose: () => void;
   /** When the photo came from the in-app camera: go back there instead of closing. */
   onBack?: () => void;
-  onPost: (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category: string }) => void;
+  onPost: (data: { caption: string; mediaUri?: string; mediaWidth?: number; mediaHeight?: number; category: string; clip?: VideoClip }) => void;
   preloadMediaUri?: string | null;
   preloadMediaWidth?: number;
   preloadMediaHeight?: number;
-  /** The preloaded media is a video (recorded in the camera). */
+  /** The preloaded media is a video (recorded in the camera or picked). */
   preloadIsVideo?: boolean;
+  /** Open the trimmer straight away (video longer than the 60-second limit). */
+  preloadNeedsTrim?: boolean;
   backgroundColor?: string;
   textColor?: string;
   accentColor?: string;
@@ -67,6 +72,7 @@ export default function PostComposer({
   preloadMediaWidth,
   preloadMediaHeight,
   preloadIsVideo = false,
+  preloadNeedsTrim = false,
   backgroundColor = '#000',
   textColor = '#FFF',
   accentColor = '#2196F3',
@@ -78,6 +84,11 @@ export default function PostComposer({
   const [mediaDims, setMediaDims] = useState<{ width: number; height: number } | null>(null);
   const [category, setCategory] = useState('General');
   const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
+  // Video: trim / fit choice, preview playback.
+  const [clip, setClip] = useState<VideoClip>({});
+  const [showTrim, setShowTrim] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(true);
+  const [previewMuted, setPreviewMuted] = useState(false);
 
   // Calculate cover sizing for 9:16 container + max pan limits
   const coverCalc = useMemo(() => {
@@ -111,7 +122,12 @@ export default function PostComposer({
   };
 
   // Reset crop when media changes
-  useEffect(() => { setCropOffset({ x: 0, y: 0 }); }, [mediaUri]);
+  useEffect(() => { setCropOffset({ x: 0, y: 0 }); setClip({}); setPreviewPlaying(true); }, [mediaUri]);
+  const isVideo = !!mediaUri && preloadIsVideo && mediaUri === preloadMediaUri;
+  // A video over the limit opens the trimmer right away.
+  useEffect(() => {
+    if (visible && preloadIsVideo && preloadNeedsTrim && preloadMediaUri) setShowTrim(true);
+  }, [visible, preloadIsVideo, preloadNeedsTrim, preloadMediaUri]);
 
   // Preload media when camera capture provides a photo
   useEffect(() => {
@@ -129,7 +145,7 @@ export default function PostComposer({
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    onPost({ caption: caption.trim(), mediaUri: mediaUri ?? undefined, mediaWidth: mediaDims?.width, mediaHeight: mediaDims?.height, category });
+    onPost({ caption: caption.trim(), mediaUri: mediaUri ?? undefined, mediaWidth: mediaDims?.width, mediaHeight: mediaDims?.height, category, clip: isVideo ? (preloadNeedsTrim && !clip.end ? { ...clip, end: (clip.start || 0) + 60 } : clip) : undefined });
     // Reset state
     setCaption('');
     setMediaUri(null);
@@ -218,8 +234,22 @@ export default function PostComposer({
               <View style={styles.photoSection}>
                 {/* 9:16 clipped container */}
                 <View style={styles.cropContainer}>
-                  {preloadIsVideo && mediaUri === preloadMediaUri ? (
-                    <AppVideo source={{ uri: mediaUri }} style={styles.coverPreview} resizeMode="cover" shouldPlay isLooping isMuted />
+                  {isVideo ? (
+                    // Tap to play / pause. Plays just the trimmed part, framed as chosen.
+                    <Pressable style={styles.coverPreview} onPress={() => setPreviewPlaying((p) => !p)} accessibilityLabel={previewPlaying ? 'Pause video' : 'Play video'}>
+                      <AppVideo
+                        key={withClip(mediaUri, clip)}
+                        source={{ uri: withClip(mediaUri, clip) }}
+                        style={styles.coverPreview}
+                        resizeMode="cover"
+                        shouldPlay={previewPlaying && !showTrim}
+                        isLooping
+                        isMuted={previewMuted}
+                      />
+                      {!previewPlaying && (
+                        <View style={styles.previewPlay} pointerEvents="none"><Play size={30} color="#FFF" fill="#FFF" /></View>
+                      )}
+                    </Pressable>
                   ) : mediaDims && coverCalc.displayW > 0 ? (
                     <RNImage
                       source={{ uri: mediaUri }}
@@ -235,8 +265,25 @@ export default function PostComposer({
                     <RNImage source={{ uri: mediaUri }} style={styles.coverPreview} resizeMode="cover" />
                   )}
                 </View>
+                {/* Video: trim & crop, sound */}
+                {isVideo && (
+                  <View style={styles.videoTools}>
+                    <TouchableOpacity style={styles.videoTool} onPress={() => setShowTrim(true)} accessibilityLabel="Trim and crop video">
+                      <Scissors size={16} color="#FFF" />
+                      <Text style={styles.videoToolText}>Trim & crop</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.videoClipText} numberOfLines={1}>
+                      {clip.start || clip.end
+                        ? `${fmtSecs(clip.start || 0)}–${clip.end ? fmtSecs(clip.end) : 'end'}${clip.fit === 'contain' ? ' · Fit' : ''}`
+                        : clip.fit === 'contain' ? 'Whole video · Fit' : 'Whole video'}
+                    </Text>
+                    <TouchableOpacity style={styles.videoTool} onPress={() => setPreviewMuted((m) => !m)} accessibilityLabel={previewMuted ? 'Sound on' : 'Sound off'}>
+                      {previewMuted ? <VolumeX size={16} color="#FFF" /> : <Volume2 size={16} color="#FFF" />}
+                    </TouchableOpacity>
+                  </View>
+                )}
                 {/* Reposition controls */}
-                {(coverCalc.maxX > 0 || coverCalc.maxY > 0) && (
+                {!isVideo && (coverCalc.maxX > 0 || coverCalc.maxY > 0) && (
                   <View style={styles.repositionRow}>
                     <View style={styles.repositionHint}>
                       <Move size={14} color="rgba(255,255,255,0.5)" />
@@ -310,6 +357,15 @@ export default function PostComposer({
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
+      {isVideo && mediaUri ? (
+        <VideoTrimmer
+          visible={showTrim}
+          uri={mediaUri}
+          initial={clip}
+          onCancel={() => setShowTrim(false)}
+          onDone={(c) => { setClip(c); setShowTrim(false); setPreviewPlaying(true); }}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -394,6 +450,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
   coverPreview: { width: '100%', height: '100%' },
+  previewPlay: { position: 'absolute', alignSelf: 'center', top: '45%', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  videoTools: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  videoTool: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
+  videoToolText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  videoClipText: { flex: 1, color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
   repositionRow: {
     flexDirection: 'row',
     alignItems: 'center',
