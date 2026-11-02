@@ -58,7 +58,7 @@ export function safeImageUrl(url: string | undefined | null): string | null {
   return null;
 }
 
-const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp)(\?.*)?$/i;
+const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp)(\?[^#]*)?(#.*)?$/i;
 
 /**
  * Returns true if the URL points to a video file (by extension).
