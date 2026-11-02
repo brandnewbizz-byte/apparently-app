@@ -82,7 +82,7 @@ export async function createPost(
   userId: string,
   content: string,
   imageUrl?: string,
-  options?: { postKind?: 'post'; videoUrl?: string; mediaType?: 'image' | 'video' }
+  options?: { postKind?: 'post'; videoUrl?: string; mediaType?: 'image' | 'video'; coverUrl?: string }
 ) {
   // NOTE: the `posts` table has no `category` column. Category is only used
   // locally for the feed tag display; do not attempt to persist it.
@@ -92,7 +92,8 @@ export async function createPost(
     .insert({
       user_id: userId,
       content,
-      image_url: isVideo ? null : (imageUrl || null),
+      // Video posts keep their cover frame in image_url (grid, previews).
+      image_url: isVideo ? (options?.coverUrl || null) : (imageUrl || null),
       video_url: isVideo ? (options?.videoUrl || imageUrl || null) : null,
       media_type: options?.mediaType || null,
       post_kind: options?.postKind || 'post',
