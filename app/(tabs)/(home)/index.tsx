@@ -58,6 +58,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFeedStack, useNeedsPicks, useRankedFeed, type FeedStack } from '@/hooks/useFeedStack';
 import { feedStore } from '@/lib/feedEngine';
 import { parseWhen } from '@/lib/nearby';
+import { listingLiveUntil } from '@/lib/listingLife';
 import { vibesOf } from '@/lib/vibes';
 import type { HideReason } from '@/lib/feedEngine';
 import { notify } from '@/lib/dialog';
@@ -217,7 +218,7 @@ interface SwipeableBundlesProps {
 const describeBundle = (b: BundlePlan): FeedItemInfo => ({
   id: b.id, category: b.category || b.type, location: b.location,
   types: vibesOf({ category: b.category || b.type, tags: b.tags, title: b.title, description: b.description }),
-  creatorId: b.creatorId, createdAt: b.createdAt, price: b.price,
+  creatorId: b.creatorId, createdAt: b.createdAt, price: b.price, liveUntil: listingLiveUntil(b.createdAt),
   spotsLeft: b.availableCount ? Math.max(b.availableCount - (b.grabCount || 0), 0) : undefined,
   grabCount: b.grabCount, hasImage: !!(b.imageUrl || b.image || b.videoUrl), description: b.description,
   startsAt: parseWhen(b.dateRange),
@@ -225,7 +226,7 @@ const describeBundle = (b: BundlePlan): FeedItemInfo => ({
 const describeSkill = (k: SkillDeal): FeedItemInfo => ({
   id: k.id, category: k.category, types: k.category ? [k.category] : undefined, creatorId: k.creatorId, createdAt: k.createdAt, price: k.price, originalPrice: k.originalPrice,
   spotsLeft: k.spotsLeft, expiresIn: k.expiresIn, grabCount: k.grabCount, hasImage: !!(k.imageUrl || k.image), description: k.description,
-  location: k.location,
+  location: k.location, liveUntil: listingLiveUntil(k.createdAt),
 });
 const describeRequest = (r: ServiceRequest): FeedItemInfo => ({
   id: r.id, category: r.category, types: [r.source === 'job' ? (r.jobType || 'job') : (r.category || 'other')],
