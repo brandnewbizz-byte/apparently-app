@@ -1,18 +1,30 @@
 /**
  * Native deep-link handling.
  *
- * IMPORTANT: the previous implementation returned `'/'` unconditionally, which
- * forced EVERY incoming deep link (invite links, password reset, profile links)
- * to the home screen. That silently broke `rork-app://live/room/{id}` and
- * `rork-app://reset-password`.
+ * Passes app links (rork-app://live/room/{id}, rork-app://reset-password …)
+ * through unchanged so expo-router opens the right screen.
  *
- * We now pass the incoming path through unchanged so expo-router can resolve it
- * to the correct screen. Returning the path verbatim is a no-op redirect that
- * preserves the deep-link destination.
+ * Shared web links (https://apparentlyappdashboard.nationalcompliancehub.com/app/…)
+ * open the app directly when it's installed. Those carry the web app's "/app"
+ * prefix, which the phone app doesn't use, so it's removed here:
+ *   …/app/user/123?post=9   →  /user/123?post=9
+ *   …/app/live/room/abc     →  /live/room/abc
  */
-export function redirectSystemPath({
-  path,
-  initial,
-}: { path: string; initial: boolean }) {
-  return path;
+const WEB_HOST = 'apparentlyappdashboard.nationalcompliancehub.com';
+
+export function redirectSystemPath({ path }: { path: string; initial: boolean }) {
+  try {
+    if (!path) return path;
+    let p = path;
+    if (/^https?:\/\//i.test(p)) {
+      const u = new URL(p);
+      if (u.hostname !== WEB_HOST) return p;
+      p = `${u.pathname}${u.search}`;
+    }
+    if (p === '/app' || p === '/app/') return '/';
+    if (p.startsWith('/app/')) return p.slice(4);
+    return p;
+  } catch {
+    return path;
+  }
 }

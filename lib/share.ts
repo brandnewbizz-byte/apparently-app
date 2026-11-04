@@ -2,8 +2,7 @@
  * Share a real web link (profile, post or Spot room) through the phone's share
  * sheet, so "Copy", Messages, WhatsApp etc. all get a link that opens.
  *
- * iOS: the link goes in `url` (that's what "Copy" copies) and the text in
- * `message`. Android ignores `url`, so the link is appended to the message.
+ * The link is always part of the message text, on iOS and Android.
  * Web: the browser share sheet, or the clipboard when there isn't one.
  */
 import { Alert, Platform, Share } from 'react-native';
@@ -28,11 +27,10 @@ export async function shareLink(text: string, url: string): Promise<void> {
         return;
       }
     }
-    if (Platform.OS === 'ios') {
-      await Share.share({ message, url });
-    } else {
-      await Share.share({ message: message ? `${message}\n${url}` : url, title: message || undefined });
-    }
+    // The link is always written into the message itself, so every app the
+    // person picks (Messages, WhatsApp, Instagram, Copy…) gets a working URL.
+    // (iOS's separate `url` field is dropped by many apps.)
+    await Share.share({ message: message ? `${message}\n\n${url}` : url, title: message || undefined });
   } catch {
     // cancelled
   }
