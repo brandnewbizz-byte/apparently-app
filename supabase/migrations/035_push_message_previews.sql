@@ -1,0 +1,3 @@
+-- Notification settings → "Show message previews" (notification_prefs.previews).
+-- Off: message pushes say "Sent you a message" instead of the text.
+-- (Function body as applied; see notify_on_message_insert in the database.)

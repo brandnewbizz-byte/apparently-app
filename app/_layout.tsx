@@ -35,6 +35,7 @@ import { OrdersProvider } from '@/contexts/OrdersContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import IncomingCallWatcher from '@/components/IncomingCallWatcher';
+import InAppToast from '@/components/InAppToast';
 import { callStillRinging, claimCall, declineCall, isCallUiActive, markCallNotificationRead, paramsFromPushData } from '@/lib/calls';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
@@ -227,6 +228,7 @@ function RootLayoutNav() {
     <Stack.Screen name="call/[roomId]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }} />
     <Stack.Screen name="picks" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     </Stack>
+    <InAppToast />
     </>
   );
 }

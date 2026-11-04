@@ -55,6 +55,11 @@ export function setActiveConversation(otherUserId: string | null): void {
   activeConversationUserId = otherUserId;
 }
 
+/** The person whose chat is open right now (null when no chat is open). */
+export function getActiveConversation(): string | null {
+  return activeConversationUserId;
+}
+
 /** True while the in-app incoming-call screen (or a call) is showing. */
 export function setInAppCallUi(active: boolean): void {
   inAppCallUiActive = active;
@@ -80,13 +85,13 @@ export async function configureNotificationHandler(): Promise<void> {
   Notifications.setNotificationHandler({
     handleNotification: async (n) => {
       const data: any = n?.request?.content?.data || {};
-      const quiet =
-        isCallData(data) ||
-        (data.kind === 'message' && !!activeConversationUserId && data.senderId === activeConversationUserId);
+      // While you're in the app, Apparently shows its own banner at the top
+      // (components/InAppToast), like Instagram — so the phone's banner stays
+      // quiet. The notification still goes in the list / notification shade.
       return {
-        shouldShowBanner: !quiet,
+        shouldShowBanner: false,
         shouldShowList: !isCallData(data),
-        shouldPlaySound: !quiet,
+        shouldPlaySound: false,
         shouldSetBadge: true,
       };
     },
