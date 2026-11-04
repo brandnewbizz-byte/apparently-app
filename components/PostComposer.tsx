@@ -1,5 +1,5 @@
 // PostComposer.tsx — Instagram-style single-screen post composer
-// Replaces the old inline CreatePostModal. Photos + caption + category, one clean screen.
+// Replaces the old inline CreatePostModal. Photos + caption, one clean screen.
 // v2: 9:16 Reels-style preview with nudge reposition
 
 import * as Haptics from 'expo-haptics';
@@ -221,7 +221,7 @@ export default function PostComposer({
 
         {/* ── Body ── */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           style={styles.body}
         >
           <ScrollView
@@ -329,31 +329,6 @@ export default function PostComposer({
               scrollEnabled={false}
             />
 
-            {/* ── Category Chips ── */}
-            <Text style={[styles.sectionLabel, { color: textColor, opacity: 0.5 }]}>CATEGORY</Text>
-            <View style={styles.chips}>
-              {POST_CATEGORIES.map((cat) => {
-                const active = category === cat.key;
-                return (
-                  <TouchableOpacity
-                    key={cat.key}
-                    onPress={() => setCategory(active ? 'General' : cat.key)}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: active ? cat.bg : 'rgba(255,255,255,0.06)',
-                        borderColor: active ? cat.color : 'rgba(255,255,255,0.08)',
-                      },
-                    ]}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.chipText, { color: active ? cat.color : 'rgba(255,255,255,0.5)' }]}>
-                      {cat.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
