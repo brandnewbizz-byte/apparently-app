@@ -1,0 +1,17 @@
+# Sends an already-finished iOS build to App Store Connect / TestFlight.
+# Triggered by pushing to the "submit-ios" branch; update build_id to the
+# Expo build you want submitted.
+name: Submit iOS build
+
+on:
+  push:
+    branches: ['submit-ios']
+
+jobs:
+  submit_ios:
+    name: Submit to App Store Connect
+    type: submit
+    params:
+      platform: ios
+      build_id: e691dd37-c25c-40fb-a74d-0b347f13664b
+      profile: production
