@@ -188,8 +188,8 @@ export default function ProfileScreen() {
       supabase.from('user_grabs').select('price, status').eq('provider_id', myId),
       supabase.from('posts').select('created_at').eq('user_id', myId).gte('created_at', since.toISOString()),
       supabase.from('user_reviews').select('rating').eq('target_user_id', myId),
-      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', myId).neq('follower_id', myId),
-      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', myId).neq('following_id', myId),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', myId).neq('follower_id', myId).eq('status', 'accepted'),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', myId).neq('following_id', myId).eq('status', 'accepted'),
     ]);
     setFollowersCount(followers.count ?? 0);
     setFollowingCount(following.count ?? 0);
@@ -262,7 +262,7 @@ export default function ProfileScreen() {
     setFollowList({ title: type === 'followers' ? 'Followers' : 'Following', users: [], loading: true });
     const filterCol = type === 'followers' ? 'following_id' : 'follower_id';
     const joinCol = type === 'followers' ? 'follower_id' : 'following_id';
-    const { data: rows } = await supabase.from('follows').select(joinCol).eq(filterCol, myId).neq(joinCol, myId);
+    const { data: rows } = await supabase.from('follows').select(joinCol).eq(filterCol, myId).neq(joinCol, myId).eq('status', 'accepted');
     const ids = ((rows || []) as any[]).map((r) => r[joinCol]);
     let users: any[] = [];
     if (ids.length) {

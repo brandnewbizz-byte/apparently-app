@@ -77,6 +77,17 @@ export default function ConversationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
+  // Private accounts: can I message this person? (null = still checking / allowed)
+  const [canMessage, setCanMessage] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!participantId) return;
+    let on = true;
+    supabase.rpc('can_message', { p_receiver: participantId }).then(({ data, error }) => {
+      if (on && !error && data === false) setCanMessage(false);
+    });
+    return () => { on = false; };
+  }, [participantId]);
+
   // Pushes from this chat stay quiet while it's open (the message shows right here).
   useEffect(() => {
     if (!participantId) return;
@@ -857,7 +868,19 @@ export default function ConversationScreen() {
           </View>
         )}
 
+        {/* ── Private account you can't message yet ── */}
+        {canMessage === false ? (
+          <View style={[styles.privateNote, { paddingBottom: Math.max(insets.bottom, 12), borderTopColor: colors.border }]}>
+            <Text style={[styles.privateNoteTitle, { color: colors.text }]}>This account is private</Text>
+            <Text style={[styles.privateNoteText, { color: colors.textSecondary }]}>Follow them and wait for them to approve you to send a message.</Text>
+            <TouchableOpacity onPress={() => participantId && router.push(`/user/${participantId}` as any)} style={[styles.privateNoteBtn, { backgroundColor: colors.accent }]}>
+              <Text style={styles.privateNoteBtnText}>View profile</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* ── Composer ── */}
+        {canMessage === false ? null : (
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <View style={[styles.composer, { backgroundColor: colors.backgroundTertiary }]}>
             {isRecording ? (
@@ -928,6 +951,7 @@ export default function ConversationScreen() {
           {imageUploading && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending photo…</Text>}
           {voiceSending && <Text style={[styles.uploading, { color: colors.textSecondary }]}>Sending voice note…</Text>}
         </View>
+        )}
       </KeyboardAvoidingView>
 
       {showPaySheet && <RequestPaymentSheet
@@ -952,6 +976,11 @@ export default function ConversationScreen() {
 }
 
 const styles = StyleSheet.create({
+  privateNote: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 14, gap: 6, borderTopWidth: StyleSheet.hairlineWidth },
+  privateNoteTitle: { fontSize: 15, fontWeight: '700' },
+  privateNoteText: { fontSize: 13, textAlign: 'center' },
+  privateNoteBtn: { marginTop: 6, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 16 },
+  privateNoteBtnText: { color: '#FFF', fontWeight: '700' },
   container: { flex: 1 },
   flex: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth },

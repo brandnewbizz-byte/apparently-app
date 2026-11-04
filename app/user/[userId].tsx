@@ -40,6 +40,7 @@ import {
   BadgeCheck,
   Slash,
   AlertTriangle,
+  Lock,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -92,6 +93,8 @@ export default function UserProfileScreen() {
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
+  /** Asked to follow a private account; waiting for them to approve. */
+  const [followRequested, setFollowRequested] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
 
   // Posts
@@ -123,7 +126,7 @@ export default function UserProfileScreen() {
     if (!userId) return;
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, username, full_name, avatar, bio, location, is_verified, followers_count, is_live, relationship_category, created_at, updated_at')
+      .select('id, username, full_name, avatar, bio, location, is_verified, followers_count, is_live, relationship_category, created_at, updated_at, is_private')
       .eq('id', userId)
       .single();
     if (!error && data) setProfileUser(data);
@@ -144,7 +147,8 @@ export default function UserProfileScreen() {
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('following_id', userId)
-      .neq('follower_id', userId);
+      .neq('follower_id', userId)
+      .eq('status', 'accepted');
     setFollowersCount(fc ?? 0);
 
     // Following
@@ -152,7 +156,8 @@ export default function UserProfileScreen() {
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('follower_id', userId)
-      .neq('following_id', userId);
+      .neq('following_id', userId)
+      .eq('status', 'accepted');
     setFollowingCount(fgc ?? 0);
   }, [userId]);
 
@@ -160,11 +165,12 @@ export default function UserProfileScreen() {
     if (!authUser?.id || !userId || authUser.id === userId) return;
     const { data } = await supabase
       .from('follows')
-      .select('id')
+      .select('id, status')
       .eq('follower_id', authUser.id)
       .eq('following_id', userId)
-      .single();
-    setIsFollowing(!!data);
+      .maybeSingle();
+    setIsFollowing(!!data && (data as any).status !== 'pending');
+    setFollowRequested(!!data && (data as any).status === 'pending');
   }, [authUser?.id, userId]);
 
   const fetchPosts = useCallback(async () => {
@@ -195,6 +201,7 @@ export default function UserProfileScreen() {
       .select(joinField)
       .eq(field, userId)
       .neq(selfExclude.field, selfExclude.val)
+      .eq('status', 'accepted')
       .limit(50);
 
     if (follows && follows.length > 0) {
@@ -260,23 +267,37 @@ export default function UserProfileScreen() {
     else Alert.alert('Reported', 'Thank you. We will review this report.');
   };
 
+  // Private account you don't follow (yet): posts and messages are locked.
+  // Their bundles and skill deals stay public on Home.
+  const isLocked = !!profileUser?.is_private && !isFollowing && authUser?.id !== userId;
+
   const handleFollow = async () => {
     if (!authUser?.id || !userId || followLoading) return;
     setFollowLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      if (isFollowing) {
+      if (isFollowing || followRequested) {
+        // Unfollow, or cancel a follow request.
         const { error } = await supabase.from('follows').delete().eq('follower_id', authUser.id).eq('following_id', userId);
         if (error) throw error;
+        if (isFollowing) setFollowersCount((c) => Math.max(0, c - 1));
         setIsFollowing(false);
-        setFollowersCount((c) => Math.max(0, c - 1));
+        setFollowRequested(false);
+        if (profileUser?.is_private) setAllPosts([]);
       } else {
-        const { error } = await supabase.from('follows').insert({ follower_id: authUser.id, following_id: userId });
+        const { data: row, error } = await supabase
+          .from('follows')
+          .insert({ follower_id: authUser.id, following_id: userId })
+          .select('status')
+          .maybeSingle();
         // 23505 = already following (e.g. tapped on another device) — treat as success.
         if (error && error.code !== '23505') throw error;
-        setIsFollowing(true);
+        // Private accounts get a request the owner approves (the server decides).
+        const pending = (row as any)?.status === 'pending' || (!!error && !!profileUser?.is_private);
+        setIsFollowing(!pending);
+        setFollowRequested(pending);
         if (!error) {
-          setFollowersCount((c) => c + 1);
+          if (!pending) setFollowersCount((c) => c + 1);
           // Send follow notification (DB columns: user_id, actor_id, actor_name, etc.)
           const actorName = authUser.fullName || authUser.username || 'Someone';
           const actorAvatar = authUser.avatar || '';
@@ -286,9 +307,9 @@ export default function UserProfileScreen() {
             actor_name: actorName,
             actor_avatar: actorAvatar,
             type: 'follow',
-            title: `${actorName} started following you`,
-            body: 'started following you',
-            data: {},
+            title: pending ? `${actorName} wants to follow you` : `${actorName} started following you`,
+            body: pending ? 'requested to follow you' : 'started following you',
+            data: pending ? { kind: 'follow_request', follower_id: authUser.id } : { follower_id: authUser.id },
             read: false,
             created_at: new Date().toISOString(),
           }).then(({ error: notifErr }) => {
@@ -391,12 +412,20 @@ export default function UserProfileScreen() {
                         <UserPlus size={18} color={isDark ? '#1a1a2e' : '#667eea'} />
                       )}
                       <Text style={[styles.followBtnText, { color: isFollowing ? '#FFFFFF' : isDark ? '#1a1a2e' : '#667eea' }]}>
-                        {isFollowing ? 'Following' : 'Follow'}
+                        {isFollowing ? 'Following' : followRequested ? 'Requested' : 'Follow'}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.followBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
-                      onPress={() => router.push(`/inbox/conversation/${userId}` as any)}
+                      onPress={() => {
+                        if (isLocked) {
+                          Alert.alert('This account is private', followRequested
+                            ? `You can message ${displayName} once they approve your follow request.`
+                            : `Follow ${displayName} and wait for them to approve you to send a message.`);
+                          return;
+                        }
+                        router.push(`/inbox/conversation/${userId}` as any);
+                      }}
                     >
                       <MessageCircle size={18} color="#FFFFFF" />
                       <Text style={[styles.followBtnText, { color: '#FFFFFF' }]}>Message</Text>
@@ -440,7 +469,17 @@ export default function UserProfileScreen() {
 
           {/* Posts Grid — EXACT same as profile tab */}
           <View style={{ paddingHorizontal: 0, paddingTop: 8, paddingBottom: 100 }}>
-            {allPosts.length === 0 ? (
+            {isLocked ? (
+              <View style={styles.gridEmpty}>
+                <View style={[styles.gridEmptyIcon, { backgroundColor: ACCENT_COLORS.blueDim }]}>
+                  <Lock size={26} color={ACCENT_COLORS.blue} />
+                </View>
+                <Text style={[styles.gridEmptyTitle, { color: colors.text }]}>This account is private</Text>
+                <Text style={{ color: colors.textTertiary, textAlign: 'center', marginTop: 6, paddingHorizontal: 32 }}>
+                  {followRequested ? 'Your follow request is waiting for approval.' : 'Follow this account to see their photos and videos.'}
+                </Text>
+              </View>
+            ) : allPosts.length === 0 ? (
               <View style={styles.gridEmpty}>
                 <View style={[styles.gridEmptyIcon, { backgroundColor: ACCENT_COLORS.blueDim }]}>
                   <Camera size={28} color={ACCENT_COLORS.blue} />

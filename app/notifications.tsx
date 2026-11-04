@@ -24,6 +24,7 @@ import { answerParams, declineCall, isCallNotification } from '@/lib/calls';
 import { callsAvailable } from '@/lib/webrtc';
 import { useConnections, ConnectionRequest } from '@/contexts/ConnectionsContext';
 import { supabase } from '@/lib/supabase';
+import { approveFollow, declineFollow } from '@/lib/privacy';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -149,15 +150,18 @@ export default function NotificationsScreen() {
         if (error) throw error;
         setFollowing((prev) => { const n = new Set(prev); n.delete(actorId); return n; });
       } else {
-        const { error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: actorId });
+        const { data: row, error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: actorId }).select('status').maybeSingle();
         if (error && error.code !== '23505') throw error;
         setFollowing((prev) => new Set(prev).add(actorId));
         if (!error) {
+          const pending = (row as any)?.status === 'pending';
           const actorName = user.fullName || user.username || 'Someone';
           supabase.from('notifications').insert({
             user_id: actorId, actor_id: user.id, actor_name: actorName, actor_avatar: user.avatar || '',
-            type: 'follow', title: `${actorName} started following you`, body: 'started following you',
-            data: {}, read: false,
+            type: 'follow',
+            title: pending ? `${actorName} wants to follow you` : `${actorName} started following you`,
+            body: pending ? 'requested to follow you' : 'started following you',
+            data: pending ? { kind: 'follow_request', follower_id: user.id } : { follower_id: user.id }, read: false,
           }).then(() => {});
         }
       }
@@ -226,7 +230,37 @@ export default function NotificationsScreen() {
     ]);
   };
 
+  // Follow requests to a private account: Confirm / Delete (Instagram).
+  const [requestDone, setRequestDone] = useState<Record<string, 'ok' | 'no'>>({});
+  const answerRequest = useCallback(async (n: AppNotification, ok: boolean) => {
+    if (!user?.id || !n.actorId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFollowBusy(n.actorId);
+    const me = { id: user.id, name: user.fullName || user.username || 'Someone', avatar: user.avatar || null };
+    const done = ok ? await approveFollow(me, n.actorId) : await declineFollow(user.id, n.actorId);
+    setFollowBusy(null);
+    if (done) { setRequestDone((p) => ({ ...p, [n.id]: ok ? 'ok' : 'no' })); markRead(n.id); }
+    else Alert.alert('Something went wrong', 'Please try again.');
+  }, [user, markRead]);
+
   const renderRight = (n: AppNotification) => {
+    if (n.type === 'follow' && n.actorId && n.data?.kind === 'follow_request') {
+      const done = requestDone[n.id];
+      if (done) {
+        return <Text style={[styles.followBtnText, { color: colors.textSecondary }]}>{done === 'ok' ? 'Approved' : 'Removed'}</Text>;
+      }
+      if (followBusy === n.actorId) return <ActivityIndicator size="small" color={colors.text} />;
+      return (
+        <View style={styles.actionPair}>
+          <TouchableOpacity onPress={() => answerRequest(n, true)} style={[styles.followBtn, { backgroundColor: colors.accent }]} accessibilityLabel="Confirm follow request">
+            <Text style={[styles.followBtnText, { color: '#FFF' }]}>Confirm</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => answerRequest(n, false)} style={[styles.followBtn, { backgroundColor: colors.backgroundTertiary }]} accessibilityLabel="Delete follow request">
+            <Text style={[styles.followBtnText, { color: colors.text }]}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
     if (n.type === 'follow' && n.actorId) {
       const isF = following.has(n.actorId);
       return (

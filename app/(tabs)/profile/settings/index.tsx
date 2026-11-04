@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import {
-  Search, X, User, UserCog, Crown, Banknote, Bell, Sparkles, Palette, ShieldOff, LifeBuoy, Shield, FileText, Info, LogOut, ChevronRight,
+  Search, X, User, UserCog, Crown, Banknote, Bell, Sparkles, Palette, ShieldOff, LifeBuoy, Shield, FileText, Info, LogOut, ChevronRight, Lock,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -59,6 +59,15 @@ export default function SettingsHome() {
     return () => { on = false; };
   }, [user?.id]);
 
+  const [isPrivate, setIsPrivate] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    let on = true;
+    supabase.from('profiles').select('is_private').eq('id', user.id).maybeSingle()
+      .then(({ data }) => { if (on) setIsPrivate(!!(data as any)?.is_private); });
+    return () => { on = false; };
+  }, [user?.id]);
+
   const go = (path: string) => router.push(path as never);
   const openUrl = (url: string) => Linking.openURL(url).catch(() => notify('Could not open link'));
   const version = Constants.expoConfig?.version || Application.nativeApplicationVersion || '1.0.0';
@@ -82,6 +91,7 @@ export default function SettingsHome() {
     { key: 'notifications', group: 'How you use Apparently', label: 'Notifications', keywords: 'push alerts messages likes comments follows calls', icon: <Bell size={18} color={W} />, color: '#EF4444', value: notifOn == null ? undefined : notifOn ? 'On' : 'Off', onPress: () => go('/profile/settings/notifications'), testID: 'settings-notifications' },
     { key: 'picks', group: 'How you use Apparently', label: 'Your picks', keywords: 'home feed interests vibes preferences', icon: <Sparkles size={18} color={W} />, color: '#8B5CF6', value: picks || 'Choose', onPress: () => go('/picks?edit=1'), testID: 'settings-your-picks' },
     { key: 'appearance', group: 'How you use Apparently', label: 'Appearance', keywords: 'dark mode light theme display', icon: <Palette size={18} color={W} />, color: '#0EA5E9', value: themeLabel, onPress: () => go('/profile/settings/appearance'), testID: 'settings-appearance' },
+    { key: 'account-privacy', group: 'Privacy & safety', label: 'Account privacy', keywords: 'private account public follow requests approve privacy who can see message', icon: <Lock size={18} color={W} />, color: '#334155', value: isPrivate == null ? undefined : isPrivate ? 'Private' : 'Public', onPress: () => go('/profile/settings/privacy'), testID: 'settings-privacy' },
     { key: 'blocked', group: 'Privacy & safety', label: 'Blocked accounts', keywords: 'block unblock privacy safety', icon: <ShieldOff size={18} color={W} />, color: '#475569', value: blockedUserIds.length ? String(blockedUserIds.length) : undefined, onPress: () => go('/profile/settings/blocked'), testID: 'settings-blocked' },
     ...(SUPPORT_EMAIL ? [{ key: 'help', group: 'Support & about', label: 'Help & support', keywords: 'contact email help support problem', icon: <LifeBuoy size={18} color={W} />, color: '#06B6D4', onPress: () => openUrl(SUPPORT_URL || `mailto:${SUPPORT_EMAIL}`) }] : []),
     ...(PRIVACY_POLICY_URL ? [{ key: 'privacy', group: 'Support & about', label: 'Privacy Policy', keywords: 'privacy policy legal data', icon: <Shield size={18} color={W} />, color: '#6366F1', onPress: () => openUrl(PRIVACY_POLICY_URL) }] : []),

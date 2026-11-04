@@ -755,8 +755,8 @@ export default function FeedScreen() {
     if (!myId) { setNetworkIds(null); return; }
     try {
       const [{ data: following }, { data: followers }] = await Promise.all([
-        supabase.from('follows').select('following_id').eq('follower_id', myId),
-        supabase.from('follows').select('follower_id').eq('following_id', myId),
+        supabase.from('follows').select('following_id').eq('follower_id', myId).eq('status', 'accepted'),
+        supabase.from('follows').select('follower_id').eq('following_id', myId).eq('status', 'accepted'),
       ]);
       const ids = new Set<string>([myId]);
       (following || []).forEach((f: any) => { if (f?.following_id) ids.add(f.following_id); });
@@ -776,7 +776,7 @@ export default function FeedScreen() {
     if (!myId) { setMentionThumbs([]); return; }
     try {
       const [{ data: following }, { data: mentions }] = await Promise.all([
-        supabase.from('follows').select('following_id').eq('follower_id', myId),
+        supabase.from('follows').select('following_id').eq('follower_id', myId).eq('status', 'accepted'),
         supabase.from('notifications').select('id, actor_id, data').eq('user_id', myId).eq('type', 'mention').order('created_at', { ascending: false }).limit(50),
       ]);
       const followingIds = new Set((following || []).map((f: any) => f.following_id).filter(Boolean));
