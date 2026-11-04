@@ -22,7 +22,7 @@ export default function CommentsSheet({ visible, onClose, postId, postOwnerId, c
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close comments" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.anchor} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior="padding" style={styles.anchor} pointerEvents="box-none">
         <View style={[styles.sheet, { height, backgroundColor: colors.background }]}>
           <View style={[styles.grab, { backgroundColor: colors.border }]} />
           <View style={[styles.header, { borderBottomColor: colors.border }]}>

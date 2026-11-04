@@ -67,7 +67,7 @@ export default function TextPostBar({
 
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.sheet, { backgroundColor: surfaceColor, borderColor, paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>

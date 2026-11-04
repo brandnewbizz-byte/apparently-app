@@ -145,7 +145,7 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.backdrop}>
+      <KeyboardAvoidingView behavior="padding" style={s.backdrop}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={[s.sheet, { backgroundColor: colors.background }]}>
           <View style={s.sheetHead}>

@@ -306,7 +306,7 @@ function QuickAddSheet({ visible, date, onClose, colors }: { visible: boolean; d
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding">
         <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} hitSlop={10}><X size={22} color={colors.text} /></TouchableOpacity>
           <Text style={[styles.sheetTitle, { color: colors.text }]}>New plan · {relativeLabel(date)}</Text>
@@ -416,7 +416,7 @@ function RequestSheet({ visible, date, onClose, onCreate, colors }: {
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding">
         <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} hitSlop={10}><X size={22} color={colors.text} /></TouchableOpacity>
           <Text style={[styles.sheetTitle, { color: colors.text }]}>Ask for help</Text>

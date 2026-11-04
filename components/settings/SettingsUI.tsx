@@ -29,7 +29,7 @@ export function SettingsPage({ title, children, right, testID }: { title: string
         <Text style={[s.headerTitle, { color: colors.text }]} numberOfLines={1}>{title}</Text>
         <View style={s.headerBtn}>{right}</View>
       </View>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 120 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {children}
         </ScrollView>

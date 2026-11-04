@@ -357,7 +357,7 @@ export default function QuickAddModal({ visible, onClose }: QuickAddModalProps) 
   const renderPostCompose = () => (
     <KeyboardAvoidingView 
       style={[styles.fullScreenCompose, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
     >
       <View style={[styles.fullScreenHeader, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
         <TouchableOpacity 
@@ -462,7 +462,7 @@ export default function QuickAddModal({ visible, onClose }: QuickAddModalProps) 
   const renderStoryCompose = () => (
     <KeyboardAvoidingView 
       style={[styles.fullScreenCompose, { backgroundColor: selectedBg }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
     >
       <View style={[styles.fullScreenHeader, { paddingTop: insets.top + 8, borderBottomColor: 'rgba(255,255,255,0.2)' }]}>
         <TouchableOpacity 

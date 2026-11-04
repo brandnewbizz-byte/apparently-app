@@ -1069,7 +1069,7 @@ export default function CreateRentalModal({ visible, onClose }: CreateRentalModa
     >
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
       >
         <View style={[styles.header, { paddingTop: insets.top + 10, borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={handleClose} style={styles.closeButton} testID="closeRentalModal">

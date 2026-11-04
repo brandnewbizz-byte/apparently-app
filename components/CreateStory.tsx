@@ -162,7 +162,7 @@ export default function CreateStory({ visible, onClose, onStoryCreated, myAvatar
 
           {/* ── Photo preview ── */}
           {step === 'photo' && photoUri ? (
-            <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <KeyboardAvoidingView style={styles.flex} behavior="padding">
               <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               <View style={[styles.previewTop, { paddingTop: insets.top + 8 }]}>
                 <TouchableOpacity onPress={() => setStep('choose')} style={styles.roundBtn} accessibilityLabel="Back">
@@ -195,7 +195,7 @@ export default function CreateStory({ visible, onClose, onStoryCreated, myAvatar
 
           {/* ── Text story ── */}
           {step === 'text' ? (
-            <KeyboardAvoidingView style={[styles.flex, { backgroundColor: BACKGROUNDS[bgIndex] }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <KeyboardAvoidingView style={[styles.flex, { backgroundColor: BACKGROUNDS[bgIndex] }]} behavior="padding">
               <View style={[styles.previewTop, { paddingTop: insets.top + 8 }]}>
                 <TouchableOpacity onPress={() => setStep('choose')} style={styles.roundBtn} accessibilityLabel="Back">
                   <ChevronLeft size={26} color="#FFF" />

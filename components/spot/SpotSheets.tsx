@@ -15,7 +15,7 @@ function Sheet({ visible, onClose, children }: { visible: boolean; onClose: () =
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.anchor} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior="padding" style={styles.anchor} pointerEvents="box-none">
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 14 }]}>
           <View style={styles.grab} />
           {children}

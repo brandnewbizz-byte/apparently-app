@@ -98,7 +98,7 @@ export default function InviteSheet({ visible, room, me, hereIds, onClose, onSha
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
+      <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 14 }]}>
           <View style={styles.grabber} />

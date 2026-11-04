@@ -178,7 +178,7 @@ function SkillForm({ editing }: { editing?: UserSkill }) {
   };
 
   return (
-    <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.backgroundSecondary }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.backgroundSecondary }]} behavior="padding">
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
 
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>

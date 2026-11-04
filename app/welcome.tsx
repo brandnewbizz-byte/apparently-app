@@ -255,7 +255,7 @@ export default function WelcomeScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient colors={[C.background, C.backgroundSecondary, C.background]} style={styles.gradient}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardAvoidingView style={styles.flex} behavior="padding">
           <ScrollView
             contentContainerStyle={[styles.content, { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 24 }]}
             showsVerticalScrollIndicator={false}

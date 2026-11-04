@@ -225,7 +225,7 @@ export default function SpotLobby() {
       {/* New room */}
       <Modal visible={showNew} transparent animationType="slide" onRequestClose={() => setShowNew(false)} statusBarTranslucent>
         <Pressable style={styles.backdrop} onPress={() => setShowNew(false)} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.anchor} pointerEvents="box-none">
+        <KeyboardAvoidingView behavior="padding" style={styles.anchor} pointerEvents="box-none">
           <View style={[styles.sheet, { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.sheetHead}>
               <Text style={[styles.sheetTitle, { color: colors.text }]}>New room</Text>
