@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import {
   BellRing, Package, Zap, Check, CheckCheck, X, MessageCircle, Plus, Trash2, CalendarDays, Pause, Play, Pencil,
-  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck, Search, RefreshCw,
+  Activity, ChevronRight, TrendingUp, Inbox, Sparkles, MapPin, Car, MoreHorizontal, Crown, DollarSign, CircleCheck, Search, RefreshCw, ChevronLeft,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessaging } from '@/contexts/MessagingContext';
@@ -501,6 +501,13 @@ export default function ManageScreen() {
 
       <View style={[styles.header, { paddingTop: insets.top + 10, backgroundColor: colors.background }]}>
         <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => { haptic(); if (router.canGoBack()) router.back(); else router.navigate('/(tabs)/planner' as any); }}
+            hitSlop={10}
+            accessibilityLabel="Back to Planner"
+          >
+            <ChevronLeft size={26} color={colors.text} />
+          </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={[styles.h1, { color: colors.text }]}>Manage</Text>
             <Text style={[styles.muted, { color: colors.textTertiary }]}>Your listings, orders and plans</Text>

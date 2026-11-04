@@ -158,9 +158,12 @@ export default function SpotLobby() {
         showsVerticalScrollIndicator={false}
       >
         <LinearGradient colors={['#5B2A86', '#8B5CF6', '#EC4899']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.navigate('/(tabs)/planner' as any))} style={styles.back} accessibilityLabel="Back">
-            <ChevronLeft size={26} color="#FFF" />
-          </TouchableOpacity>
+          {/* Spot is a main tab now: only show Back when something opened it on top. */}
+          {router.canGoBack() ? (
+            <TouchableOpacity onPress={() => router.back()} style={styles.back} accessibilityLabel="Back">
+              <ChevronLeft size={26} color="#FFF" />
+            </TouchableOpacity>
+          ) : null}
           <Text style={styles.heroTitle}>Spot</Text>
           <Text style={styles.heroSub}>Virtual rooms to hang out and plan with friends — live.{'\n'}Drop things in, doodle, move stuff around, react.</Text>
           <TouchableOpacity style={styles.newBtn} onPress={async () => { tap(); if (await requireSpot({ create: true })) setShowNew(true); }} accessibilityLabel="New room">

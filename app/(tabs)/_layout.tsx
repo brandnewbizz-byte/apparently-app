@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Newspaper, User, LayoutGrid } from 'lucide-react-native';
+import { Home, Newspaper, User, Radio } from 'lucide-react-native';
 import React from 'react';
 import { View, StyleSheet, Platform, Image } from 'react-native';
 
@@ -96,21 +96,17 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen name="create" options={{ ...OFF_BAR }} />
-        {/* Live/Spot moved into the Planner (calendar) tab — hidden from bottom nav */}
+        {/* Manage lives inside the Planner now (header button + card) — no bar button */}
+        <Tabs.Screen name="manage" options={{ ...OFF_BAR }} />
+        {/* Spot (live rooms) — on the bar where Manage used to be */}
         <Tabs.Screen
           name="live"
           options={{
-            ...OFF_BAR,
-          }}
-        />
-        {/* Manage hub — skills, bundles, plans, and orders in one place */}
-        <Tabs.Screen
-          name="manage"
-          options={{
-            title: 'Manage',
+            title: 'Spot',
+            tabBarAccessibilityLabel: 'Spot live rooms',
             tabBarIcon: ({ color, focused }) => (
               <View style={focused ? [styles.activeIconContainer, { backgroundColor: colors.accentGlow }] : undefined}>
-                <LayoutGrid size={24} color={color} />
+                <Radio size={24} color={color} />
               </View>
             ),
           }}

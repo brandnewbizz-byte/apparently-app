@@ -31,7 +31,6 @@ import {
   DollarSign,
   BellRing,
   Camera,
-  Radio,
   Check,
   CalendarDays,
   LayoutGrid,
@@ -604,8 +603,8 @@ export default function PlannerScreen() {
               <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/search' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Search">
                 <Search size={17} color={colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/live' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Live rooms">
-                <Radio size={17} color={colors.text} />
+              <TouchableOpacity onPress={() => { haptic(); router.push('/(tabs)/manage' as any); }} style={[styles.headerBtn, { borderColor: colors.border }]} accessibilityLabel="Manage listings, orders and plans">
+                <LayoutGrid size={17} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={async () => { haptic(); if (tab === 'requests') { if (await requireListing()) setShowRequest(true); } else setShowAdd(true); }}
@@ -618,6 +617,24 @@ export default function PlannerScreen() {
           ),
         }}
       />
+
+      {/* Manage — listings, orders and plans, right from the Planner */}
+      <TouchableOpacity
+        style={[styles.manageCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        onPress={() => { haptic(); router.push('/(tabs)/manage' as any); }}
+        activeOpacity={0.8}
+        accessibilityLabel={`Manage your listings, orders and plans${pendingOrders > 0 ? `, ${pendingOrders} waiting` : ''}`}
+      >
+        <View style={styles.manageIcon}><LayoutGrid size={18} color="#7C3AED" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.manageTitle, { color: colors.text }]}>Manage</Text>
+          <Text style={[styles.manageSub, { color: colors.textSecondary }]}>Your listings, orders and plans</Text>
+        </View>
+        {pendingOrders > 0 ? (
+          <View style={[styles.segBadge, { backgroundColor: '#F59E0B' }]}><Text style={styles.segBadgeText}>{pendingOrders}</Text></View>
+        ) : null}
+        <ChevronRight size={18} color={colors.textTertiary} />
+      </TouchableOpacity>
 
       {/* Segmented control */}
       <View style={[styles.segment, { backgroundColor: colors.surfaceHighlight }]}>
@@ -824,6 +841,10 @@ const styles = StyleSheet.create({
   headerBack: { paddingRight: 8, paddingVertical: 4 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
+  manageCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 8, marginBottom: 4, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14, borderWidth: 1 },
+  manageIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(124,58,237,0.12)', alignItems: 'center', justifyContent: 'center' },
+  manageTitle: { fontSize: 15, fontWeight: '700' },
+  manageSub: { fontSize: 12, marginTop: 1 },
   segment: { flexDirection: 'row', marginHorizontal: 16, marginTop: 6, marginBottom: 12, padding: 3, borderRadius: 11 },
   segBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 9 },
   segText: { fontSize: 14, fontWeight: '700' },
