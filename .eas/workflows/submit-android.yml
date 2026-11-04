@@ -1,0 +1,18 @@
+# Uploads an already-finished Android build to Google Play (internal testing
+# track — it can then be added to the Production release from the library).
+# Triggered by pushing to the "submit-android" branch; update build_id to the
+# Expo build you want uploaded.
+name: Submit Android build
+
+on:
+  push:
+    branches: ['submit-android']
+
+jobs:
+  submit_android:
+    name: Upload to Google Play
+    type: submit
+    params:
+      platform: android
+      build_id: 8b1875a8-24ed-4e45-b4ee-102be1eb128d
+      profile: production
