@@ -35,6 +35,7 @@ import { OrdersProvider } from '@/contexts/OrdersContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import IncomingCallWatcher from '@/components/IncomingCallWatcher';
+import { callStillRinging, claimCall, declineCall, isCallUiActive, markCallNotificationRead, paramsFromPushData } from '@/lib/calls';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
 
@@ -44,6 +45,7 @@ import {
   ensureNotificationChannel,
   registerForPushNotifications,
   onNotificationTap,
+  dismissCallNotifications,
 } from '@/lib/notifications';
 
 const queryClient = new QueryClient();
@@ -70,11 +72,38 @@ function RootLayoutNav() {
     if (!isAuthenticated) return;
     let unsubscribe: (() => void) | null = null;
     let cancelled = false;
-    onNotificationTap((path) => router.push(path as never)).then((fn) => {
+    onNotificationTap({
+      navigate: (href) => router.push(href as never),
+      onCall: (data, action) => {
+        const u: any = user;
+        const me = { id: u?.id || '', name: u?.fullName || u?.username || 'You' };
+        if (!me.id) return;
+        const params = paramsFromPushData(data, me);
+        const ringing = callStillRinging(data.createdAt);
+        dismissCallNotifications();
+        if (action === 'decline') {
+          claimCall(params.roomId);
+          markCallNotificationRead(data.notificationId);
+          if (ringing) declineCall(params.roomId, me.id, params.callerId);
+          return;
+        }
+        if (!ringing) { router.push('/notifications' as never); return; }
+        if (!claimCall(params.roomId) && isCallUiActive()) return; // already showing it
+        if (action === 'answer') {
+          markCallNotificationRead(data.notificationId);
+          router.push({ pathname: '/call/[roomId]', params } as never);
+        } else {
+          router.push({
+            pathname: '/call/incoming',
+            params: { ...params, notificationId: data.notificationId || '', ringStartedAt: String(new Date(data.createdAt || Date.now()).getTime()) },
+          } as never);
+        }
+      },
+    }).then((fn) => {
       if (cancelled) fn(); else unsubscribe = fn;
     });
     return () => { cancelled = true; unsubscribe?.(); };
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
@@ -194,6 +223,8 @@ function RootLayoutNav() {
     <Stack.Screen name="notifications" options={{ headerShown: false }} />
     <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     <Stack.Screen name="payouts" options={{ headerShown: false }} />
+    <Stack.Screen name="call/incoming" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }} />
+    <Stack.Screen name="call/[roomId]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }} />
     <Stack.Screen name="picks" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
     </Stack>
     </>
@@ -208,7 +239,7 @@ function RootLayoutNavWithTheme() {
       <View style={[styles.safeArea, { backgroundColor: colors.background }]} testID="app-safe-area">
         <KeyboardAvoidingView
           style={styles.safeAreaInner}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           testID="global-keyboard-avoiding-view"
         >
           <RootLayoutNav />

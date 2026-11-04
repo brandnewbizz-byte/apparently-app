@@ -1,18 +1,20 @@
 /**
- * Pops up "X is calling you" with Answer / Decline when a call comes in while
- * the app is open (calls arrive as call notifications in realtime) and rings.
+ * Opens the full-screen incoming-call screen when a call comes in while the
+ * app is open (calls arrive as call notifications in realtime). Also answers,
+ * declines or shows calls tapped from a push notification.
  */
 import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
-import { answerParams, declineCall, isCallNotification, CALL_RING_MS } from '@/lib/calls';
-import { playTone, stopTone } from '@/lib/callTones';
+import {
+  answerParams, claimCall, declineCall, isCallNotification, isCallUiActive,
+  markCallNotificationRead, CALL_RING_MS,
+} from '@/lib/calls';
 import { callsAvailable } from '@/lib/webrtc';
 
 export default function IncomingCallWatcher() {
-  const { notifications, markRead } = useNotifications();
+  const { notifications } = useNotifications();
   const { user } = useAuth();
   const router = useRouter();
   const seen = useRef(new Set<string>());
@@ -23,43 +25,24 @@ export default function IncomingCallWatcher() {
     for (const n of notifications) {
       if (!isCallNotification(n.type) || n.read || seen.current.has(n.id)) continue;
       seen.current.add(n.id);
-      if (now - new Date(n.createdAt).getTime() > CALL_RING_MS) continue; // too old to answer
+      const started = new Date(n.createdAt).getTime();
+      if (now - started > CALL_RING_MS) continue; // too old to answer
       const me = { id: user.id, name: (user as any)?.fullName || (user as any)?.username || 'You' };
       const params = answerParams(n, me);
-      const video = params.video === '1';
-      // Ring (sound + vibration) until answered, declined or the caller gives up.
-      playTone('ringtone');
-      const left = Math.max(5_000, CALL_RING_MS - (now - new Date(n.createdAt).getTime()));
-      const giveUp = setTimeout(stopTone, left);
-      Alert.alert(
-        video ? 'Incoming video call' : 'Incoming call',
-        `${params.callerName} is calling you.`,
-        [
-          {
-            text: 'Decline',
-            style: 'destructive',
-            onPress: () => {
-              clearTimeout(giveUp);
-              stopTone();
-              markRead(n.id);
-              declineCall(params.roomId, me.id, params.callerId);
-            },
-          },
-          {
-            text: 'Answer',
-            onPress: () => {
-              clearTimeout(giveUp);
-              stopTone();
-              markRead(n.id);
-              router.push({ pathname: '/call/[roomId]' as any, params: params as any } as any);
-            },
-          },
-        ],
-        { cancelable: false },
-      );
-      break; // one popup at a time
+      if (!claimCall(params.roomId)) continue; // already ringing (e.g. opened from the push)
+      if (isCallUiActive()) {
+        // Already on a call or another call is ringing: tell this caller we're busy.
+        markCallNotificationRead(n.id);
+        declineCall(params.roomId, me.id, params.callerId);
+        continue;
+      }
+      router.push({
+        pathname: '/call/incoming' as any,
+        params: { ...params, notificationId: n.id, ringStartedAt: String(started) } as any,
+      } as any);
+      break; // one at a time
     }
-  }, [notifications, user, markRead, router]);
+  }, [notifications, user, router]);
 
   return null;
 }

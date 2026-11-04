@@ -41,6 +41,7 @@ import { supabase } from '@/lib/supabase';
 import { ensureUploadSpace } from '@/lib/uploadQuota';
 import { generateUsername } from '@/lib/sanitize';
 import { ringUser } from '@/lib/calls';
+import { setActiveConversation } from '@/lib/notifications';
 import { callsAvailable } from '@/lib/webrtc';
 
 // Voice notes are recorded as AAC/M4A so they decode natively on both iOS and
@@ -76,6 +77,12 @@ export default function ConversationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { participantId } = useLocalSearchParams<{ participantId: string }>();
+  // Pushes from this chat stay quiet while it's open (the message shows right here).
+  useEffect(() => {
+    if (!participantId) return;
+    setActiveConversation(participantId);
+    return () => setActiveConversation(null);
+  }, [participantId]);
   const { colors, isDark } = useTheme();
   const { getConversation, sendMessage, markConversationAsRead, deleteMessage, loadEarlierMessages, presence, notifyTyping } = useMessaging();
   const { user: authUser } = useAuth();
@@ -792,7 +799,7 @@ export default function ConversationScreen() {
         )}
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.flex} behavior="padding">
         <ScrollView
           ref={scrollViewRef}
           style={styles.flex}

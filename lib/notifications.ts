@@ -46,22 +46,72 @@ async function loadNotifications(): Promise<NotificationsModule | null> {
   return cachedModule;
 }
 
+// ── What's on screen right now (so we don't double-notify) ──
+let activeConversationUserId: string | null = null;
+let inAppCallUiActive = false;
+
+/** The chat screen calls this so pushes from that chat stay quiet while it's open. */
+export function setActiveConversation(otherUserId: string | null): void {
+  activeConversationUserId = otherUserId;
+}
+
+/** True while the in-app incoming-call screen (or a call) is showing. */
+export function setInAppCallUi(active: boolean): void {
+  inAppCallUiActive = active;
+}
+
+export const CALL_CATEGORY = 'incoming_call';
+export const CALL_CHANNEL = 'incoming_calls';
+export const MESSAGE_CHANNEL = 'messages';
+
+const isCallData = (d: any) => !!d && (d.kind === 'call' || d.type === 'call_request' || d.type === 'call');
+
 /**
  * Configure how notifications behave while the app is in the FOREGROUND.
- * Without this, foreground notifications are silently dropped.
+ * Like the big apps:
+ *  - a call doesn't show a banner: the full-screen incoming-call screen rings instead
+ *  - a message from the chat you have open stays quiet
+ *  - everything else shows a banner with sound
  * Safe no-op on builds without the native module.
  */
 export async function configureNotificationHandler(): Promise<void> {
   const Notifications = await loadNotifications();
   if (!Notifications) return;
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async (n) => {
+      const data: any = n?.request?.content?.data || {};
+      const quiet =
+        isCallData(data) ||
+        (data.kind === 'message' && !!activeConversationUserId && data.senderId === activeConversationUserId);
+      return {
+        shouldShowBanner: !quiet,
+        shouldShowList: !isCallData(data),
+        shouldPlaySound: !quiet,
+        shouldSetBadge: true,
+      };
+    },
   });
+  // Answer / Decline buttons on call notifications.
+  try {
+    await Notifications.setNotificationCategoryAsync(CALL_CATEGORY, [
+      { identifier: 'answer', buttonTitle: 'Answer', options: { opensAppToForeground: true } },
+      { identifier: 'decline', buttonTitle: 'Decline', options: { opensAppToForeground: false, isDestructive: true } },
+    ]);
+  } catch (e) {
+    logger.warn(TAG, 'Failed to set call category', { e });
+  }
+}
+
+/** Remove call notifications from the tray (after answering / declining / a missed call). */
+export async function dismissCallNotifications(): Promise<void> {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return;
+  try {
+    const shown = await Notifications.getPresentedNotificationsAsync();
+    for (const n of shown) {
+      if (isCallData(n.request.content.data)) await Notifications.dismissNotificationAsync(n.request.identifier);
+    }
+  } catch {}
 }
 
 /**
@@ -109,11 +159,36 @@ export async function ensureNotificationChannel(): Promise<void> {
   if (!Notifications) return;
   try {
     await Notifications.setNotificationChannelAsync('default', {
-      name: 'Notifications',
+      name: 'Activity',
+      description: 'Likes, comments, follows, orders and other updates',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#001F3D',
+      lightColor: '#E91E8C',
       sound: 'default',
+    });
+    await Notifications.setNotificationChannelAsync(MESSAGE_CHANNEL, {
+      name: 'Messages',
+      description: 'New messages in your chats',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 200, 120, 200],
+      lightColor: '#E91E8C',
+      sound: 'default',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
+    // Calls ring for ~25 s (assets/sounds/ringtone.wav), pop over other apps
+    // and show on the lock screen.
+    await Notifications.setNotificationChannelAsync(CALL_CHANNEL, {
+      name: 'Incoming calls',
+      description: 'Rings when someone calls you on Apparently',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 800, 600, 800, 600, 800, 600, 800, 600, 800, 600, 800],
+      lightColor: '#22C55E',
+      sound: 'ringtone.wav',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      audioAttributes: {
+        usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+        contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+      },
     });
   } catch (e) {
     logger.warn(TAG, 'Failed to create notification channel', { e });
@@ -186,26 +261,51 @@ export async function setBadgeCount(count: number): Promise<void> {
   }
 }
 
+// Responses already handled (getLastNotificationResponseAsync keeps returning the cold-start one).
+const handledResponses = new Set<string>();
+
+export interface NotificationTapHandlers {
+  /** Open a route (string path or expo-router href object). */
+  navigate: (href: any) => void;
+  /** A call notification was tapped / answered. */
+  onCall: (data: Record<string, any>, action: 'open' | 'answer' | 'decline') => void;
+}
+
 /**
  * Open the right screen when the user taps a push notification:
- * a message push opens that chat; anything else opens Notifications.
+ *  - a call: Answer joins it, Decline hangs up, a plain tap shows the ringing screen
+ *  - a message: that chat
+ *  - a like / comment / follow / order: the post, profile or Notifications
  * Returns an unsubscribe function.
  */
-export async function onNotificationTap(navigate: (path: string) => void): Promise<() => void> {
+export async function onNotificationTap(h: NotificationTapHandlers | ((path: string) => void)): Promise<() => void> {
+  const handlers: NotificationTapHandlers = typeof h === 'function' ? { navigate: h, onCall: () => h('/notifications') } : h;
   const Notifications = await loadNotifications();
   if (!Notifications) return () => {};
-  const handle = (data: any) => {
+  const seen = handledResponses;
+  const handle = (resp: any) => {
+    const req = resp?.notification?.request;
+    const data = req?.content?.data;
     if (!data) return;
-    if (data.kind === 'message' && data.senderId) navigate(`/inbox/conversation/${data.senderId}`);
-    else navigate('/notifications');
+    const key = `${req?.identifier}:${resp?.actionIdentifier}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (isCallData(data)) {
+      const a = resp.actionIdentifier === 'answer' ? 'answer' : resp.actionIdentifier === 'decline' ? 'decline' : 'open';
+      handlers.onCall(data, a);
+      return;
+    }
+    if (data.kind === 'message' && data.senderId) { handlers.navigate(`/inbox/conversation/${data.senderId}`); return; }
+    if (data.kind === 'missed_call' && data.caller_id) { handlers.navigate(`/inbox/conversation/${data.caller_id}`); return; }
+    if (data.type === 'follow' && (data.follower_id || data.actor_id)) { handlers.navigate(`/user/${data.follower_id || data.actor_id}`); return; }
+    if (data.type === 'room_invite' && data.room_id) { handlers.navigate(`/(tabs)/live/room/${data.room_id}`); return; }
+    handlers.navigate('/notifications');
   };
   try {
     // App opened from a cold start by tapping a notification
     const last = await Notifications.getLastNotificationResponseAsync();
-    if (last) handle(last.notification.request.content.data);
+    if (last) handle(last);
   } catch {}
-  const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
-    handle(resp.notification.request.content.data);
-  });
+  const sub = Notifications.addNotificationResponseReceivedListener(handle);
   return () => sub.remove();
 }

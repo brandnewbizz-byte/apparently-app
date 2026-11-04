@@ -11,6 +11,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWebRTCCall, type CallConfig } from '@/hooks/useWebRTCCall';
 import CallVideo from '@/components/CallVideo';
 import { playTone, stopTone } from '@/lib/callTones';
+import { claimCall, sendMissedCall, setCallUiActive } from '@/lib/calls';
+import { dismissCallNotifications } from '@/lib/notifications';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -69,6 +71,26 @@ export default function CallScreen() {
     else stopTone();
   }, [isOutgoing, callState]);
   useEffect(() => () => stopTone(), []);
+
+  // While this screen is open other calls get "busy", and the call's push is cleared.
+  useEffect(() => {
+    setCallUiActive(true);
+    claimCall(roomId);
+    if (!isOutgoing) dismissCallNotifications();
+    return () => setCallUiActive(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Nobody picked up: leave them a "Missed call".
+  const missedSent = useRef(false);
+  useEffect(() => {
+    if (!isOutgoing || missedSent.current || callState !== 'ended' || callError !== 'No answer.') return;
+    missedSent.current = true;
+    sendMissedCall({
+      me: { id: currentUserId, name: currentUserName, avatar: (user as any)?.avatar || '' },
+      targetId,
+      video: isVideo,
+    });
+  }, [isOutgoing, callState, callError, currentUserId, currentUserName, targetId, isVideo, user]);
 
   // Ring animation while waiting for the other person
   const ringAnim = useRef(new Animated.Value(1)).current;

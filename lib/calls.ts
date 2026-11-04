@@ -93,3 +93,60 @@ export function answerParams(
     peerAvatar: n.data?.caller_avatar || n.actorAvatar || '',
   };
 }
+
+// ── Ringing state shared by the popup, push taps and the call screens ──
+
+const handledRooms = new Set<string>();
+let callUiActive = false;
+
+/** First caller wins: returns false if this call is already ringing / answered / declined. */
+export function claimCall(roomId: string): boolean {
+  if (!roomId || handledRooms.has(roomId)) return false;
+  handledRooms.add(roomId);
+  return true;
+}
+
+/** The incoming-call screen and the call screen mark themselves while open. */
+export function setCallUiActive(on: boolean) { callUiActive = on; }
+export function isCallUiActive() { return callUiActive; }
+
+/** Mark a call notification as handled so it stops ringing everywhere. */
+export async function markCallNotificationRead(notificationId?: string | null): Promise<void> {
+  if (!notificationId) return;
+  try { await supabase.from('notifications').update({ read: true }).eq('id', notificationId); } catch {}
+}
+
+/** Screen params for a call from a push notification's data. */
+export function paramsFromPushData(data: Record<string, any>, me: { id: string; name: string }): CallScreenParams {
+  return answerParams(
+    { actorId: data.caller_id || null, actorName: data.caller_name || 'Someone', actorAvatar: data.caller_avatar || '', data },
+    me,
+  );
+}
+
+/** True while a call notification can still be answered. */
+export function callStillRinging(createdAt?: string | number | null): boolean {
+  if (!createdAt) return true;
+  const t = typeof createdAt === 'number' ? createdAt : new Date(createdAt).getTime();
+  return !Number.isFinite(t) || Date.now() - t < CALL_RING_MS;
+}
+
+/** Tell the person you called that they missed it (shows in their Notifications). */
+export async function sendMissedCall(opts: { me: { id: string; name: string; avatar?: string }; targetId: string; video: boolean }): Promise<void> {
+  const { me, targetId, video } = opts;
+  if (!targetId || targetId === me.id) return;
+  try {
+    await supabase.from('notifications').insert({
+      user_id: targetId,
+      actor_id: me.id,
+      actor_name: me.name,
+      actor_avatar: me.avatar || null,
+      type: 'general',
+      title: video ? 'Missed video call' : 'Missed call',
+      body: `${me.name} tried to call you`,
+      data: { kind: 'missed_call', caller_id: me.id, caller_name: me.name, video },
+      read: false,
+      created_at: new Date().toISOString(),
+    });
+  } catch {}
+}
