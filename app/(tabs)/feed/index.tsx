@@ -311,6 +311,10 @@ function PostCard({
   // ── Play / pause (Instagram): tap to pause or play, press and hold to
   // pause while you hold. A post that scrolls back in starts playing again.
   const [paused, setPaused] = useState(false);
+  // While someone is live on this post the video plays without sound, so
+  // voices are clear and your mic doesn't pick up the video.
+  const [liveActive, setLiveActive] = useState(false);
+  const onLiveChange = useCallback((a: boolean) => setLiveActive(a), []);
   const [holdPaused, setHoldPaused] = useState(false);
   const holding = useRef(false);
   useEffect(() => { setPaused(false); setHoldPaused(false); holding.current = false; }, [isActive]);
@@ -432,7 +436,7 @@ function PostCard({
                   resizeMode="cover"
                   shouldPlay={!paused && !holdPaused}
                   isLooping
-                  isMuted={muted}
+                  isMuted={muted || liveActive}
                   showProgress
                   progressBottom={height ? tabBarSpace : 0}
                 />
@@ -543,6 +547,7 @@ function PostCard({
               avatar={currentUser?.avatar || null}
               bottomOffset={height ? tabBarSpace : 0}
               topOffset={topOffset}
+              onLiveChange={onLiveChange}
             />
           ) : null}
         </View>

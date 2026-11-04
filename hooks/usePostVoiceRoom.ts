@@ -17,6 +17,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
 import { useLiveSound } from '@/lib/liveSound';
+import { useLiveMesh, type MeshRemote } from '@/hooks/useLiveMesh';
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -41,6 +42,10 @@ export interface UsePostVoiceRoomResult {
   /** Your voice is going out right now. */
   talking: boolean;
   speakingIds: string[];
+  /** Someone (maybe you) is live on this post right now. */
+  liveActive: boolean;
+  /** Live streams coming in (web needs them rendered to hear them). */
+  remotes: MeshRemote[];
   error: string | null;
   toggleSound: () => void;
   goLive: () => Promise<'ok' | 'denied' | 'failed'>;
@@ -74,7 +79,17 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
   }), []);
 
   const me = useMemo(() => (userId ? { id: userId, name: userName || 'User' } : null), [userId, userName]);
-  const { talking, speaking, startTalking, stopTalking } = useSpotVoice(room, me, { maxTalkMs: MAX_LIVE_MS });
+  // Old app versions still send recorded clips — keep hearing them.
+  const clips = useSpotVoice(room, me, { maxTalkMs: MAX_LIVE_MS });
+  const { speaking } = clips;
+  // Real-time voice (WebRTC). Phones without it fall back to clips.
+  const mesh = useLiveMesh(room, me, { enabled: enabled && !!postId, soundOn, ready: connectionState === 'connected' });
+  const useMesh = mesh.available;
+  const stopTalking = useCallback(() => {
+    clips.stopTalking();
+    mesh.unpublish();
+  }, [clips.stopTalking, mesh.unpublish]); // eslint-disable-line react-hooks/exhaustive-deps
+  const talking = useMesh ? (live && !micMuted && mesh.publishing) : clips.talking;
 
   // ── Join this post's voice channel while it's on screen ──
   useEffect(() => {
@@ -91,6 +106,7 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
     };
     ch.on('broadcast', { event: 'voice' }, dispatch('voice'));
     ch.on('broadcast', { event: 'talk' }, dispatch('talk'));
+    ch.on('broadcast', { event: 'rtc' }, dispatch('rtc'));
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') setConnectionState('connected');
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -120,21 +136,36 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
   // The mic loop stopped by itself (time limit / error) while not muted → off-air.
   const wasTalking = useRef(false);
   useEffect(() => {
-    if (wasTalking.current && !talking && live && !micMuted) setLive(false);
+    if (!useMesh && wasTalking.current && !talking && live && !micMuted) setLive(false);
     wasTalking.current = talking;
-  }, [talking, live, micMuted]);
+  }, [useMesh, talking, live, micMuted]);
+
+  // Real-time voice: tell everyone you're talking (keeps the green ring on),
+  // and go off-air after the time limit.
+  useEffect(() => {
+    if (!useMesh || !talking || !me) return;
+    const ping = () => room.send('talk', { uid: me.id, on: true });
+    ping();
+    const t = setInterval(ping, 2000);
+    return () => { clearInterval(t); room.send('talk', { uid: me.id, on: false }); };
+  }, [useMesh, talking, me, room]);
+  useEffect(() => {
+    if (!useMesh || !live) return;
+    const t = setTimeout(() => { mesh.unpublish(); setLive(false); setMicMuted(false); }, MAX_LIVE_MS);
+    return () => clearTimeout(t);
+  }, [useMesh, live]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSound = useCallback(() => setSoundOn(!soundOnRef.current), [setSoundOn]);
 
   const goLive = useCallback(async () => {
     if (connectionState !== 'connected') return 'failed' as const;
     setError(null);
-    const r = await startTalking();
-    if (r === 'ok') { setLive(true); setMicMuted(false); }
+    const r = useMesh ? await mesh.publish({ video: false }) : await clips.startTalking();
+    if (r === 'ok') { setLive(true); setMicMuted(false); if (useMesh) mesh.setMic(true); }
     else if (r === 'denied') setError('Allow microphone access in Settings to talk');
     else setError('Couldn’t start the mic. Try again.');
     return r;
-  }, [connectionState, startTalking]);
+  }, [connectionState, useMesh, mesh.publish, mesh.setMic, clips.startTalking]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const endLive = useCallback(() => {
     stopTalking();
@@ -144,16 +175,26 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
 
   const toggleMic = useCallback(() => {
     if (!live) return;
+    if (useMesh) {
+      // Instant: just switch the mic track on / off, the stream keeps going.
+      mesh.setMic(micMuted);
+      setMicMuted(!micMuted);
+      return;
+    }
     if (micMuted) {
       setMicMuted(false);
-      startTalking().then((r) => { if (r !== 'ok') { setLive(false); setError('Couldn’t turn the mic back on.'); } });
+      clips.startTalking().then((r) => { if (r !== 'ok') { setLive(false); setError('Couldn’t turn the mic back on.'); } });
     } else {
       setMicMuted(true);
-      stopTalking();
+      clips.stopTalking();
     }
-  }, [live, micMuted, startTalking, stopTalking]);
+  }, [live, micMuted, useMesh, mesh.setMic, clips.startTalking, clips.stopTalking]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const speakingIds = useMemo(() => Object.keys(speaking), [speaking]);
+  const liveActive = live || speakingIds.length > 0 || mesh.remotes.length > 0;
 
-  return { connectionState, soundOn, live, micMuted, talking, speakingIds, error, toggleSound, goLive, endLive, toggleMic };
+  return {
+    connectionState, soundOn, live, micMuted, talking, speakingIds, liveActive, remotes: mesh.remotes,
+    error, toggleSound, goLive, endLive, toggleMic,
+  };
 }

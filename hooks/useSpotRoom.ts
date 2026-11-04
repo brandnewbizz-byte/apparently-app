@@ -30,6 +30,7 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   const [bursts, setBursts] = useState<Burst[]>([]);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const [connected, setConnected] = useState(false);
   // Listeners for the voice / camera events (handled by their own hooks).
   const busRef = useRef<Map<string, Set<(payload: any) => void>>>(new Map());
   const lastMoveSent = useRef<Record<string, number>>({});
@@ -97,6 +98,7 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
       .on('broadcast', { event: 'talk' }, ({ payload }) => emit('talk', payload))
       .on('broadcast', { event: 'cam' }, ({ payload }) => emit('cam', payload))
       .on('broadcast', { event: 'camOff' }, ({ payload }) => emit('camOff', payload))
+      .on('broadcast', { event: 'rtc' }, ({ payload }) => emit('rtc', payload))
       // Saved changes (covers anyone whose broadcast we missed).
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'virtual_room_objects', filter: `room_id=eq.${roomId}` }, (p: any) => upsert(mapItem(p.new)))
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'virtual_room_objects', filter: `room_id=eq.${roomId}` }, (p: any) => {
@@ -107,12 +109,14 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'virtual_room_objects' }, (p: any) => { if (p.old?.id) drop(p.old.id); })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
+          if (alive) setConnected(true);
           await channel.track({ name: me?.name || 'Someone', avatar: me?.avatar || '' });
         }
       });
 
     return () => {
       alive = false;
+      setConnected(false);
       channel.untrack().catch(() => {});
       supabase.removeChannel(channel);
       channelRef.current = null;
@@ -240,6 +244,6 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   return {
     items: sorted, loading, error, members, remoteDrag, liveStrokes, bursts, topZ,
     add, dragTo, dropAt, remove, react, resize, editText, bringToFront, burst, strokeProgress, strokeDone,
-    send, on,
+    send, on, connected,
   };
 }

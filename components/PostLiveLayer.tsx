@@ -6,7 +6,9 @@
  * All three overlays are flat absolute-positioned siblings (no nested flex-row
  * overlays) to avoid the native flexShrink/space-between crash seen on RN 0.86.
  */
-import { View } from 'react-native';
+import { useEffect } from 'react';
+import { Platform, View } from 'react-native';
+import CallVideo from '@/components/CallVideo';
 import { usePostPresence } from '@/hooks/usePostPresence';
 import { usePostVoiceRoom } from '@/hooks/usePostVoiceRoom';
 import PostPresenceIndicator from '@/components/PostPresenceIndicator';
@@ -22,10 +24,14 @@ interface PostLiveLayerProps {
   bottomOffset?: number;
   /** Space taken by the floating top bar. */
   topOffset?: number;
+  /** Tells the post when someone is live on it (the video goes quiet). */
+  onLiveChange?: (active: boolean) => void;
 }
 
-export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0, topOffset = 0 }: PostLiveLayerProps) {
+export default function PostLiveLayer({ postId, userId, userName, avatar, bottomOffset = 0, topOffset = 0, onLiveChange }: PostLiveLayerProps) {
   const voice = usePostVoiceRoom({ postId, userId, userName, enabled: !!userId });
+  useEffect(() => { onLiveChange?.(voice.liveActive); }, [voice.liveActive, onLiveChange]);
+  useEffect(() => () => onLiveChange?.(false), [onLiveChange]);
 
   // While you hold the mic you're "talking" — bridged into presence so
   // other viewers see "N here now · M talking" without subscribing to audio.
@@ -43,6 +49,10 @@ export default function PostLiveLayer({ postId, userId, userName, avatar, bottom
 
   return (
     <>
+      {/* Phones play live voices by themselves; browsers need a player. */}
+      {Platform.OS === 'web'
+        ? voice.remotes.map((r) => <CallVideo key={r.uid} stream={r.stream} style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} />)
+        : null}
       {/* Presence pill — top-left, below the author overlay (author pill is ~54px tall with a location line) */}
       <View style={{ position: 'absolute', top: 60 + topOffset, left: 12, zIndex: 12 }}>
         <PostPresenceIndicator

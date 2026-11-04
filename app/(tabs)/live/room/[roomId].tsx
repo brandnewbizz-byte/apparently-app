@@ -14,6 +14,8 @@ import { useTabBar } from '@/contexts/TabBarContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSpotRoom } from '@/hooks/useSpotRoom';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
+import { useLiveMesh } from '@/hooks/useLiveMesh';
+import CallVideo from '@/components/CallVideo';
 import { useCameraPermissions } from '@/lib/safe-camera';
 import {
   deleteRoom, getRoom, listInvites, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
@@ -25,7 +27,7 @@ import DoodleLayer from '@/components/spot/DoodleLayer';
 import BurstLayer from '@/components/spot/BurstLayer';
 import SpotItemView from '@/components/spot/SpotItemView';
 import { AddSheet, ItemMenu } from '@/components/spot/SpotSheets';
-import { MyCameraBubble, RemoteCameraBubbles, type RemoteCam } from '@/components/spot/CameraBubbles';
+import { MyCameraBubble, MyLiveCameraBubble, RemoteCameraBubbles, type RemoteCam } from '@/components/spot/CameraBubbles';
 import CutoutSheet, { type PhotoStyle, type PickedPhoto } from '@/components/spot/CutoutSheet';
 import InviteSheet from '@/components/spot/InviteSheet';
 
@@ -70,16 +72,48 @@ export default function SpotRoomScreen() {
 
   // ── Voice (hold to talk) ──────────────────────────────────────────────────
   const live = useMemo(() => ({ send: room.send, on: room.on }), [room.send, room.on]);
-  const voice = useSpotVoice(live, me);
+  // Older app versions send recorded clips — keep hearing them.
+  const clipVoice = useSpotVoice(live, me);
+  // Real-time voice + camera (WebRTC). Without it we fall back to clips / snapshots.
+  const mesh = useLiveMesh(live, me, { enabled: !!me, ready: room.connected });
+  const useMesh = mesh.available;
+  const [meshTalking, setMeshTalking] = useState(false);
+  const voice = { speaking: clipVoice.speaking, talking: useMesh ? meshTalking : clipVoice.talking };
   const pressingMic = useRef(false);
   const micDown = async () => {
     pressingMic.current = true;
     tap(Haptics.ImpactFeedbackStyle.Medium);
-    const r = await voice.startTalking();
+    if (useMesh) {
+      const r = await mesh.publish({ video: camOn });
+      if (r === 'denied') { Alert.alert('Microphone access needed', 'Allow microphone access in Settings to talk in rooms.'); return; }
+      if (r !== 'ok') return;
+      mesh.setMic(pressingMic.current);
+      setMeshTalking(pressingMic.current);
+      return;
+    }
+    const r = await clipVoice.startTalking();
     if (r === 'denied') Alert.alert('Microphone access needed', 'Allow microphone access in Settings to talk in rooms.');
-    if (r === 'ok' && !pressingMic.current) voice.stopTalking();
+    if (r === 'ok' && !pressingMic.current) clipVoice.stopTalking();
   };
-  const micUp = () => { pressingMic.current = false; voice.stopTalking(); };
+  const micUp = () => {
+    pressingMic.current = false;
+    if (useMesh) { mesh.setMic(false); setMeshTalking(false); } else clipVoice.stopTalking();
+  };
+
+  // Real-time voice: keep the green "talking" ring on for others while you hold the mic.
+  useEffect(() => {
+    if (!useMesh || !meshTalking || !me) return;
+    const ping = () => room.send('talk', { uid: me.id, on: true });
+    ping();
+    const t = setInterval(ping, 2000);
+    return () => { clearInterval(t); room.send('talk', { uid: me.id, on: false }); };
+  }, [useMesh, meshTalking, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Not talking and no camera for a while: turn the mic off completely.
+  useEffect(() => {
+    if (!useMesh || !mesh.publishing || meshTalking || camOn) return;
+    const t = setTimeout(() => mesh.unpublish(), 30_000);
+    return () => clearTimeout(t);
+  }, [useMesh, mesh.publishing, meshTalking, camOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Camera bubbles ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,7 +137,15 @@ export default function SpotRoomScreen() {
     tap();
     if (camOn) {
       setCamOn(false);
+      if (useMesh) mesh.unpublish();
       if (me) room.send('camOff', { uid: me.id });
+      return;
+    }
+    if (useMesh) {
+      const r = await mesh.publish({ video: true });
+      if (r !== 'ok') { Alert.alert('Camera access needed', 'Allow camera and microphone access in Settings to show your camera in rooms.'); return; }
+      mesh.setMic(pressingMic.current);
+      setCamOn(true);
       return;
     }
     const perm = await requestCamera();
@@ -516,8 +558,22 @@ export default function SpotRoomScreen() {
       })()}
 
       {/* ── Camera bubbles ── */}
-      <RemoteCameraBubbles cams={Object.values(cams)} speaking={voice.speaking} />
-      {camOn ? <MyCameraBubble onFrame={sendFrame} onClose={toggleCamera} talking={voice.talking} /> : null}
+      <RemoteCameraBubbles
+        cams={[
+          ...mesh.remotes.filter((r) => r.video).map((r) => ({ uid: r.uid, name: r.name, stream: r.stream, at: Date.now() })),
+          ...Object.values(cams).filter((c) => !mesh.remotes.some((r) => r.uid === c.uid && r.video)),
+        ]}
+        speaking={voice.speaking}
+      />
+      {/* Browsers need a player to hear live voices (phones play them by themselves). */}
+      {Platform.OS === 'web'
+        ? mesh.remotes.filter((r) => !r.video).map((r) => <CallVideo key={r.uid} stream={r.stream} style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} />)
+        : null}
+      {camOn
+        ? (useMesh && mesh.localStream
+          ? <MyLiveCameraBubble stream={mesh.localStream} onClose={toggleCamera} onFlip={mesh.switchCamera} talking={voice.talking} />
+          : useMesh ? null : <MyCameraBubble onFrame={sendFrame} onClose={toggleCamera} talking={voice.talking} />)
+        : null}
 
       {/* ── Mic + camera ── */}
       <View style={[styles.sideCol, { bottom: insets.bottom + (mode === 'draw' || showReact ? 152 : 100) }]} pointerEvents="box-none">

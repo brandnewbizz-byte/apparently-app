@@ -3,6 +3,7 @@ import { Image, PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { RefreshCw, X } from 'lucide-react-native';
 import { CameraView, cameraNativeAvailable } from '@/lib/safe-camera';
+import CallVideo from '@/components/CallVideo';
 
 const SIZE = 104;
 const FRAME_MS = 1400;
@@ -87,7 +88,25 @@ export function MyCameraBubble({ onFrame, onClose, talking }: { onFrame: (b64: s
   );
 }
 
-export interface RemoteCam { uid: string; name: string; img: string; at: number }
+/** Your camera streaming live (real-time video, no snapshots). */
+export function MyLiveCameraBubble({ stream, onClose, onFlip, talking }: { stream: any; onClose: () => void; onFlip: () => void; talking: boolean }) {
+  const { width } = useWindowDimensions();
+  const [front, setFront] = useState(true);
+  return (
+    <DragBubble start={{ x: width - SIZE - 14, y: 120 }} ring={talking ? '#22C55E' : '#FFF'} label="Your camera">
+      <CallVideo stream={stream} mirror={front} muted zOrder={1} style={StyleSheet.absoluteFill} />
+      <TouchableOpacity onPress={onClose} style={[styles.mini, { top: 6, right: 14 }]} accessibilityLabel="Turn camera off" hitSlop={8}>
+        <X size={12} color="#FFF" />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => { setFront((f) => !f); onFlip(); }} style={[styles.mini, { bottom: 6, right: 14 }]} accessibilityLabel="Flip camera" hitSlop={8}>
+        <RefreshCw size={11} color="#FFF" />
+      </TouchableOpacity>
+    </DragBubble>
+  );
+}
+
+/** A camera from someone else: a live stream, or snapshots from older app versions. */
+export interface RemoteCam { uid: string; name: string; img?: string; stream?: any; at: number }
 
 /** Everyone else who has their camera on. */
 export function RemoteCameraBubbles({ cams, speaking }: { cams: RemoteCam[]; speaking: Record<string, number> }) {
@@ -95,7 +114,9 @@ export function RemoteCameraBubbles({ cams, speaking }: { cams: RemoteCam[]; spe
     <>
       {cams.map((c, i) => (
         <DragBubble key={c.uid} start={{ x: 14, y: 120 + i * (SIZE + 14) }} ring={speaking[c.uid] ? '#22C55E' : '#FFF'} label={`${c.name}'s camera`}>
-          <Image source={{ uri: `data:image/jpeg;base64,${c.img}` }} style={StyleSheet.absoluteFill} fadeDuration={0} />
+          {c.stream
+            ? <CallVideo stream={c.stream} style={StyleSheet.absoluteFill} />
+            : <Image source={{ uri: `data:image/jpeg;base64,${c.img}` }} style={StyleSheet.absoluteFill} fadeDuration={0} />}
           <View style={styles.nameTag}><Text style={styles.nameText} numberOfLines={1}>{c.name.split(' ')[0]}</Text></View>
         </DragBubble>
       ))}
