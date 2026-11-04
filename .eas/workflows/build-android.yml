@@ -1,0 +1,16 @@
+# Native Android build (Play Store .aab). Triggered by pushing to the
+# "release-android" branch — needed when native code changes (new modules,
+# permissions, notification sounds), which an over-the-air update can't ship.
+name: Build Android
+
+on:
+  push:
+    branches: ['release-android']
+
+jobs:
+  build_android:
+    name: Build Android (production)
+    type: build
+    params:
+      platform: android
+      profile: production
