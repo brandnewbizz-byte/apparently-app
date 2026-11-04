@@ -255,28 +255,37 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
   }, [send, stopLocal]);
 
   /** Go live with the mic (and camera). Restarts the stream if the camera choice changed. */
+  // One start at a time: a second request waits for the first, then re-checks.
+  const pending = useRef<Promise<'ok' | 'denied' | 'failed'> | null>(null);
+  const [starting, setStarting] = useState(false);
   const publish = useCallback(async (o: { video?: boolean } = {}): Promise<'ok' | 'denied' | 'failed'> => {
+    while (pending.current) { try { await pending.current; } catch {} }
     const rtc = getWebRTC();
     if (!rtc || !meRef.current) return 'failed';
     const video = !!o.video;
     if (local.current && pubVideo.current === video) return 'ok';
-    if (local.current) { send({ t: 'unpub' }); stopLocal(); }
-    let stream: any;
-    try {
-      stream = await rtc.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } as any,
-        video: video ? VIDEO : false,
-      });
-    } catch {
-      return 'denied';
-    }
-    local.current = stream;
-    pubVideo.current = video;
-    setLocalStream(stream);
-    setPublishing(true);
-    syncAudio();
-    send({ t: 'pub', video });
-    return 'ok';
+    const run = (async (): Promise<'ok' | 'denied' | 'failed'> => {
+      if (local.current) { send({ t: 'unpub' }); stopLocal(); }
+      let stream: any;
+      try {
+        stream = await rtc.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } as any,
+          video: video ? VIDEO : false,
+        });
+      } catch {
+        return 'denied';
+      }
+      local.current = stream;
+      pubVideo.current = video;
+      setLocalStream(stream);
+      setPublishing(true);
+      syncAudio();
+      send({ t: 'pub', video });
+      return 'ok';
+    })();
+    pending.current = run;
+    setStarting(true);
+    try { return await run; } finally { pending.current = null; setStarting(false); }
   }, [send, stopLocal, syncAudio]);
 
   const setMic = useCallback((on: boolean) => {
@@ -304,5 +313,5 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const remoteList = useMemo(() => Object.values(remotes), [remotes]);
-  return { available, publishing, localStream, remotes: remoteList, publish, unpublish, setMic, switchCamera };
+  return { available, publishing, starting, localStream, remotes: remoteList, publish, unpublish, setMic, switchCamera };
 }

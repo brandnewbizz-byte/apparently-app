@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, PanResponder, Platform, Pressable, Share, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, AppState, Image, Modal, PanResponder, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,13 +8,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, UserPlus, Palette, Mic, Video, VideoOff, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, Redo2, UserPlus, Palette, Mic, Video, VideoOff, Trash2, Lock, LockOpen, X, Crown } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useSpotRoom } from '@/hooks/useSpotRoom';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
 import { useLiveMesh } from '@/hooks/useLiveMesh';
+import { useSpotHistory } from '@/hooks/useSpotHistory';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import CallVideo from '@/components/CallVideo';
 import { useCameraPermissions } from '@/lib/safe-camera';
 import {
@@ -49,6 +51,9 @@ export default function SpotRoomScreen() {
 
   const me = useMemo(() => (user?.id ? { id: user.id, name: user.fullName || user.username || 'You', avatar: user.avatar || '' } : null), [user?.id, user?.fullName, user?.username, user?.avatar]);
   const room = useSpotRoom(roomId, me);
+  const history = useSpotHistory(room);
+  const [showPeople, setShowPeople] = useState(false);
+  const dragStart = useRef<Record<string, { x: number; y: number; z: number }>>({});
 
   const [info, setInfo] = useState<SpotRoom | null>(null);
   const [infoLoading, setInfoLoading] = useState(true);
@@ -70,50 +75,111 @@ export default function SpotRoomScreen() {
   const [cams, setCams] = useState<Record<string, RemoteCam>>({});
   const [, requestCamera] = useCameraPermissions();
 
-  // ── Voice (hold to talk) ──────────────────────────────────────────────────
+  // ── Voice and camera ─────────────────────────────────────────────────────
+  // The mic is on while you hold the button, while the mic is locked on, or
+  // while your camera is on. Turning the camera off turns the mic off again
+  // unless you're holding it or locked it on.
   const live = useMemo(() => ({ send: room.send, on: room.on }), [room.send, room.on]);
   // Older app versions send recorded clips — keep hearing them.
   const clipVoice = useSpotVoice(live, me);
   // Real-time voice + camera (WebRTC). Without it we fall back to clips / snapshots.
   const mesh = useLiveMesh(live, me, { enabled: !!me, ready: room.connected });
   const useMesh = mesh.available;
-  const [meshTalking, setMeshTalking] = useState(false);
-  const voice = { speaking: clipVoice.speaking, talking: useMesh ? meshTalking : clipVoice.talking };
-  const pressingMic = useRef(false);
-  const micDown = async () => {
-    pressingMic.current = true;
-    tap(Haptics.ImpactFeedbackStyle.Medium);
-    if (useMesh) {
-      const r = await mesh.publish({ video: camOn });
-      if (r === 'denied') { Alert.alert('Microphone access needed', 'Allow microphone access in Settings to talk in rooms.'); return; }
-      if (r !== 'ok') return;
-      mesh.setMic(pressingMic.current);
-      setMeshTalking(pressingMic.current);
-      return;
-    }
-    const r = await clipVoice.startTalking();
-    if (r === 'denied') Alert.alert('Microphone access needed', 'Allow microphone access in Settings to talk in rooms.');
-    if (r === 'ok' && !pressingMic.current) clipVoice.stopTalking();
-  };
-  const micUp = () => {
-    pressingMic.current = false;
-    if (useMesh) { mesh.setMic(false); setMeshTalking(false); } else clipVoice.stopTalking();
+  const [holding, setHolding] = useState(false);
+  const [micLocked, setMicLocked] = useState(false);
+  const micOn = holding || micLocked || camOn;
+  const voice = { speaking: clipVoice.speaking, talking: useMesh ? micOn && mesh.publishing : clipVoice.talking };
+  const lastDenied = useRef(0);
+
+  const micDenied = () => {
+    setHolding(false); setMicLocked(false); setCamOn(false);
+    if (Date.now() - lastDenied.current < 3000) return;
+    lastDenied.current = Date.now();
+    Alert.alert('Microphone access needed', 'Allow microphone (and camera) access in Settings to talk in rooms.');
   };
 
-  // Real-time voice: keep the green "talking" ring on for others while you hold the mic.
+  // Keep the mic / camera stream in step with what you asked for.
   useEffect(() => {
-    if (!useMesh || !meshTalking || !me) return;
+    if (!me) return;
+    let cancelled = false;
+    (async () => {
+      if (useMesh) {
+        if (micOn) {
+          const r = await mesh.publish({ video: camOn });
+          if (cancelled) return;
+          if (r !== 'ok') { micDenied(); return; }
+          mesh.setMic(true);
+        } else {
+          mesh.setMic(false);
+        }
+        return;
+      }
+      // Older builds: clips for voice; the camera bubble sends snapshots.
+      if (holding || micLocked) {
+        const r = await clipVoice.startTalking();
+        if (!cancelled && r === 'denied') micDenied();
+      } else clipVoice.stopTalking();
+    })();
+    return () => { cancelled = true; };
+  }, [micOn, camOn, holding, micLocked, useMesh, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const micDown = () => {
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    if (micLocked) return; // locked on: a tap on the mic turns it off (see micUp)
+    setHolding(true);
+  };
+  const micUp = () => {
+    if (micLocked) { setMicLocked(false); tap(); return; }
+    setHolding(false);
+  };
+  const toggleMicLock = () => {
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    setMicLocked((v) => !v);
+    setHolding(false);
+  };
+
+  // Real-time voice: keep the green "talking" ring on for others while your mic is on.
+  useEffect(() => {
+    if (!useMesh || !voice.talking || !me) return;
     const ping = () => room.send('talk', { uid: me.id, on: true });
     ping();
     const t = setInterval(ping, 2000);
     return () => { clearInterval(t); room.send('talk', { uid: me.id, on: false }); };
-  }, [useMesh, meshTalking, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Not talking and no camera for a while: turn the mic off completely.
+  }, [useMesh, voice.talking, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Mic off and no camera for a while: release the mic completely.
   useEffect(() => {
-    if (!useMesh || !mesh.publishing || meshTalking || camOn) return;
+    if (!useMesh || !mesh.publishing || micOn) return;
     const t = setTimeout(() => mesh.unpublish(), 30_000);
     return () => clearTimeout(t);
-  }, [useMesh, mesh.publishing, meshTalking, camOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [useMesh, mesh.publishing, micOn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The phone going to sleep / the app going to the background stops the
+  // camera and mic, so the buttons must show that too (no "red" camera that's
+  // really off when you come back).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') return;
+      setHolding(false);
+      setMicLocked(false);
+      setCamOn((on) => { if (on && me) room.send('camOff', { uid: me.id }); return false; });
+      mesh.unpublish();
+      clipVoice.stopTalking();
+    });
+    return () => sub.remove();
+  }, [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The stream stopped by itself (e.g. the camera was taken by another app).
+  useEffect(() => {
+    if (useMesh && camOn && !mesh.publishing && !mesh.starting) {
+      const t = setTimeout(() => { if (!mesh.publishing) setCamOn(false); }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [useMesh, camOn, mesh.publishing, mesh.starting]);
+
+  // Stay awake while you're in the room (Spot live). The lock button still works.
+  useEffect(() => {
+    activateKeepAwakeAsync('spot-room').catch(() => {});
+    return () => { try { deactivateKeepAwake('spot-room'); } catch {} };
+  }, []);
 
   // ── Camera bubbles ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -137,20 +203,14 @@ export default function SpotRoomScreen() {
     tap();
     if (camOn) {
       setCamOn(false);
-      if (useMesh) mesh.unpublish();
       if (me) room.send('camOff', { uid: me.id });
       return;
     }
-    if (useMesh) {
-      const r = await mesh.publish({ video: true });
-      if (r !== 'ok') { Alert.alert('Camera access needed', 'Allow camera and microphone access in Settings to show your camera in rooms.'); return; }
-      mesh.setMic(pressingMic.current);
-      setCamOn(true);
-      return;
+    if (!useMesh) {
+      const perm = await requestCamera();
+      if (!perm?.granted) { Alert.alert('Camera access needed', 'Allow camera access in Settings to show your camera in rooms.'); return; }
     }
-    const perm = await requestCamera();
-    if (!perm?.granted) { Alert.alert('Camera access needed', 'Allow camera access in Settings to show your camera in rooms.'); return; }
-    setCamOn(true);
+    setCamOn(true); // the mic comes on with it
   };
   const sendFrame = useCallback((img: string) => {
     if (me) room.send('cam', { uid: me.id, name: me.name, img });
@@ -177,7 +237,6 @@ export default function SpotRoomScreen() {
   const isHost = !!me && info?.creatorId === me.id;
   const things = room.items.filter((i) => i.kind !== 'doodle');
   const doodles = room.items.filter((i) => i.kind === 'doodle');
-  const myDoodles = doodles.filter((d) => d.ownerId === me?.id);
   const menuItem = menuId ? room.items.find((i) => i.id === menuId) || null : null;
 
   // ── Drawing ───────────────────────────────────────────────────────────────
@@ -186,8 +245,8 @@ export default function SpotRoomScreen() {
   drawRef.current.size = size;
   drawRef.current.penColor = penColor;
   drawRef.current.penWidth = penWidth;
-  const strokeFns = useRef({ progress: room.strokeProgress, done: room.strokeDone });
-  strokeFns.current = { progress: room.strokeProgress, done: room.strokeDone };
+  const strokeFns = useRef({ progress: room.strokeProgress, done: room.strokeDone, rec: history.recordAdd });
+  strokeFns.current = { progress: room.strokeProgress, done: room.strokeDone, rec: history.recordAdd };
 
   const canvasPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => drawRef.current.mode === 'draw',
@@ -215,7 +274,9 @@ export default function SpotRoomScreen() {
       const pts = drawRef.current.points;
       drawRef.current.points = [];
       // Keep showing it until the saved version arrives.
-      strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
+      strokeFns.current.done(pts, drawRef.current.penColor, drawRef.current.penWidth)
+        .then((it) => strokeFns.current.rec(it))
+        .finally(() => setMyStroke([]));
     },
     // A second finger means "zoom", so drop the half-drawn stroke.
     onPanResponderTerminate: () => {
@@ -274,10 +335,8 @@ export default function SpotRoomScreen() {
     return list;
   }, [room.liveStrokes, myStroke, penColor, penWidth]);
 
-  const undoDoodle = () => {
-    const last = [...myDoodles].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).pop();
-    if (last) { tap(); room.remove(last.id); }
-  };
+  const undoLast = () => { tap(); history.undo(); };
+  const redoLast = () => { tap(); history.redo(); };
 
   // ── Adding things ─────────────────────────────────────────────────────────
   const addSticker = async (emoji: string) => {
@@ -285,6 +344,7 @@ export default function SpotRoomScreen() {
     tap(Haptics.ImpactFeedbackStyle.Medium);
     setMode('move');
     const it = await room.add({ kind: 'sticker', emoji, x: nearCenter(), y: nearCenter() });
+    history.recordAdd(it);
     if (!it) Alert.alert('Not added', 'Check your connection and try again.');
   };
   const addNote = async (text: string, color: string) => {
@@ -292,6 +352,7 @@ export default function SpotRoomScreen() {
     tap(Haptics.ImpactFeedbackStyle.Medium);
     setMode('move');
     const it = await room.add({ kind: 'note', text, color, x: nearCenter(), y: nearCenter() });
+    history.recordAdd(it);
     if (!it) Alert.alert('Not added', 'Check your connection and try again.');
   };
   const addPhoto = async (source: 'camera' | 'library') => {
@@ -373,6 +434,7 @@ export default function SpotRoomScreen() {
         bare: style === 'bare',
       });
       if (!it) throw new Error('save failed');
+      history.recordAdd(it);
       tap(Haptics.ImpactFeedbackStyle.Medium);
       setPicked(null);
     } catch {
@@ -386,8 +448,20 @@ export default function SpotRoomScreen() {
   const onTap = useCallback((id: string) => setSelectedId(id), []);
   const onDoubleTap = useCallback((id: string) => { tap(); room.react(id, '❤️'); }, [room]);
   const onLongPress = useCallback((id: string) => { tap(Haptics.ImpactFeedbackStyle.Medium); setSelectedId(id); setMenuId(id); }, []);
-  const onDrag = useCallback((id: string, x: number, y: number, z: number) => { setSelectedId(id); room.dragTo(id, x, y, z); }, [room]);
-  const onDrop = useCallback((id: string, x: number, y: number, z: number) => { room.dropAt(id, x, y, z); }, [room]);
+  const onDrag = useCallback((id: string, x: number, y: number, z: number) => {
+    if (!dragStart.current[id]) {
+      const it = room.items.find((i) => i.id === id);
+      if (it) dragStart.current[id] = { x: it.x, y: it.y, z: it.z };
+    }
+    setSelectedId(id);
+    room.dragTo(id, x, y, z);
+  }, [room]);
+  const onDrop = useCallback((id: string, x: number, y: number, z: number) => {
+    const from = dragStart.current[id];
+    delete dragStart.current[id];
+    if (from) history.recordMove(id, from, { x, y, z });
+    room.dropAt(id, x, y, z);
+  }, [room, history]);
 
   const invite = () => {
     tap();
@@ -496,14 +570,18 @@ export default function SpotRoomScreen() {
         <TouchableOpacity onPress={() => router.back()} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Leave room">
           <ChevronLeft size={24} color={fg} />
         </TouchableOpacity>
-        <View style={[styles.titlePill, { backgroundColor: glass }]}>
+        <TouchableOpacity
+          onPress={() => { tap(); setShowPeople(true); }}
+          style={[styles.titlePill, { backgroundColor: glass }]}
+          accessibilityLabel={`Live: ${room.members.length} here. Show who's in the room`}
+        >
           <Text style={[styles.title, { color: fg }]} numberOfLines={1}>{theme.emoji} {info?.name || 'Room'}</Text>
           <View style={styles.liveRow}>
             <View style={styles.liveDot} />
-            <Text style={[styles.liveText, { color: fg }]}>{room.members.length} here</Text>
+            <Text style={[styles.liveText, { color: fg }]}>LIVE · {room.members.length} here ›</Text>
           </View>
-        </View>
-        <View style={styles.avatars}>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.avatars} onPress={() => { tap(); setShowPeople(true); }} accessibilityLabel="Show who's in the room">
           {room.members.slice(0, 4).map((m, i) => {
             const talkingNow = m.id === me?.id ? voice.talking : !!voice.speaking[m.id];
             const ring = talkingNow ? '#22C55E' : theme.colors[0];
@@ -515,7 +593,7 @@ export default function SpotRoomScreen() {
               </View>
             );
           })}
-        </View>
+        </TouchableOpacity>
         {isHost ? (
           <TouchableOpacity onPress={() => setShowThemes((v) => !v)} style={[styles.round, { backgroundColor: glass }]} accessibilityLabel="Change room theme">
             <Palette size={19} color={fg} />
@@ -575,21 +653,43 @@ export default function SpotRoomScreen() {
           : useMesh ? null : <MyCameraBubble onFrame={sendFrame} onClose={toggleCamera} talking={voice.talking} />)
         : null}
 
+      {/* ── Undo / Redo (move mode; the pen bar has its own) ── */}
+      {mode !== 'draw' && (history.canUndo || history.canRedo) ? (
+        <View style={[styles.historyCol, { bottom: insets.bottom + (showReact ? 152 : 100) }]}>
+          <TouchableOpacity onPress={undoLast} disabled={!history.canUndo} style={[styles.sideBtn, !history.canUndo && { opacity: 0.35 }]} accessibilityLabel="Undo">
+            <Undo2 size={19} color="#111" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={redoLast} disabled={!history.canRedo} style={[styles.sideBtn, !history.canRedo && { opacity: 0.35 }]} accessibilityLabel="Redo">
+            <Redo2 size={19} color="#111" />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {/* ── Mic + camera ── */}
       <View style={[styles.sideCol, { bottom: insets.bottom + (mode === 'draw' || showReact ? 152 : 100) }]} pointerEvents="box-none">
         <TouchableOpacity onPress={toggleCamera} style={[styles.sideBtn, camOn && styles.sideBtnOn]} accessibilityLabel={camOn ? 'Turn camera off' : 'Turn camera on'}>
           {camOn ? <VideoOff size={20} color="#FFF" /> : <Video size={20} color="#111" />}
         </TouchableOpacity>
+        <TouchableOpacity
+          onPress={toggleMicLock}
+          style={[styles.lockBtn, micLocked && styles.lockBtnOn]}
+          accessibilityLabel={micLocked ? 'Unlock the mic (back to hold to talk)' : 'Lock the mic on'}
+          accessibilityState={{ selected: micLocked }}
+        >
+          {micLocked ? <Lock size={15} color="#FFF" /> : <LockOpen size={15} color="#111" />}
+        </TouchableOpacity>
         <Pressable
           onPressIn={micDown}
           onPressOut={micUp}
-          style={[styles.micBtn, voice.talking && styles.micBtnOn]}
-          accessibilityLabel="Hold to talk"
-          accessibilityHint="Press and hold to speak to everyone in the room"
+          style={[styles.micBtn, micOn && styles.micBtnOn]}
+          accessibilityLabel={micLocked ? 'Mic locked on. Tap to turn it off' : 'Hold to talk'}
+          accessibilityHint={micLocked ? undefined : 'Press and hold to speak, or tap the lock to keep the mic on'}
         >
           <Mic size={26} color="#FFF" />
         </Pressable>
-        <Text style={[styles.micHint, { color: fg }]}>{voice.talking ? 'Talking…' : 'Hold to talk'}</Text>
+        <Text style={[styles.micHint, { color: fg }]}>
+          {micLocked ? 'Mic on · tap to stop' : camOn ? 'Mic on with camera' : holding ? 'Talking…' : 'Hold to talk'}
+        </Text>
       </View>
 
       {/* ── Draw options ── */}
@@ -605,8 +705,11 @@ export default function SpotRoomScreen() {
             </TouchableOpacity>
           ))}
           <View style={styles.sep} />
-          <TouchableOpacity onPress={undoDoodle} disabled={!myDoodles.length} style={[styles.penWidth, !myDoodles.length && { opacity: 0.3 }]} accessibilityLabel="Undo my last doodle">
+          <TouchableOpacity onPress={undoLast} disabled={!history.canUndo} style={[styles.penWidth, !history.canUndo && { opacity: 0.3 }]} accessibilityLabel="Undo">
             <Undo2 size={18} color="#111" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={redoLast} disabled={!history.canRedo} style={[styles.penWidth, !history.canRedo && { opacity: 0.3 }]} accessibilityLabel="Redo">
+            <Redo2 size={18} color="#111" />
           </TouchableOpacity>
         </View>
       ) : null}
@@ -667,6 +770,47 @@ export default function SpotRoomScreen() {
         </View>
       ) : null}
       <CutoutSheet photo={picked} busy={uploading} onCancel={() => !uploading && setPicked(null)} onDone={placePhoto} />
+      {/* ── Who's here ── */}
+      <Modal visible={showPeople} transparent animationType="slide" onRequestClose={() => setShowPeople(false)}>
+        <Pressable style={styles.peopleBackdrop} onPress={() => setShowPeople(false)}>
+          <Pressable style={[styles.peopleSheet, { paddingBottom: insets.bottom + 16 }]} onPress={() => {}}>
+            <View style={styles.peopleHead}>
+              <View style={styles.liveDot} />
+              <Text style={styles.peopleTitle}>Live now · {room.members.length}</Text>
+              <TouchableOpacity onPress={() => setShowPeople(false)} accessibilityLabel="Close" hitSlop={10}>
+                <X size={20} color="#111" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 380 }}>
+              {room.members.map((m) => {
+                const isMe = m.id === me?.id;
+                const talkingNow = isMe ? voice.talking : !!voice.speaking[m.id];
+                return (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={styles.personRow}
+                    disabled={isMe}
+                    onPress={() => { setShowPeople(false); router.push(`/user/${m.id}` as any); }}
+                    accessibilityLabel={`${m.name}${isMe ? ' (you)' : ''}${talkingNow ? ', talking' : ''}`}
+                  >
+                    {m.avatar ? (
+                      <Image source={{ uri: m.avatar }} style={[styles.personAvatar, talkingNow && styles.personTalking]} />
+                    ) : (
+                      <View style={[styles.personAvatar, styles.avatarFallback, talkingNow && styles.personTalking]}>
+                        <Text style={styles.avatarInitial}>{(m.name || '?').charAt(0).toUpperCase()}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.personName} numberOfLines={1}>{m.name}{isMe ? ' (you)' : ''}</Text>
+                    {m.id === info?.creatorId ? <Crown size={15} color="#F59E0B" /> : null}
+                    {talkingNow ? <Mic size={15} color="#22C55E" /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+              {!room.members.length ? <Text style={styles.personEmpty}>Connecting…</Text> : null}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <InviteSheet
         visible={showInvite}
         room={info}
@@ -681,16 +825,27 @@ export default function SpotRoomScreen() {
         canRemove={!!menuItem && (menuItem.ownerId === me?.id || isHost)}
         onClose={() => setMenuId(null)}
         onReact={(e) => menuItem && room.react(menuItem.id, e)}
-        onResize={(d) => menuItem && room.resize(menuItem.id, menuItem.scale + d)}
+        onResize={(d) => {
+          if (!menuItem) return;
+          const to = Math.min(3, Math.max(0.5, menuItem.scale + d));
+          history.recordResize(menuItem.id, menuItem.scale, to);
+          room.resize(menuItem.id, to);
+        }}
         onFront={() => { if (menuItem) room.bringToFront(menuItem.id); setMenuId(null); }}
-        onEdit={(t) => menuItem && t && room.editText(menuItem.id, t)}
+        onEdit={(t) => {
+          if (!menuItem || !t) return;
+          history.recordEdit(menuItem.id, menuItem.text || '', t);
+          room.editText(menuItem.id, t);
+        }}
         onRemove={async () => {
           if (!menuItem) return;
           const id = menuItem.id;
+          const snapshot = menuItem;
           setMenuId(null);
           setSelectedId(null);
           const ok = await room.remove(id);
           if (!ok) Alert.alert('Not removed', 'Please try again.');
+          else history.recordRemove(snapshot);
         }}
       />
     </View>
@@ -745,6 +900,18 @@ const styles = StyleSheet.create({
   talkPill: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.92)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, maxWidth: '80%' },
   talkText: { color: '#FFF', fontWeight: '800', fontSize: 12 },
   sideCol: { position: 'absolute', right: 14, alignItems: 'center', gap: 10 },
+  historyCol: { position: 'absolute', left: 14, gap: 10 },
+  lockBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', ...shadow },
+  lockBtnOn: { backgroundColor: '#22C55E' },
+  peopleBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  peopleSheet: { backgroundColor: '#FFF', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 16 },
+  peopleHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  peopleTitle: { flex: 1, fontSize: 17, fontWeight: '800', color: '#111' },
+  personRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
+  personAvatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: 'transparent' },
+  personTalking: { borderColor: '#22C55E' },
+  personName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#111' },
+  personEmpty: { color: '#6B7280', paddingVertical: 12, textAlign: 'center' },
   sideBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', ...shadow },
   sideBtnOn: { backgroundColor: '#EF4444' },
   micBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)', ...shadow },
