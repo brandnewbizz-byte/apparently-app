@@ -13,6 +13,7 @@ import CallVideo from '@/components/CallVideo';
 import { playTone, stopTone } from '@/lib/callTones';
 import { claimCall, sendMissedCall, setCallUiActive } from '@/lib/calls';
 import { dismissCallNotifications } from '@/lib/notifications';
+import { callAudioAvailable } from '@/lib/callAudio';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -67,6 +68,8 @@ export default function CallScreen() {
 
   // Ringback for the caller until the other person picks up.
   useEffect(() => {
+    // Phones with call audio play ringback through it (see lib/callAudio).
+    if (callAudioAvailable()) return;
     if (isOutgoing && callState === 'calling') playTone('ringback');
     else stopTone();
   }, [isOutgoing, callState]);

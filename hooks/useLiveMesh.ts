@@ -27,6 +27,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { setAudioModeAsync } from 'expo-audio';
 import { getWebRTC } from '@/lib/webrtc';
+import { ICE_SERVERS } from '@/lib/ice';
+import { callAudioAvailable, liveAudioStart } from '@/lib/callAudio';
 
 export interface MeshRoom {
   send: (event: string, payload: any) => void;
@@ -40,9 +42,6 @@ export interface MeshRemote {
   video: boolean;
 }
 
-const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-];
 /** Live posts and rooms are voice-first: small, smooth video. */
 const VIDEO = { facingMode: 'user', width: 480, height: 480, frameRate: 24 };
 
@@ -75,13 +74,19 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
     room.send('rtc', { ...msg, from: m.id, name: m.name });
   }, [room]);
 
-  // ── Audio session: speaker on, recording allowed while anything is connected ──
+  // ── Audio: loudspeaker on and call-mode audio while anything is connected ──
   const audioOn = useRef(false);
+  const releaseAudio = useRef<(() => void) | null>(null);
   const syncAudio = useCallback(() => {
     if (Platform.OS === 'web') return;
     const want = !!local.current || Object.keys(inPeers.current).length > 0;
     if (want === audioOn.current) return;
     audioOn.current = want;
+    if (callAudioAvailable()) {
+      if (want) releaseAudio.current = liveAudioStart();
+      else { releaseAudio.current?.(); releaseAudio.current = null; }
+      return;
+    }
     setAudioModeAsync({ allowsRecording: want, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
   }, []);
 
@@ -291,7 +296,9 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
   useEffect(() => () => {
     stopLocal();
     Object.keys(inPeers.current).forEach((uid) => closePeer(inPeers.current, uid));
-    if (audioOn.current && Platform.OS !== 'web') {
+    releaseAudio.current?.();
+    releaseAudio.current = null;
+    if (audioOn.current && Platform.OS !== 'web' && !callAudioAvailable()) {
       setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

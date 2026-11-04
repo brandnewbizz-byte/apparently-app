@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import CallVideo from '@/components/CallVideo';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { usePostPresence } from '@/hooks/usePostPresence';
 import { usePostVoiceRoom } from '@/hooks/usePostVoiceRoom';
 import PostPresenceIndicator from '@/components/PostPresenceIndicator';
@@ -32,6 +33,16 @@ export default function PostLiveLayer({ postId, userId, userName, avatar, bottom
   const voice = usePostVoiceRoom({ postId, userId, userName, enabled: !!userId });
   useEffect(() => { onLiveChange?.(voice.liveActive); }, [voice.liveActive, onLiveChange]);
   useEffect(() => () => onLiveChange?.(false), [onLiveChange]);
+
+  // Live with your mic on: the screen stays awake (Instagram Live). Mic muted
+  // or not live: the phone sleeps normally. The lock button always works.
+  const keepAwake = voice.live && !voice.micMuted;
+  useEffect(() => {
+    if (!keepAwake) return;
+    const tag = `post-live-${postId}`;
+    activateKeepAwakeAsync(tag).catch(() => {});
+    return () => { try { deactivateKeepAwake(tag); } catch {} };
+  }, [keepAwake, postId]);
 
   // While you hold the mic you're "talking" — bridged into presence so
   // other viewers see "N here now · M talking" without subscribing to audio.

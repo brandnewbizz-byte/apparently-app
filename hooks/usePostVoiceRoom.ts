@@ -17,6 +17,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useSpotVoice } from '@/hooks/useSpotVoice';
 import { useLiveSound } from '@/lib/liveSound';
+import { callAudioAvailable } from '@/lib/callAudio';
 import { useLiveMesh, type MeshRemote } from '@/hooks/useLiveMesh';
 
 export type VoiceConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -96,7 +97,7 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
     if (!enabled || !postId || !userId) return;
     setError(null);
     setConnectionState('connecting');
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && !callAudioAvailable()) {
       setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
     }
     const ch = supabase.channel(`post-voice:${postId}`, { config: { broadcast: { self: false } } });
@@ -161,11 +162,17 @@ export function usePostVoiceRoom({ postId, userId, userName, enabled = true }: U
     if (connectionState !== 'connected') return 'failed' as const;
     setError(null);
     const r = useMesh ? await mesh.publish({ video: false }) : await clips.startTalking();
-    if (r === 'ok') { setLive(true); setMicMuted(false); if (useMesh) mesh.setMic(true); }
+    if (r === 'ok') {
+      setLive(true);
+      setMicMuted(false);
+      if (useMesh) mesh.setMic(true);
+      // Going live turns other people's voices on so you can talk with them.
+      if (!soundOnRef.current) setSoundOn(true);
+    }
     else if (r === 'denied') setError('Allow microphone access in Settings to talk');
     else setError('Couldn’t start the mic. Try again.');
     return r;
-  }, [connectionState, useMesh, mesh.publish, mesh.setMic, clips.startTalking]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connectionState, useMesh, mesh.publish, mesh.setMic, clips.startTalking, setSoundOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const endLive = useCallback(() => {
     stopTalking();

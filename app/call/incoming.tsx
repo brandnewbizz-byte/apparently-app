@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { playTone, stopTone } from '@/lib/callTones';
 import { CALL_RING_MS, declineCall, markCallNotificationRead, setCallUiActive } from '@/lib/calls';
 import { dismissCallNotifications } from '@/lib/notifications';
+import { ringStart, ringStop } from '@/lib/callAudio';
 
 export default function IncomingCallScreen() {
   const p = useLocalSearchParams<Record<string, string>>();
@@ -39,6 +40,7 @@ export default function IncomingCallScreen() {
   const finish = (how: 'answer' | 'decline' | 'missed') => {
     if (done.current) return;
     done.current = true;
+    ringStop();
     stopTone();
     dismissCallNotifications();
     markCallNotificationRead(p.notificationId);
@@ -59,7 +61,8 @@ export default function IncomingCallScreen() {
   // Ring until answered, declined, the caller hangs up or time runs out.
   useEffect(() => {
     setCallUiActive(true);
-    playTone('ringtone');
+    // The phone's own ringtone when we can; otherwise our built-in one.
+    if (!ringStart()) playTone('ringtone');
     dismissCallNotifications();
     const left = Math.max(5_000, CALL_RING_MS - (Date.now() - createdAt));
     const t = setTimeout(() => finish('missed'), left);
@@ -75,6 +78,7 @@ export default function IncomingCallScreen() {
     }
     return () => {
       clearTimeout(t);
+      ringStop();
       stopTone();
       setCallUiActive(false);
       if (ch) supabase.removeChannel(ch).then(() => {}, () => {});

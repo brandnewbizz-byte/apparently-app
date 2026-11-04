@@ -20,6 +20,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { getWebRTC } from '@/lib/webrtc';
 import { CALL_RING_MS } from '@/lib/calls';
+import { ICE_SERVERS } from '@/lib/ice';
+import { callAudioAvailable, callConnected, callEnd, callSpeaker, callStart } from '@/lib/callAudio';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 
@@ -32,9 +34,6 @@ export interface CallConfig {
   video?: boolean;
 }
 
-const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-];
 const JOIN_WAIT_MS = 25_000; // callee gives up if the caller never sends an offer
 const JOIN_REPEAT_MS = 3_000;
 const CANT_CONNECT = 'The call couldn’t connect. Check your internet connection and try again.';
@@ -79,6 +78,7 @@ export function useWebRTCCall() {
   /** Phones: route call audio to the loudspeaker or the earpiece. */
   const applySpeaker = useCallback(async (on: boolean) => {
     if (Platform.OS === 'web') return;
+    if (callAudioAvailable()) { callSpeaker(on); return; }
     try {
       await setAudioModeAsync({
         allowsRecording: true,
@@ -118,7 +118,8 @@ export function useWebRTCCall() {
     setRemoteStream(null);
     if (error) setCallError(error);
     setCallState('ended');
-    if (Platform.OS !== 'web') {
+    if (callAudioAvailable()) callEnd();
+    else if (Platform.OS !== 'web') {
       setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, shouldRouteThroughEarpiece: false }).catch(() => {});
     }
   }, [clearWaits, stopTimer]);
@@ -134,7 +135,8 @@ export function useWebRTCCall() {
     // Video calls start on the loudspeaker, voice calls on the earpiece.
     const speaker = !!configRef.current?.video;
     setIsSpeakerOn(speaker);
-    applySpeaker(speaker);
+    if (callAudioAvailable()) callConnected(speaker);
+    else applySpeaker(speaker);
   }, [applySpeaker, clearWaits]);
 
   const addRemoteIce = useCallback(async (candidate: any) => {
@@ -300,6 +302,7 @@ export function useWebRTCCall() {
   const startCall = useCallback(async (cfg: CallConfig) => {
     reset(cfg);
     setCallState('calling');
+    if (callAudioAvailable()) callStart({ video: !!cfg.video, outgoing: true });
     try {
       await connectSignaling(cfg);
       await createPeer(cfg);
@@ -317,6 +320,7 @@ export function useWebRTCCall() {
   const acceptCall = useCallback(async (cfg: CallConfig) => {
     reset(cfg);
     setCallState('connecting');
+    if (callAudioAvailable()) callStart({ video: !!cfg.video, outgoing: false });
     try {
       await connectSignaling(cfg);
       await createPeer(cfg);
