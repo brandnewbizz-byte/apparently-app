@@ -27,7 +27,7 @@ import { supabase } from '@/lib/supabase';
 import * as api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSocial } from '@/contexts/SocialContext';
-import AppVideo from '@/components/AppVideo';
+import AppVideo, { PlayPauseFlash } from '@/components/AppVideo';
 import CommentsSheet from '@/components/comments/CommentsSheet';
 import { CommentAvatar } from '@/components/comments/CommentsPanel';
 import { shortTimeAgo } from '@/components/comments/useComments';
@@ -63,6 +63,9 @@ function Page({
   const [expanded, setExpanded] = useState(false);
   const [heartScale] = useState(() => new Animated.Value(0));
   const lastTap = useRef(0);
+  const isVid = !!(post.isVideo && post.videoUrl);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => { setPaused(false); }, [active]);
   const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Real like/save state for this viewer, loaded when the page becomes active.
@@ -126,7 +129,8 @@ function Page({
       return;
     }
     lastTap.current = now;
-    singleTapTimer.current = setTimeout(onToggleChrome, 270);
+    // Videos: tap to pause / play (Instagram). Photos: tap shows or hides the buttons.
+    singleTapTimer.current = setTimeout(isVid ? () => setPaused((p) => !p) : onToggleChrome, 270);
   };
 
   const toggleSave = async () => {
@@ -155,7 +159,10 @@ function Page({
       <Pressable style={StyleSheet.absoluteFill} onPress={onMediaPress} accessibilityLabel="Double-tap to like">
         {post.isVideo && post.videoUrl ? (
           active ? (
-            <AppVideo source={{ uri: post.videoUrl }} style={StyleSheet.absoluteFill} resizeMode="contain" shouldPlay isLooping />
+            <>
+              <AppVideo source={{ uri: post.videoUrl }} style={StyleSheet.absoluteFill} resizeMode="contain" shouldPlay={!paused} isLooping showProgress />
+              <PlayPauseFlash paused={paused} />
+            </>
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.center]}>
               {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="contain" /> : null}
@@ -404,7 +411,7 @@ export default function PostViewer({
 
         {/* ── Edit caption ── */}
         {editing && current ? (
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetBackdrop}>
+          <KeyboardAvoidingView behavior="padding" style={styles.sheetBackdrop}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditing(false)} />
             <View style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 12 }]}>
               <View style={styles.editHeader}>

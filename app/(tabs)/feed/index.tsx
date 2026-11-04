@@ -57,7 +57,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import PostLiveLayer from '@/components/PostLiveLayer';
 import { postUrl, shareLink } from '@/lib/share';
 import FeedPhoto from '@/components/FeedPhoto';
-import AppVideo from '@/components/AppVideo';
+import AppVideo, { PlayPauseFlash } from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 import CommentsPanel from '@/components/comments/CommentsPanel';
 
@@ -226,7 +226,7 @@ function PostDetailModal({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={[styles.modalContainer, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
       >
         <View style={[styles.modalHeader, { paddingTop: Platform.OS === 'ios' ? 14 : insets.top + 8, borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.modalBackBtn} accessibilityLabel="Close">
@@ -308,6 +308,13 @@ function PostCard({
   const cardInsets = useSafeAreaInsets();
   const tabBarSpace = (Platform.OS === 'ios' ? 56 : 52) + Math.max(cardInsets.bottom, 0);
 
+  // ── Play / pause (Instagram): tap to pause or play, press and hold to
+  // pause while you hold. A post that scrolls back in starts playing again.
+  const [paused, setPaused] = useState(false);
+  const [holdPaused, setHoldPaused] = useState(false);
+  const holding = useRef(false);
+  useEffect(() => { setPaused(false); setHoldPaused(false); holding.current = false; }, [isActive]);
+
   // ── Double-tap to like (Instagram): big heart pops over the media ──
   const burst = useRef(new Animated.Value(0)).current;
   const lastTap = useRef(0);
@@ -337,9 +344,11 @@ function PostCard({
     lastTap.current = now;
     singleTapTimer.current = setTimeout(() => {
       singleTapTimer.current = null;
-      // Single tap: videos toggle sound (Reels), photos open full screen.
-      if (isVideo) onToggleMute();
-      else onMediaTap(post.media!, false);
+      // Single tap: videos play / pause, photos open full screen.
+      if (isVideo) {
+        Haptics.selectionAsync().catch(() => {});
+        setPaused((p) => !p);
+      } else onMediaTap(post.media!, false);
     }, 280);
   };
 
@@ -407,16 +416,25 @@ function PostCard({
     >
       {post.media ? (
         <View style={height ? { flex: 1 } : undefined}>
-          <Pressable onPress={handleMediaPress} style={height ? { flex: 1 } : undefined} accessibilityLabel={isVideo ? 'Video. Double tap to like, tap to mute or unmute' : 'Photo. Double tap to like, tap to view'}>
+          <Pressable
+            onPress={handleMediaPress}
+            onLongPress={isVideo && isActive ? () => { holding.current = true; setHoldPaused(true); } : undefined}
+            onPressOut={() => { if (holding.current) { holding.current = false; setHoldPaused(false); } }}
+            delayLongPress={250}
+            style={height ? { flex: 1 } : undefined}
+            accessibilityLabel={isVideo ? (paused ? 'Video paused. Tap to play, double tap to like' : 'Video. Tap to pause, double tap to like') : 'Photo. Double tap to like, tap to view'}
+          >
             {isVideo ? (
               isActive ? (
                 <AppVideo
                   source={{ uri: post.videoUrl }}
                   style={[igCardStyles.media, height ? { width: '100%', height: '100%' } : { height: FEED_MEDIA_HEIGHT }]}
                   resizeMode="cover"
-                  shouldPlay
+                  shouldPlay={!paused && !holdPaused}
                   isLooping
                   isMuted={muted}
+                  showProgress
+                  progressBottom={height ? tabBarSpace : 0}
                 />
               ) : (
                 // Off-screen videos don't hold a player (saves memory/battery) — show the cover frame instead.
@@ -443,6 +461,7 @@ function PostCard({
                 </View>
               </View>
             ) : null}
+            {isVideo && isActive ? <PlayPauseFlash paused={paused} /> : null}
             <Animated.View style={[igCardStyles.playOverlay, burstStyle]} pointerEvents="none">
               <Heart size={96} color="#FFFFFF" fill="#FFFFFF" />
             </Animated.View>
