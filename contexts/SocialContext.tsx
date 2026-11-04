@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Share, Platform } from 'react-native';
+import { AppState, Share, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState, useRef } from 'react';
 
@@ -146,6 +146,10 @@ interface SocialState {
   isFeedLoading: boolean;
   /** Re-fetch posts, like/comment counts and the viewer's likes. */
   refreshPosts: () => Promise<void>;
+  /** New posts from other people since the feed last loaded (Instagram's "New posts" pill). */
+  newPostCount: number;
+  /** Load the new posts now and clear the pill. */
+  showNewPosts: () => Promise<void>;
   toggleLike: (postId: string, initialLikeCount?: number) => void;
   addComment: (postId: string, text: string, parentId?: string, options?: AddCommentOptions) => Promise<boolean>;
   /** Shift a post's cached comment count (e.g. after a comment is deleted). */
@@ -1030,7 +1034,16 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     refreshPosts();
   }, [authUserId, refreshPosts]);
 
-  // New / deleted posts from anyone show up without a manual refresh.
+  // ── Live updates (Instagram-style) ──
+  //  * someone else posts → a "New posts" pill (the feed doesn't jump under you)
+  //  * a post is deleted / edited → the feed updates quietly
+  //  * likes and comments from others → counts change live
+  //  * coming back to the app after a while → fresh posts
+  const [newPostCount, setNewPostCount] = useState(0);
+  const showNewPosts = useCallback(async () => {
+    setNewPostCount(0);
+    await refreshPosts();
+  }, [refreshPosts]);
   useEffect(() => {
     if (!authUserId || authUserId === 'u-dev') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1038,16 +1051,51 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => { refreshPosts(); }, 800);
     };
+    const bumpCount = (postId: string | undefined, key: 'likeCount' | 'commentCount', delta: number) => {
+      if (!postId) return;
+      setInteractions((prev) => {
+        const cur = prev[postId];
+        if (!cur) return prev;
+        return { ...prev, [postId]: { ...cur, [key]: Math.max(0, (cur[key] || 0) + delta) } };
+      });
+    };
     const channel = supabase
       .channel('feed-posts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, schedule)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (p: any) => {
+        const author = p?.new?.author_id || p?.new?.user_id;
+        if (author && author === authUserId) return; // your own post is already in the feed
+        setNewPostCount((n) => n + 1);
+      })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, schedule)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stories' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['supabaseStories'] });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'post_likes' }, (p: any) => {
+        if (p?.new?.user_id === authUserId) return; // your own like is already counted
+        bumpCount(p?.new?.post_id, 'likeCount', 1);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'post_likes' }, (p: any) => {
+        if (p?.old?.user_id === authUserId) return;
+        bumpCount(p?.old?.post_id, 'likeCount', -1);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'post_comments' }, (p: any) => {
+        if (p?.new?.author_id === authUserId) return;
+        bumpCount(p?.new?.post_id, 'commentCount', 1);
+      })
       .subscribe();
+    // Back in the app after a minute or more: load what's new.
+    let leftAt = 0;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') { leftAt = Date.now(); return; }
+      if (leftAt && Date.now() - leftAt > 60_000) { setNewPostCount(0); refreshPosts(); }
+      leftAt = 0;
+    });
     return () => {
       if (timer) clearTimeout(timer);
+      sub.remove();
       supabase.removeChannel(channel);
     };
-  }, [authUserId, refreshPosts]);
+  }, [authUserId, refreshPosts, queryClient]);
 
   // ── Hidden posts + blocked users (persisted per account) ──
   // hidden_posts rows were written before but never read back, so hidden
@@ -1140,6 +1188,8 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     isLoading: query.isLoading || postsQuery.isLoading,
     isFeedLoading,
     refreshPosts,
+    newPostCount,
+    showNewPosts,
     toggleLike,
     addComment,
     adjustCommentCount,

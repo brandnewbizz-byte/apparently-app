@@ -196,6 +196,19 @@ export function BundleProvider({ children }: { children: React.ReactNode }) {
   // Load on start and again when the signed-in account changes.
   useEffect(() => { reload(); }, [reload, user?.id]);
 
+  // Live: new, edited, grabbed or removed bundles show up without pulling to refresh.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const ch = supabase
+      .channel('live-bundles')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bundles' }, () => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => { reload(); }, 1200);
+      })
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+  }, [reload]);
+
   // Save bundles to AsyncStorage whenever they change (after initial load)
   const saveBundles = useCallback(async (updatedBundles: UserBundle[]) => {
     try {

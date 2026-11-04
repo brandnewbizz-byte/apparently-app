@@ -167,6 +167,19 @@ export function SkillProvider({ children }: { children: React.ReactNode }) {
   // Load on start and again when the signed-in account changes.
   useEffect(() => { reload(); }, [reload, user?.id]);
 
+  // Live: new, edited, grabbed or removed skill deals show up without pulling to refresh.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const ch = supabase
+      .channel('live-skill_deals')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_deals' }, () => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => { reload(); }, 1200);
+      })
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+  }, [reload]);
+
   const saveSkills = useCallback(async (updatedSkills: UserSkill[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSkills));

@@ -649,7 +649,7 @@ export default function FeedScreen() {
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
   const { addUserPost } = useUserPosts();
-  const { deletePost, deleteStory, createPost, feedStories, userStories, getAllPosts, hidePost, refreshPosts, isFeedLoading } = useSocial();
+  const { deletePost, deleteStory, createPost, feedStories, userStories, getAllPosts, hidePost, refreshPosts, isFeedLoading, newPostCount, showNewPosts } = useSocial();
   // Videos start muted (like Reels); one tap toggles sound for the whole feed.
   const [muted, setMuted] = useState(true);
   // "Posting…" banner while media uploads and the post saves.
@@ -957,6 +957,17 @@ export default function FeedScreen() {
 
   const activePostId = filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null;
 
+  // New posts from others: at the top of the feed they just appear; further
+  // down you get a "New posts" pill instead, so the feed never jumps (Instagram).
+  useEffect(() => {
+    if (newPostCount > 0 && activeIndex === 0) showNewPosts();
+  }, [newPostCount, activeIndex, showNewPosts]);
+  const jumpToNewPosts = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    showNewPosts();
+  }, [showNewPosts]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setTagFilter(null);
@@ -1235,6 +1246,12 @@ export default function FeedScreen() {
           </View>
         ) : null}
 
+        {newPostCount > 0 && activeIndex > 0 ? (
+          <TouchableOpacity onPress={jumpToNewPosts} style={styles.newPostsPill} accessibilityLabel="Show new posts">
+            <Text style={styles.newPostsText}>↑ New posts</Text>
+          </TouchableOpacity>
+        ) : null}
+
         {/* ── Posting progress ── */}
         {posting ? (
           <View style={[styles.postingBar, { backgroundColor: colors.surface, marginHorizontal: 12, marginTop: 6 }]}>
@@ -1462,6 +1479,8 @@ export default function FeedScreen() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const styles = StyleSheet.create({
+  newPostsPill: { alignSelf: 'center', marginTop: 8, backgroundColor: '#E91E8C', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  newPostsText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
   container: { flex: 1 },
   floatBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30, elevation: 30, paddingBottom: 14 },
   floatRow: { height: FLOAT_BAR_HEIGHT - 4, flexDirection: 'row', alignItems: 'center' },
