@@ -2,7 +2,7 @@
   "expo": {
     "name": "Apparently",
     "slug": "apparently-app-real-app",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "owner": "sharehost",
     "extra": {
       "eas": {
@@ -127,7 +127,8 @@
           "microphonePermission": "Apparently uses your microphone for voice notes, voice and video calls, and talking with friends in live posts and Spot rooms."
         }
       ],
-      "./plugins/withWebRTCProguard"
+      "./plugins/withWebRTCProguard",
+      "./plugins/withVoipCalls"
     ],
     "experiments": {
       "typedRoutes": true

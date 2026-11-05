@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import { File as ExpoFile } from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase } from '@/lib/supabase';
+import { clearVoipToken } from '@/lib/callkit';
 import { isAbortError, withAbortSignal } from '@/lib/abort';
 import { isLocalFileUri } from '@/lib/media';
 import { usernameProblem } from '@/constants/app';
@@ -560,6 +561,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         } catch (e) {
           logger.warn('Auth', 'Failed to clear push token on sign out', { e });
         }
+        if (Platform.OS === 'ios') await clearVoipToken(signingOutId);
       }
       // 'local' signs out this device only. The default ('global') also ends the
       // account's sessions on every other phone and browser.

@@ -37,6 +37,7 @@ import AppErrorBoundary from '@/components/AppErrorBoundary';
 import IncomingCallWatcher from '@/components/IncomingCallWatcher';
 import InAppToast from '@/components/InAppToast';
 import { callStillRinging, claimCall, declineCall, isCallUiActive, markCallNotificationRead, paramsFromPushData } from '@/lib/calls';
+import { startCallKit } from '@/lib/callkit';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/logger';
 
@@ -105,6 +106,30 @@ function RootLayoutNav() {
     });
     return () => { cancelled = true; unsubscribe?.(); };
   }, [isAuthenticated, router, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // iPhone: calls ring on the system call screen (CallKit), even when the app
+  // is closed or the phone is locked. Answering opens the call here.
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    const u: any = user;
+    const me = { id: u.id as string, name: (u.fullName || u.username || 'You') as string };
+    return startCallKit({
+      userId: me.id,
+      onAnswer: (data) => {
+        const params = paramsFromPushData(data, me);
+        claimCall(params.roomId);
+        markCallNotificationRead(data.notificationId);
+        dismissCallNotifications();
+        router.push({ pathname: '/call/[roomId]', params } as never);
+      },
+      onDecline: (data) => {
+        const params = paramsFromPushData(data, me);
+        claimCall(params.roomId);
+        markCallNotificationRead(data.notificationId);
+        declineCall(params.roomId, me.id, params.callerId);
+      },
+    });
+  }, [isAuthenticated, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;

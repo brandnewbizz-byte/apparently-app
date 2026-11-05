@@ -12,6 +12,7 @@ import {
   markCallNotificationRead, CALL_RING_MS,
 } from '@/lib/calls';
 import { callsAvailable } from '@/lib/webrtc';
+import { callKitHasRoom, callKitReady } from '@/lib/callkit';
 
 export default function IncomingCallWatcher() {
   const { notifications } = useNotifications();
@@ -29,6 +30,21 @@ export default function IncomingCallWatcher() {
       if (now - started > CALL_RING_MS) continue; // too old to answer
       const me = { id: user.id, name: (user as any)?.fullName || (user as any)?.username || 'You' };
       const params = answerParams(n, me);
+      if (callKitReady()) {
+        // iPhone: the system call screen rings for this call. Only if it
+        // hasn't shown up in a few seconds do we ring in the app instead.
+        const id = n.id;
+        setTimeout(() => {
+          if (callKitHasRoom(params.roomId) || !claimCall(params.roomId)) return;
+          if (Date.now() - started > CALL_RING_MS) return;
+          if (isCallUiActive()) { markCallNotificationRead(id); declineCall(params.roomId, me.id, params.callerId); return; }
+          router.push({
+            pathname: '/call/incoming' as any,
+            params: { ...params, notificationId: id, ringStartedAt: String(started) } as any,
+          } as any);
+        }, 4000);
+        continue;
+      }
       if (!claimCall(params.roomId)) continue; // already ringing (e.g. opened from the push)
       if (isCallUiActive()) {
         // Already on a call or another call is ringing: tell this caller we're busy.

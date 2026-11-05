@@ -14,6 +14,7 @@ import { playTone, stopTone } from '@/lib/callTones';
 import { claimCall, sendMissedCall, setCallUiActive } from '@/lib/calls';
 import { dismissCallNotifications } from '@/lib/notifications';
 import { callAudioAvailable } from '@/lib/callAudio';
+import { callKitEndRoom, onCallKitHangUp } from '@/lib/callkit';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -126,6 +127,7 @@ export default function CallScreen() {
   useEffect(() => {
     if (callState !== 'ended') return;
     setCallUiActive(false, `call:${roomId}`);
+    callKitEndRoom(roomId); // closes the iPhone's call screen too
     stopTone();
     Vibration.cancel();
     dismissCallNotifications();
@@ -143,6 +145,11 @@ export default function CallScreen() {
     endCall();
     setTimeout(() => { if (!closed.current) close(); }, 300);
   };
+  // Hanging up from the lock screen / Dynamic Island ends the call here too.
+  const hangUpRef = useRef(hangUp);
+  hangUpRef.current = hangUp;
+  useEffect(() => onCallKitHangUp(roomId, () => hangUpRef.current()), [roomId]);
+  useEffect(() => () => callKitEndRoom(roomId), [roomId]);
 
   const fmt = (secs: number) => `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
 
