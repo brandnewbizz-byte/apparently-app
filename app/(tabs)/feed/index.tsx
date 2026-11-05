@@ -7,11 +7,13 @@ import {
   MessageCircle, MoreHorizontal, Volume2, VolumeX, Camera, Users
 } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useIsFocused } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   Animated,
   Dimensions,
   FlatList,
@@ -955,7 +957,18 @@ export default function FeedScreen() {
   }, [filteredPosts, contentHeight, textHeights, floatBarSpace]);
   layoutRef.current = feedLayout;
 
-  const activePostId = filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null;
+  // Only a post you're actually looking at is "active" (plays, joins its live
+  // voice and counts you as a listener). Leaving the Feed tab, opening another
+  // screen or putting the app away drops you from the live right away.
+  const feedFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    return () => sub.remove();
+  }, []);
+  const activePostId = feedFocused && appActive
+    ? filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null
+    : null;
 
   // New posts from others: at the top of the feed they just appear; further
   // down you get a "New posts" pill instead, so the feed never jumps (Instagram).

@@ -97,7 +97,9 @@ export function answerParams(
 // ── Ringing state shared by the popup, push taps and the call screens ──
 
 const handledRooms = new Set<string>();
-let callUiActive = false;
+// Which screens are busy with a call right now (ringing or talking). Kept per
+// screen so one screen closing never frees the phone while another is on.
+const callUiOwners = new Set<string>();
 
 /** First caller wins: returns false if this call is already ringing / answered / declined. */
 export function claimCall(roomId: string): boolean {
@@ -107,8 +109,10 @@ export function claimCall(roomId: string): boolean {
 }
 
 /** The incoming-call screen and the call screen mark themselves while open. */
-export function setCallUiActive(on: boolean) { callUiActive = on; }
-export function isCallUiActive() { return callUiActive; }
+export function setCallUiActive(on: boolean, owner = 'default') {
+  if (on) callUiOwners.add(owner); else callUiOwners.delete(owner);
+}
+export function isCallUiActive() { return callUiOwners.size > 0; }
 
 /** Mark a call notification as handled so it stops ringing everywhere. */
 export async function markCallNotificationRead(notificationId?: string | null): Promise<void> {

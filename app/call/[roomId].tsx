@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Vibration, Platform, Image,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Volume2, VolumeX, User, Video, VideoOff, SwitchCamera,
@@ -77,10 +77,10 @@ export default function CallScreen() {
 
   // While this screen is open other calls get "busy", and the call's push is cleared.
   useEffect(() => {
-    setCallUiActive(true);
+    setCallUiActive(true, `call:${roomId}`);
     claimCall(roomId);
     if (!isOutgoing) dismissCallNotifications();
-    return () => setCallUiActive(false);
+    return () => setCallUiActive(false, `call:${roomId}`);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nobody picked up: leave them a "Missed call".
@@ -94,6 +94,8 @@ export default function CallScreen() {
       video: isVideo,
     });
   }, [isOutgoing, callState, callError, currentUserId, currentUserName, targetId, isVideo, user]);
+
+  const closed = useRef(false);
 
   // Ring animation while waiting for the other person
   const ringAnim = useRef(new Animated.Value(1)).current;
@@ -111,14 +113,35 @@ export default function CallScreen() {
   }, [waiting, ringAnim]);
 
   const close = () => {
+    closed.current = true;
     Vibration.cancel();
     if (router.canGoBack()) router.back();
     else router.replace('/inbox' as never);
   };
 
+  // Call over: free the phone for the next call right away (no "busy" while
+  // the summary shows), then close the summary by itself after 2 seconds.
+  const focused = useIsFocused();
+  const [closeDue, setCloseDue] = useState(false);
+  useEffect(() => {
+    if (callState !== 'ended') return;
+    setCallUiActive(false, `call:${roomId}`);
+    stopTone();
+    Vibration.cancel();
+    dismissCallNotifications();
+    const t = setTimeout(() => setCloseDue(true), 2000);
+    return () => clearTimeout(t);
+  }, [callState]);
+  useEffect(() => {
+    // If a new call is ringing on top, wait until we're back on this screen.
+    if (!closeDue || !focused || closed.current) return;
+    closed.current = true;
+    close();
+  }, [closeDue, focused]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const hangUp = () => {
     endCall();
-    setTimeout(close, 300);
+    setTimeout(() => { if (!closed.current) close(); }, 300);
   };
 
   const fmt = (secs: number) => `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;

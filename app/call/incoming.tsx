@@ -60,7 +60,7 @@ export default function IncomingCallScreen() {
 
   // Ring until answered, declined, the caller hangs up or time runs out.
   useEffect(() => {
-    setCallUiActive(true);
+    setCallUiActive(true, `ring:${roomId}`);
     // The phone's own ringtone when we can; otherwise our built-in one.
     if (!ringStart()) playTone('ringtone');
     dismissCallNotifications();
@@ -80,7 +80,7 @@ export default function IncomingCallScreen() {
       clearTimeout(t);
       ringStop();
       stopTone();
-      setCallUiActive(false);
+      setCallUiActive(false, `ring:${roomId}`);
       if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
