@@ -32,6 +32,8 @@ export interface CallConfig {
   targetPeerId: string;
   targetPeerName: string;
   video?: boolean;
+  /** Answered on the iPhone's own call screen (CallKit handles the audio session). */
+  systemCall?: boolean;
 }
 
 const JOIN_WAIT_MS = 25_000; // callee gives up if the caller never sends an offer
@@ -320,7 +322,7 @@ export function useWebRTCCall() {
   const acceptCall = useCallback(async (cfg: CallConfig) => {
     reset(cfg);
     setCallState('connecting');
-    if (callAudioAvailable()) callStart({ video: !!cfg.video, outgoing: false });
+    if (callAudioAvailable()) callStart({ video: !!cfg.video, outgoing: false, systemCall: !!cfg.systemCall });
     try {
       await connectSignaling(cfg);
       await createPeer(cfg);

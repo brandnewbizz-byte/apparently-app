@@ -60,9 +60,15 @@ function maybeStop() {
 
 // ── Calls ──
 
-/** Start call audio. The caller hears ringback until `callConnected()`. */
-export function callStart(opts: { video: boolean; outgoing: boolean }) {
+/**
+ * Start call audio. The caller hears ringback until `callConnected()`.
+ * `systemCall`: answered on the iPhone's own call screen (CallKit), which
+ * sets up and turns on the call's audio itself — starting it here too can
+ * leave the call silent, so only the speaker switch is used then.
+ */
+export function callStart(opts: { video: boolean; outgoing: boolean; systemCall?: boolean }) {
   callOn = true;
+  if (opts.systemCall && Platform.OS === 'ios') return;
   started = false; // a call always takes over the audio setup
   ensureStarted(opts.video ? 'video' : 'audio', opts.outgoing ? '_DEFAULT_' : '');
   safe((m) => m.setKeepScreenOn(true));

@@ -35,6 +35,7 @@ import { OrdersProvider } from '@/contexts/OrdersContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import AppErrorBoundary from '@/components/AppErrorBoundary';
 import IncomingCallWatcher from '@/components/IncomingCallWatcher';
+import { startNativeCalls } from '@/lib/nativeCalls';
 import InAppToast from '@/components/InAppToast';
 import { callStillRinging, claimCall, declineCall, isCallUiActive, markCallNotificationRead, paramsFromPushData } from '@/lib/calls';
 import { trpc, trpcClient } from '@/lib/trpc';
@@ -116,6 +117,20 @@ function RootLayoutNav() {
     });
     return () => { cancelled = true; };
   }, [isAuthenticated, user?.id]);
+
+  // Calls answered / declined outside the app (iPhone's call screen, Android's
+  // incoming-call notification). Starts after the first navigation so a call
+  // answered from the lock screen isn't replaced by the home screen.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !onboardingCompleted || !user?.id) return;
+    const u: any = user;
+    const me = { id: u.id as string, name: (u.fullName || u.username || 'You') as string };
+    let stop = () => {};
+    const t = setTimeout(() => {
+      stop = startNativeCalls({ me, navigate: (href) => router.push(href as never) });
+    }, 400);
+    return () => { clearTimeout(t); stop(); };
+  }, [isLoading, isAuthenticated, onboardingCompleted, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isLoading) {
