@@ -228,6 +228,25 @@ export async function savePushToken(userId: string, token: string): Promise<bool
 }
 
 /**
+ * iPhone: save (or clear) this device's VoIP push token, so calls ring on the
+ * system call screen even when the app is closed or the phone is locked.
+ * Kept in its own update so a database without the column (before migration
+ * 036) never breaks the regular push token.
+ */
+export async function saveVoipToken(userId: string, token: string | null): Promise<void> {
+  if (!userId) return;
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ voip_token: token || null, voip_token_updated_at: token ? new Date().toISOString() : null })
+      .eq('id', userId);
+    if (error) logger.warn(TAG, 'Failed to save VoIP token', { message: error.message });
+  } catch (e) {
+    logger.warn(TAG, 'saveVoipToken exception', { e });
+  }
+}
+
+/**
  * Clear the push token on sign-out so the server stops sending to this device.
  */
 export async function clearPushToken(userId: string): Promise<void> {
@@ -239,6 +258,7 @@ export async function clearPushToken(userId: string): Promise<void> {
   } catch (e) {
     logger.warn(TAG, 'clearPushToken exception', { e });
   }
+  if (Platform.OS === 'ios') await saveVoipToken(userId, null);
 }
 
 /**

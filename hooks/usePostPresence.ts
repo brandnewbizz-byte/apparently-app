@@ -87,6 +87,8 @@ export function usePostPresence(options: UsePostPresenceOptions): UsePostPresenc
 
     return () => {
       trackedRef.current = false;
+      // Leave the listener list right away, then close the channel.
+      channel.untrack().catch(() => {});
       supabase.removeChannel(channel);
       channelRef.current = null;
       setIsConnected(false);

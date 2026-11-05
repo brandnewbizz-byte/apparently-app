@@ -97,7 +97,8 @@ export function answerParams(
 // ── Ringing state shared by the popup, push taps and the call screens ──
 
 const handledRooms = new Set<string>();
-let callUiActive = false;
+/** Screens currently ringing or on a live call (keyed so one closing never clears another). */
+const callUiOwners = new Set<string>();
 
 /** First caller wins: returns false if this call is already ringing / answered / declined. */
 export function claimCall(roomId: string): boolean {
@@ -106,9 +107,16 @@ export function claimCall(roomId: string): boolean {
   return true;
 }
 
-/** The incoming-call screen and the call screen mark themselves while open. */
-export function setCallUiActive(on: boolean) { callUiActive = on; }
-export function isCallUiActive() { return callUiActive; }
+/**
+ * The incoming-call screen and the call screen mark themselves while they are
+ * ringing or on a live call. Each passes its own key, so a screen that closes
+ * (or a call that just ended) never clears the mark of a newer call.
+ */
+export function setCallUiActive(on: boolean, key = 'default') {
+  if (on) callUiOwners.add(key);
+  else callUiOwners.delete(key);
+}
+export function isCallUiActive() { return callUiOwners.size > 0; }
 
 /** Mark a call notification as handled so it stops ringing everywhere. */
 export async function markCallNotificationRead(notificationId?: string | null): Promise<void> {
@@ -149,4 +157,48 @@ export async function sendMissedCall(opts: { me: { id: string; name: string; ava
       created_at: new Date().toISOString(),
     });
   } catch {}
+}
+
+// ── The in-app ringing screen, so a tap on the system call screen or the
+//    notification can answer it instead of opening a second one ──
+
+const incomingScreens = new Map<string, () => void>();
+
+/** The incoming-call screen registers itself while it rings. */
+export function registerIncomingScreen(roomId: string, answer: () => void): () => void {
+  if (!roomId) return () => {};
+  incomingScreens.set(roomId, answer);
+  return () => { if (incomingScreens.get(roomId) === answer) incomingScreens.delete(roomId); };
+}
+export function hasIncomingScreen(roomId: string): boolean { return incomingScreens.has(roomId); }
+/** Answer the call on its ringing screen; false if that screen isn't open. */
+export function answerIncomingScreen(roomId: string): boolean {
+  const fn = incomingScreens.get(roomId);
+  if (!fn) return false;
+  fn();
+  return true;
+}
+
+// ── Hang up / mute from the phone's own call screen (iPhone CallKit) ──
+
+export type NativeCallAction = { type: 'hangup' } | { type: 'mute'; muted: boolean };
+const callActionListeners = new Map<string, Set<(a: NativeCallAction) => void>>();
+export function onNativeCallAction(roomId: string, fn: (a: NativeCallAction) => void): () => void {
+  const set = callActionListeners.get(roomId) ?? new Set();
+  set.add(fn);
+  callActionListeners.set(roomId, set);
+  return () => { set.delete(fn); if (!set.size) callActionListeners.delete(roomId); };
+}
+export function emitNativeCallAction(roomId: string, a: NativeCallAction) {
+  callActionListeners.get(roomId)?.forEach((fn) => { try { fn(a); } catch {} });
+}
+
+/**
+ * The caller hung up (or gave up) before the other person answered: stop it
+ * ringing on their phone — their lock screen / notification too, not just the
+ * app. Needs migration 036 (cancel_call); older databases just let it time out.
+ */
+export async function cancelRing(roomId?: string): Promise<void> {
+  if (!roomId) return;
+  try { await supabase.rpc('cancel_call', { p_room_id: roomId }); } catch {}
 }

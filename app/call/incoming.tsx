@@ -13,7 +13,9 @@ import * as Haptics from 'expo-haptics';
 import { Phone, PhoneOff, Video, User } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { playTone, stopTone } from '@/lib/callTones';
-import { CALL_RING_MS, declineCall, markCallNotificationRead, setCallUiActive } from '@/lib/calls';
+import { CALL_RING_MS, declineCall, markCallNotificationRead, registerIncomingScreen, setCallUiActive } from '@/lib/calls';
+import { dismissNativeIncoming, holdCallMode, reportNativeCallEnded } from '@/lib/nativeCalls';
+import { useAuth } from '@/contexts/AuthContext';
 import { dismissCallNotifications } from '@/lib/notifications';
 import { ringStart, ringStop } from '@/lib/callAudio';
 
@@ -27,7 +29,8 @@ export default function IncomingCallScreen() {
   const roomId = p.roomId || '';
   const callerName = p.callerName || 'Someone';
   const callerId = p.callerId || '';
-  const myId = p.currentUserId || '';
+  const { user } = useAuth();
+  const myId = p.currentUserId || user?.id || '';
   const video = p.video === '1';
   const avatar = p.peerAvatar || '';
   const createdAt = Number(p.ringStartedAt) || Date.now();
@@ -46,7 +49,7 @@ export default function IncomingCallScreen() {
     markCallNotificationRead(p.notificationId);
     if (how === 'answer') {
       const { ringStartedAt, notificationId, ...params } = p;
-      router.replace({ pathname: '/call/[roomId]' as any, params: params as any } as any);
+      router.replace({ pathname: '/call/[roomId]' as any, params: { ...params, currentUserId: myId } as any } as any);
       return;
     }
     if (how === 'decline') {
@@ -59,8 +62,17 @@ export default function IncomingCallScreen() {
   };
 
   // Ring until answered, declined, the caller hangs up or time runs out.
+  const uiKey = `incoming:${roomId}`;
+  const finishRef = useRef(finish);
+  useEffect(() => { finishRef.current = finish; });
   useEffect(() => {
-    setCallUiActive(true);
+    setCallUiActive(true, uiKey);
+    // This screen rings now: stop the phone's own incoming-call ringing for it,
+    // and let Answer on the system screen / notification answer here.
+    dismissNativeIncoming(roomId);
+    reportNativeCallEnded(roomId, 'answeredElsewhere');
+    const unregister = registerIncomingScreen(roomId, () => finishRef.current('answer'));
+    const releaseCallMode = holdCallMode(uiKey);
     // The phone's own ringtone when we can; otherwise our built-in one.
     if (!ringStart()) playTone('ringtone');
     dismissCallNotifications();
@@ -80,7 +92,9 @@ export default function IncomingCallScreen() {
       clearTimeout(t);
       ringStop();
       stopTone();
-      setCallUiActive(false);
+      setCallUiActive(false, uiKey);
+      unregister();
+      releaseCallMode();
       if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ApparentlyCallsModule"],
+    "appDelegateSubscribers": ["CallsAppDelegateSubscriber"]
+  },
+  "android": {
+    "modules": ["app.apparently.calls.ApparentlyCallsModule"]
+  }
+}

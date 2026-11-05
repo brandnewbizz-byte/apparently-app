@@ -176,6 +176,7 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
   // ── Signalling ──
   useEffect(() => {
     if (!enabled || !available || !me) return;
+    const incoming = inPeers.current;
     const off = room.on('rtc', async (m: any) => {
       const myId = meRef.current?.id;
       if (!m?.from || m.from === myId) return;
@@ -218,6 +219,10 @@ export function useLiveMesh(room: MeshRoom, me: { id: string; name: string } | n
     return () => {
       off();
       send({ t: 'bye' });
+      // Leaving (or turning off) the session: stop hearing everyone right away.
+      Object.keys(incoming).forEach((uid) => closePeer(incoming, uid));
+      setRemotes({});
+      syncAudio();
     };
   }, [enabled, available, me?.id, room]); // eslint-disable-line react-hooks/exhaustive-deps
 

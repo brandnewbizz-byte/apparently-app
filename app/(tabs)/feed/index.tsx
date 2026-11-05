@@ -30,6 +30,7 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -268,6 +269,7 @@ function PostCard({
   isSaved: isSavedProp,
   height,
   isActive,
+  liveEnabled = true,
   muted,
   onToggleMute,
   topOffset = 0,
@@ -287,6 +289,8 @@ function PostCard({
   isSaved?: boolean;
   height?: number;
   isActive?: boolean;
+  /** The Feeds page is on screen: only then does the post join its live session. */
+  liveEnabled?: boolean;
   muted: boolean;
   onToggleMute: () => void;
   /** Space taken by the floating top bar (keeps overlays below it). */
@@ -538,8 +542,9 @@ function PostCard({
           </TouchableOpacity>
           ) : null}
 
-          {/* Live voice layer — only the active post holds a connection */}
-          {isActive ? (
+          {/* Live voice layer — only the active post holds a connection, and only
+              while the Feeds page is on screen (leaving it disconnects you). */}
+          {isActive && liveEnabled ? (
             <PostLiveLayer
               postId={post.id}
               userId={currentUser?.id ?? ''}
@@ -645,6 +650,22 @@ export default function FeedScreen() {
       return () => setStatusBarStyle(isDark ? 'light' : 'dark');
     }, [isDark]),
   );
+  // Live sessions on the feed only run while you're looking at it: leaving the
+  // Feeds page (another tab, a pushed screen) or sending the app to the
+  // background stops their audio and takes you off their listener count.
+  const [feedFocused, setFeedFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFeedFocused(true);
+      return () => setFeedFocused(false);
+    }, []),
+  );
+  const [appForeground, setAppForeground] = useState(AppState.currentState !== 'background');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppForeground(s !== 'background'));
+    return () => sub.remove();
+  }, []);
+  const liveEnabled = feedFocused && appForeground;
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
   const { user: authUser } = useAuth();
   const userAvatar = authUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop';
@@ -1299,6 +1320,7 @@ export default function FeedScreen() {
               colors={colors}
               height={item.media ? contentHeight || undefined : undefined}
               isActive={item.id === activePostId}
+              liveEnabled={liveEnabled}
               muted={muted}
               onToggleMute={toggleMute}
               topOffset={item.media || index === 0 || filteredPosts[index - 1]?.media ? floatBarSpace : 0}

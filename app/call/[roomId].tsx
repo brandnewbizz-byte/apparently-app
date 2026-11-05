@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Vibration, Platform, Image,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
+import { CommonActions } from 'expo-router/react-navigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PhoneOff, Mic, MicOff, Volume2, VolumeX, User, Video, VideoOff, SwitchCamera,
@@ -11,9 +12,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWebRTCCall, type CallConfig } from '@/hooks/useWebRTCCall';
 import CallVideo from '@/components/CallVideo';
 import { playTone, stopTone } from '@/lib/callTones';
-import { claimCall, sendMissedCall, setCallUiActive } from '@/lib/calls';
+import { cancelRing, claimCall, onNativeCallAction, sendMissedCall, setCallUiActive } from '@/lib/calls';
+import { answeredOnSystemScreen, holdCallMode, reportNativeCallEnded, setNativeCallMuted } from '@/lib/nativeCalls';
 import { dismissCallNotifications } from '@/lib/notifications';
 import { callAudioAvailable } from '@/lib/callAudio';
+
+/** How long the "Call ended" summary stays before closing by itself. */
+const ENDED_SCREEN_MS = 2000;
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -27,8 +32,12 @@ export default function CallScreen() {
     currentUserName: string;
     video: string;
     peerAvatar: string;
+    /** '1' when answered on the iPhone's own call screen (CallKit). */
+    systemCall: string;
   }>();
   const router = useRouter();
+  const navigation = useNavigation();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
 
@@ -40,6 +49,7 @@ export default function CallScreen() {
   const isOutgoing = params.isOutgoing === '1' || params.isOutgoing === 'true';
   const isVideo = params.video === '1';
   const peerAvatar = params.peerAvatar || '';
+  const systemCall = params.systemCall === '1' || answeredOnSystemScreen(roomId);
   const currentUserId = params.currentUserId || user?.id || '';
   const currentUserName = params.currentUserName || (user as any)?.fullName || (user as any)?.username || 'You';
 
@@ -50,7 +60,8 @@ export default function CallScreen() {
     targetPeerId: isOutgoing ? targetId : callerId,
     targetPeerName: isOutgoing ? targetName : callerName,
     video: isVideo,
-  }), [roomId, currentUserId, currentUserName, targetId, callerId, targetName, callerName, isOutgoing, isVideo]);
+    systemCall,
+  }), [roomId, currentUserId, currentUserName, targetId, callerId, targetName, callerName, isOutgoing, isVideo, systemCall]);
 
   const {
     callState, callError, duration, isMuted, isSpeakerOn, isCameraOff, localStream, remoteStream,
@@ -75,13 +86,43 @@ export default function CallScreen() {
   }, [isOutgoing, callState]);
   useEffect(() => () => stopTone(), []);
 
-  // While this screen is open other calls get "busy", and the call's push is cleared.
+  // While the call is ringing or live, other calls get "busy", and the call's
+  // push is cleared. The moment it ends the line is free again, even while the
+  // "Call ended" summary is still on screen, so a call back rings straight away.
+  const uiKey = `call:${roomId}`;
   useEffect(() => {
-    setCallUiActive(true);
+    setCallUiActive(true, uiKey);
     claimCall(roomId);
     if (!isOutgoing) dismissCallNotifications();
-    return () => setCallUiActive(false);
+    return () => setCallUiActive(false, uiKey);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (callState === 'ended') setCallUiActive(false, uiKey);
+  }, [callState, uiKey]);
+
+  // Android: the call shows over the lock screen while it's on.
+  useEffect(() => holdCallMode(uiKey), [uiKey]);
+
+  // The call is over: take it off the phone's own call screen too, and if the
+  // other person never picked up, stop it ringing on their phone.
+  const wasActive = useRef(false);
+  useEffect(() => {
+    if (callState === 'active') wasActive.current = true;
+    if (callState !== 'ended') return;
+    reportNativeCallEnded(roomId, 'ended');
+    if (isOutgoing && !wasActive.current) cancelRing(roomId);
+  }, [callState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hang up / mute on the iPhone's own call screen (lock screen, Dynamic Island).
+  const muteRef = useRef(isMuted);
+  useEffect(() => { muteRef.current = isMuted; }, [isMuted]);
+  useEffect(() => onNativeCallAction(roomId, (a) => {
+    if (a.type === 'hangup') endCall();
+    else if (a.type === 'mute' && a.muted !== muteRef.current) toggleMute();
+  }), [roomId, endCall, toggleMute]);
+  useEffect(() => {
+    if (systemCall) setNativeCallMuted(roomId, isMuted);
+  }, [isMuted, systemCall, roomId]);
 
   // Nobody picked up: leave them a "Missed call".
   const missedSent = useRef(false);
@@ -110,8 +151,21 @@ export default function CallScreen() {
     return () => pulse.stop();
   }, [waiting, ringAnim]);
 
+  const closed = useRef(false);
   const close = () => {
+    if (closed.current) return;
+    closed.current = true;
     Vibration.cancel();
+    // Another call's screen may have opened on top of this one (a call back):
+    // then just take this finished call out of the history, under it.
+    if (!navigation.isFocused()) {
+      (navigation as any).dispatch((state: any) => {
+        const routes = state.routes.filter((r: any) => r.key !== route.key);
+        if (routes.length === state.routes.length || routes.length === 0) return CommonActions.goBack();
+        return CommonActions.reset({ ...state, routes, index: routes.length - 1 });
+      });
+      return;
+    }
     if (router.canGoBack()) router.back();
     else router.replace('/inbox' as never);
   };
@@ -120,6 +174,13 @@ export default function CallScreen() {
     endCall();
     setTimeout(close, 300);
   };
+
+  // The "Call ended" summary closes by itself after 2 seconds.
+  useEffect(() => {
+    if (callState !== 'ended') return;
+    const t = setTimeout(close, ENDED_SCREEN_MS);
+    return () => clearTimeout(t);
+  }, [callState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fmt = (secs: number) => `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
 
