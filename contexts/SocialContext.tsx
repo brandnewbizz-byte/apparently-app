@@ -10,7 +10,7 @@ import { DatabaseService } from '@/lib/database';
 import * as localApi from '@/lib/api';
 import { isLocalFileUri } from '@/lib/media';
 import { sanitizeCaption, generateUsername } from '@/lib/sanitize';
-import { persistableImageUri, uploadVideoToStorage } from '@/lib/storage';
+import { isWebLocalUri, persistableImageUri, uploadVideoToStorage } from '@/lib/storage';
 import { queueAction, dequeueAction } from '@/lib/offlineQueue';
 import { useOfflineRetry } from '@/hooks/useOfflineRetry';
 import { supabase } from '@/lib/supabase';
@@ -944,7 +944,9 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
     // a black card (this is what happened to video posts before).
     let mediaUrl: string | undefined = imageUrl;
     let coverUrl: string | undefined;
-    if (imageUrl && isLocalFileUri(imageUrl)) {
+    // On the web a picked photo/video is a blob:/data: link that only lives in
+    // this browser tab, so it has to be uploaded too.
+    if (imageUrl && (isLocalFileUri(imageUrl) || isWebLocalUri(imageUrl))) {
       if (isVideo) {
         // Cover frame (1 second into the posted part), made and uploaded alongside the video.
         const coverJob = makeVideoCover(withClip(imageUrl, options?.clip))
@@ -952,7 +954,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
           .catch(() => undefined);
         const hosted = await uploadVideoToStorage(imageUrl, 'user-media', `posts/${userId}`);
         coverUrl = (await coverJob) || undefined;
-        if (!hosted || isLocalFileUri(hosted)) {
+        if (!hosted || isLocalFileUri(hosted) || isWebLocalUri(hosted)) {
           logger.warn('SocialContext', 'Video upload failed — post not created');
           return null;
         }
@@ -960,7 +962,7 @@ export const [SocialProvider, useSocial] = createContextHook<SocialState>(() => 
         mediaUrl = withClip(hosted, options?.clip);
       } else {
         mediaUrl = await persistableImageUri(imageUrl, 'user-media', `posts/${userId}`);
-        if (!mediaUrl) {
+        if (!mediaUrl || mediaUrl.startsWith('blob:')) {
           logger.warn('SocialContext', 'Image upload failed — post not created');
           return null;
         }

@@ -41,6 +41,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCreatePost } from '@/contexts/CreatePostContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useBundles } from '@/contexts/BundleContext';
 import { useSkills } from '@/contexts/SkillContext';
@@ -124,6 +125,7 @@ function Loading({ colors }: { colors: any }) {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { openCreate } = useCreatePost();
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const { myBundles } = useBundles();
@@ -316,7 +318,7 @@ export default function ProfileScreen() {
             title="Share your first post"
             text="Photos, videos and thoughts you post will show up here."
             cta="Create a post"
-            onCta={() => router.push('/(tabs)/create' as any)}
+            onCta={openCreate}
           />
         );
       }

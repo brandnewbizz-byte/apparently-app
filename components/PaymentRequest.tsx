@@ -4,7 +4,7 @@ import { DollarSign, CheckCircle2, X } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   usePaymentRequest, payPaymentRequest, cancelPaymentRequest, confirmPaymentRequest, createPaymentRequest,
-  getPayoutStatus, startPayoutSetup, money, sellerGets, buyerTotal, buyerServiceFee, BUYER_FEE_PERCENT, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT, isVerifying,
+  getPayoutStatus, startPayoutSetup, money, sellerGets, buyerTotal, buyerServiceFee, BUYER_FEE_PERCENT, PaymentsError, PLATFORM_FEE_PERCENT, MIN_PAYMENT, MAX_PAYMENT, MAX_OVER_LISTING, isVerifying,
 } from '@/lib/payments';
 
 const say = (title: string, msg: string) => {
@@ -123,7 +123,10 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
   }, [visible]);
 
   const value = Number(amount.replace(/[^0-9.]/g, ''));
-  const valid = value >= MIN_PAYMENT && value <= MAX_PAYMENT && title.trim().length > 0;
+  // Requests for a listing can't be far above its price (stops typos like $125 → $12,525).
+  const listed = prefill?.itemId && prefill?.amount ? Number(prefill.amount) : 0;
+  const tooHigh = listed > 0 && value > listed * MAX_OVER_LISTING;
+  const valid = value >= MIN_PAYMENT && value <= MAX_PAYMENT && title.trim().length > 0 && !tooHigh;
   const cents = Math.round((value || 0) * 100);
 
   const setup = async () => {
@@ -176,9 +179,14 @@ export function RequestPaymentSheet({ visible, onClose, buyerId, buyerName, onSe
                 <Text style={[s.dollar, { color: colors.text }]}>$</Text>
                 <TextInput
                   style={[s.amountInput, { color: colors.text }]} value={amount} onChangeText={setAmount}
-                  keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textTertiary} autoFocus testID="request-amount"
+                  keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textTertiary} autoFocus selectTextOnFocus testID="request-amount"
                 />
               </View>
+              {tooHigh ? (
+                <Text style={[s.note, { color: '#DC2626' }]}>
+                  That’s much more than the listing price ({money(Math.round(listed * 100))}). Check the amount.
+                </Text>
+              ) : null}
               <TextInput
                 style={[s.input, { color: colors.text, borderColor: colors.border }]} value={title} onChangeText={setTitle}
                 placeholder="What it’s for (e.g. Date night bundle)" placeholderTextColor={colors.textTertiary} maxLength={120} testID="request-title"

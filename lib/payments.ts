@@ -17,6 +17,8 @@ export const buyerServiceFee = (cents: number) => Math.round(cents * BUYER_FEE_P
 export const buyerTotal = (cents: number) => cents + buyerServiceFee(cents);
 export const MIN_PAYMENT = 1;
 export const MAX_PAYMENT = 20000;
+/** A request for a listing may be at most this many times the listing's price (server checks too). */
+export const MAX_OVER_LISTING = 3;
 
 export type PaymentStatus = 'requested' | 'paid' | 'canceled';
 export interface PaymentRequest {
@@ -48,6 +50,7 @@ const MESSAGES: Record<string, string> = {
   already_canceled: 'This request was canceled.',
   only_buyer_pays: 'Only the person it was sent to can pay it.',
   not_found: 'We couldn’t find this payment request.',
+  amount_mismatch: 'This amount is much higher than the listing’s price, so it can’t be paid. Ask the seller to send a new request.',
 };
 
 export class PaymentsError extends Error {

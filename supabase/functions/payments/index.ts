@@ -83,6 +83,27 @@ async function syncAccount(userId: string, accountId: string) {
   return { ...row, needs_info: due.length > 0 };
 }
 
+/** A request may ask for at most this many times its listing's price (add-ons, extra people). */
+const MAX_OVER_LISTING = 3;
+
+/** The listing's price in cents, when the request was made for a bundle or skill deal. */
+async function listingPriceCents(itemType: unknown, itemId: unknown): Promise<number | null> {
+  if (typeof itemId !== 'string' || !itemId) return null;
+  try {
+    if (itemType === 'bundle') {
+      const { data } = await admin.from('bundles').select('bundle_price').eq('id', itemId).maybeSingle();
+      const v = Number(data?.bundle_price);
+      return v > 0 ? Math.round(v * 100) : null;
+    }
+    if (itemType === 'skill' || itemType === 'deal') {
+      const { data } = await admin.from('skill_deals').select('price').eq('id', itemId).maybeSingle();
+      const v = Number(data?.price);
+      return v > 0 ? Math.round(v * 100) : null;
+    }
+  } catch { /* no check if the listing can't be read */ }
+  return null;
+}
+
 /** Put a "Paid" receipt into the buyer↔seller chat, as a message from the buyer. */
 async function postPaidMessage(pr: Record<string, any>, amount: string) {
   const [pa, pb] = [pr.buyer_id, pr.seller_id].sort();
@@ -217,6 +238,13 @@ Deno.serve(async (req) => {
       }
       const fresh = await syncAccount(pr.seller_id, sellerAcct);
       if (!fresh.charges_enabled) return json({ error: 'seller_not_ready' }, 409);
+
+      // Safety check: a request made for a listing can't charge far more than
+      // the listing's price (a $125 listing once came out as $12,525).
+      const listed = await listingPriceCents(pr.item_type, pr.item_id);
+      if (listed && pr.amount_cents > listed * MAX_OVER_LISTING) {
+        return json({ error: 'amount_mismatch', listed_cents: listed, amount_cents: pr.amount_cents }, 409);
+      }
 
       const serviceFee = Math.round(pr.amount_cents * BUYER_FEE_PERCENT / 100);
       const fee = Math.round(pr.amount_cents * FEE_PERCENT / 100) + serviceFee;
