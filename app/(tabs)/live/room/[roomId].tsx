@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator, Alert, AppState, Image, Modal, PanResponder, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -41,7 +41,24 @@ const tap = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Li
 };
 const nearCenter = () => 0.35 + Math.random() * 0.3;
 
+/**
+ * You're only in a Spot room while you're actually on its screen. Switching
+ * tabs, opening another screen or putting the app away leaves the room: you
+ * drop off the people list, your mic and camera turn off, and you stop
+ * hearing the room. Coming back joins again.
+ */
 export default function SpotRoomScreen() {
+  const focused = useIsFocused();
+  const [inBackground, setInBackground] = useState(AppState.currentState === 'background');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => setInBackground(st === 'background'));
+    return () => sub.remove();
+  }, []);
+  if (!focused || inBackground) return <View style={{ flex: 1, backgroundColor: '#0A0A14' }} />;
+  return <SpotRoomInner />;
+}
+
+function SpotRoomInner() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
