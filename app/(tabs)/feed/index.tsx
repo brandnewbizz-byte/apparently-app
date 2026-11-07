@@ -6,7 +6,7 @@ import {
   ShoppingBag, Home, Repeat, UserPlus, Search, Package,
   MessageCircle, MoreHorizontal, Volume2, VolumeX, Camera, Users
 } from 'lucide-react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useIsFocused } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -637,6 +637,16 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { openCreate } = useCreatePost();
+  // /feed?compose=1 (the /create link, Profile's "Create a post") opens the composer.
+  const { compose } = useLocalSearchParams<{ compose?: string }>();
+  useEffect(() => {
+    if (compose !== '1') return;
+    const t = setTimeout(() => {
+      openCreate();
+      router.setParams({ compose: undefined } as any);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [compose]); // eslint-disable-line react-hooks/exhaustive-deps
   const { colors, isDark } = useTheme();
   const floatBarSpace = insets.top + FLOAT_BAR_HEIGHT;
   // Light status-bar icons while the feed is showing (they sit on the dark

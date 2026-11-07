@@ -1,16 +1,7 @@
-import { useEffect } from 'react';
-import { useRouter } from 'expo-router';
-import { useCreatePost } from '@/contexts/CreatePostContext';
+import { Redirect } from 'expo-router';
 
-// The "create post" route. The tab bar's centre button opens the composer
-// directly; anything that lands on this address (a link, the web app) opens
-// the same composer over the Feed instead of showing a blank page.
+// The "create post" address (links, the web app): go to the Feed and open
+// the composer there, instead of showing a blank page.
 export default function CreateScreen() {
-  const router = useRouter();
-  const { openCreate } = useCreatePost();
-  useEffect(() => {
-    openCreate();
-    router.replace('/(tabs)/feed' as any);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  return null;
+  return <Redirect href={'/(tabs)/feed?compose=1' as any} />;
 }
