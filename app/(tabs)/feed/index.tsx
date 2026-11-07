@@ -8,6 +8,7 @@ import {
 } from 'lucide-react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useIsFocused } from 'expo-router';
+import FeedGrid from '@/components/feed/FeedGrid';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,6 +33,7 @@ import {
   Platform,
   Pressable,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -649,13 +651,17 @@ export default function FeedScreen() {
   }, [compose]); // eslint-disable-line react-hooks/exhaustive-deps
   const { colors, isDark } = useTheme();
   const floatBarSpace = insets.top + FLOAT_BAR_HEIGHT;
+  // Pinterest-style home: a grid of posts; tapping one opens the full-screen feed at it.
+  const [gridMode, setGridMode] = useState(true);
+  const [openIndex, setOpenIndex] = useState(0);
+  const gridRef = useRef<any>(null);
   // Light status-bar icons while the feed is showing (they sit on the dark
   // top fade); restore the theme's style when leaving the tab.
   useFocusEffect(
     useCallback(() => {
-      setStatusBarStyle('light');
+      setStatusBarStyle(gridMode ? (isDark ? 'light' : 'dark') : 'light');
       return () => setStatusBarStyle(isDark ? 'light' : 'dark');
-    }, [isDark]),
+    }, [isDark, gridMode]),
   );
   const { handleScroll: handleTabBarScroll, hideTabBar, showTabBar } = useTabBar();
   const { user: authUser } = useAuth();
@@ -976,7 +982,7 @@ export default function FeedScreen() {
     const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
     return () => sub.remove();
   }, []);
-  const activePostId = feedFocused && appActive
+  const activePostId = feedFocused && appActive && !gridMode
     ? filteredPosts[Math.min(activeIndex, Math.max(0, filteredPosts.length - 1))]?.id ?? null
     : null;
 
@@ -988,8 +994,27 @@ export default function FeedScreen() {
   const jumpToNewPosts = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    gridRef.current?.scrollTo({ y: 0, animated: true });
     showNewPosts();
   }, [showNewPosts]);
+
+  // Grid ⇄ full-screen post
+  const openFromGrid = useCallback((index: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    activeIndexRef.current = index;
+    setActiveIndex(index);
+    setOpenIndex(index);
+    setGridMode(false);
+  }, []);
+  const backToGrid = useCallback(() => {
+    setGridMode(true);
+    showTabBar();
+  }, [showTabBar]);
+  useEffect(() => {
+    if (gridMode) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { backToGrid(); return true; });
+    return () => sub.remove();
+  }, [gridMode, backToGrid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1178,13 +1203,20 @@ export default function FeedScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Floating top bar — stories + actions hover over the feed, so posts
           get the whole screen (the old logo header + story row took ~25%). */}
-      <View style={[styles.floatBar, { paddingTop: insets.top + 4 }]} pointerEvents="box-none">
-        <LinearGradient
-          colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0)']}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="none"
-        />
+      <View style={[styles.floatBar, { paddingTop: insets.top + 4 }, gridMode && { backgroundColor: colors.background, paddingBottom: 8 }]} pointerEvents="box-none">
+        {gridMode ? null : (
+          <LinearGradient
+            colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.18)', 'rgba(0,0,0,0)']}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+        )}
         <View style={styles.floatRow} pointerEvents="box-none">
+          {gridMode ? null : (
+            <TouchableOpacity onPress={backToGrid} hitSlop={{ top: 10, bottom: 10, left: 10, right: 6 }} style={{ paddingLeft: 8 }} accessibilityLabel="Back to all posts" testID="feed-back-to-grid">
+              <ChevronLeft size={28} color="#FFFFFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+          )}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1247,16 +1279,16 @@ export default function FeedScreen() {
 
           <View style={styles.floatIcons}>
             <TouchableOpacity onPress={openCreate} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityLabel="New post">
-              <Plus size={25} color="#FFFFFF" strokeWidth={2.2} />
+              <Plus size={25} color={gridMode ? colors.text : '#FFFFFF'} strokeWidth={2.2} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/search' as any)}
               hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
               accessibilityLabel="Search"
             >
-              <Search size={23} color="#FFFFFF" strokeWidth={2.2} />
+              <Search size={23} color={gridMode ? colors.text : '#FFFFFF'} strokeWidth={2.2} />
             </TouchableOpacity>
-            <HeaderActivityButtons size={23} color="#FFFFFF" gap={18} />
+            <HeaderActivityButtons size={23} color={gridMode ? colors.text : '#FFFFFF'} gap={18} />
           </View>
         </View>
 
@@ -1269,7 +1301,7 @@ export default function FeedScreen() {
           </View>
         ) : null}
 
-        {newPostCount > 0 && activeIndex > 0 ? (
+        {newPostCount > 0 && (gridMode || activeIndex > 0) ? (
           <TouchableOpacity onPress={jumpToNewPosts} style={styles.newPostsPill} accessibilityLabel="Show new posts">
             <Text style={styles.newPostsText}>↑ New posts</Text>
           </TouchableOpacity>
@@ -1311,8 +1343,20 @@ export default function FeedScreen() {
         {/* Mount the list only once the page height is known, so every post
             is one exact page from the first frame (mixing measured and fixed
             heights left the list unable to render posts further down). */}
-        {contentHeight > 0 ? (
+        {gridMode && filteredPosts.length > 0 ? (
+          <FeedGrid
+            scrollRef={gridRef}
+            posts={filteredPosts}
+            colors={colors}
+            topPad={floatBarSpace + 14}
+            bottomPad={insets.bottom + 100}
+            onOpen={openFromGrid}
+            onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} progressViewOffset={floatBarSpace} />}
+          />
+        ) : contentHeight > 0 ? (
         <FlatList
+          initialScrollIndex={Math.min(openIndex, Math.max(0, filteredPosts.length - 1))}
           ref={listRef}
           data={filteredPosts}
           keyExtractor={(item) => item.id}
