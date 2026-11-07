@@ -58,6 +58,30 @@ export default function SpotTV({ video, width, height, myId, onChange }: {
   const [muted, setMuted] = useState(Platform.OS === 'web'); // browsers only autoplay muted
   const [failed, setFailed] = useState<string | null>(null);
   const lastTime = useRef(0);
+  const webReady = useRef(false);
+  const videoRef = useRef(video);
+  videoRef.current = video;
+
+  // Web: the YouTube iframe tells us when it's ready and where it is.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onMsg = (e: MessageEvent) => {
+      if (!String(e.origin).includes('youtube')) return;
+      if (frameRef.current && e.source !== frameRef.current.contentWindow) return;
+      let d: any;
+      try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+      if (d?.event === 'onReady' || (d?.event === 'initialDelivery' && !webReady.current)) {
+        webReady.current = true;
+        const v = videoRef.current;
+        setTimeout(() => send('sync', { pos: spotVideoPosition(v), playing: v.playing, force: true }), 100);
+      }
+      const t = d?.info?.currentTime;
+      if (typeof t === 'number') lastTime.current = t;
+      if (d?.event === 'onError') setFailed('This video can’t be played here.');
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const html = useMemo(() => playerHtml(video.id), [video.id]);
 
   // ── Send a command to the player ─────────────────────────────────────────
@@ -67,7 +91,8 @@ export default function SpotTV({ video, width, height, myId, onChange }: {
       if (!win) return;
       const call = (func: string, args: any[] = []) => win.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
       if (name === 'sync') {
-        call('seekTo', [arg.pos, true]);
+        // Only jump when it's actually out of step (the player reports its time).
+        if (arg.force || webReady.current === false || Math.abs(lastTime.current - arg.pos) > DRIFT) call('seekTo', [arg.pos, true]);
         call(arg.playing ? 'playVideo' : 'pauseVideo');
       } else if (name === 'mute') call(arg ? 'mute' : 'unMute');
       return;
@@ -115,7 +140,14 @@ export default function SpotTV({ video, width, height, myId, onChange }: {
             src: webSrc,
             style: { width: '100%', height: '100%', border: 0 },
             allow: 'autoplay; encrypted-media; picture-in-picture',
-            onLoad: () => { setTimeout(() => { sync(true); send('mute', muted); }, 600); },
+            onLoad: () => {
+              // Ask the player to report its state (and when it's ready).
+              const win = frameRef.current?.contentWindow;
+              const listen = () => win?.postMessage(JSON.stringify({ event: 'listening', id: video.id, channel: 'widget' }), '*');
+              listen();
+              setTimeout(listen, 800);
+              setTimeout(() => { if (!webReady.current) { webReady.current = true; sync(true); } }, 2500);
+            },
             title: 'Shared video',
           })
         ) : WebView ? (
