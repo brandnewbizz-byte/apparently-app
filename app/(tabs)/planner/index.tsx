@@ -46,6 +46,7 @@ import { useServiceRequests, SERVICE_CATEGORIES, type ServiceCategory, type Requ
 import { useOrders } from '@/contexts/OrdersContext';
 import { localDateKey, dateFromKey, formatMinutes, formatTime12 } from '@/lib/dates';
 import { summarizePlan, sortByTime, formatDuration, BLOCK_CATEGORIES, type PlanSummary } from '@/components/planner/planSummary';
+import { useTabDoubleTap } from '@/lib/tabRefresh';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const TIME_OPTIONS = Array.from({ length: 34 }, (_, i) => 6 * 60 + i * 30); // 6:00 AM → 10:30 PM
@@ -552,6 +553,7 @@ export default function PlannerScreen() {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
+  useTabDoubleTap('planner', () => { onRefresh(); });
 
   const openPlan = (p: Plan) => router.push(`/planner/${p.id}` as any);
 

@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useTabBar } from '@/contexts/TabBarContext';
+import { noteTabPress } from '@/lib/tabRefresh';
 
 // Screens that live inside the tabs but have no button in the bar.
 // Don't use `href: null` for this: in this Expo Router version it marks the
@@ -28,6 +29,8 @@ export default function TabLayout() {
 
   return (
     <Tabs
+        // Double-tap a bar button to refresh that page (lib/tabRefresh).
+        screenListeners={({ route }) => ({ tabPress: () => noteTabPress(route.name) })}
         screenOptions={{
           tabBarActiveTintColor: colors.tabIconSelected,
           tabBarInactiveTintColor: colors.tabIconDefault,

@@ -15,6 +15,7 @@ import {
   answerInvite, createRoom, deleteRoom, getRooms, listInvites, listRooms, themeFor, SPOT_THEMES,
   type SpotInvite, type SpotRoom,
 } from '@/lib/spot';
+import { useTabDoubleTap } from '@/lib/tabRefresh';
 
 const tap = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
@@ -84,6 +85,7 @@ export default function SpotLobby() {
       setJoined(acceptedIds.length ? (await getRooms(acceptedIds)).filter((r) => r.creatorId !== user?.id) : []);
     } catch { /* keep list */ } finally { setLoading(false); }
   }, [user?.id]);
+  useTabDoubleTap('live', async () => { setRefreshing(true); await load(); setRefreshing(false); });
 
   const respond = async (inv: SpotInvite, accept: boolean) => {
     if (!user?.id || answering) return;

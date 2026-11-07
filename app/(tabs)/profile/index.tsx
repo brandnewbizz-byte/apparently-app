@@ -53,6 +53,7 @@ import { profileFollowUrl } from '@/lib/profileLink';
 import { shareLink } from '@/lib/share';
 import QRScanner from '@/components/QRScanner';
 import { useMyPaymentRequests, orderPaymentKey, money as centsMoney } from '@/lib/payments';
+import { useTabDoubleTap } from '@/lib/tabRefresh';
 
 const ACCENT = {
   gold: '#FFB800',
@@ -258,6 +259,7 @@ export default function ProfileScreen() {
     await Promise.all([loadPosts(), loadSaved(), loadStats(), loadBookings()]);
     setRefreshing(false);
   }, [loadPosts, loadSaved, loadStats, loadBookings]);
+  useTabDoubleTap('profile', () => { onRefresh(); });
 
   const openFollowList = async (type: 'followers' | 'following') => {
     if (!myId) return;

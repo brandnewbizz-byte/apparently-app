@@ -64,6 +64,7 @@ import FeedPhoto from '@/components/FeedPhoto';
 import AppVideo, { PlayPauseFlash } from '@/components/AppVideo';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 import CommentsPanel from '@/components/comments/CommentsPanel';
+import { useTabDoubleTap } from '@/lib/tabRefresh';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -1033,6 +1034,7 @@ export default function FeedScreen() {
       setRefreshing(false);
     }
   }, [queryClient, loadMentions, loadNetwork, refreshPosts]);
+  useTabDoubleTap('feed', () => { gridRef.current?.scrollTo?.({ y: 0, animated: true }); onRefresh(); });
 
   const handleSavePost = useCallback((postId: string) => {
     if (!authUser?.id) return;

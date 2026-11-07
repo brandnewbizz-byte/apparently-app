@@ -76,6 +76,7 @@ import { useServiceRequests, SERVICE_CATEGORIES, type ServiceRequest } from '@/c
 import { useMessaging } from '@/contexts/MessagingContext';
 import HeaderActivityButtons from '@/components/HeaderActivityButtons';
 import AppBanner from '@/components/AppBanner';
+import { useTabDoubleTap } from '@/lib/tabRefresh';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1727,6 +1728,7 @@ export default function HomeScreen() {
       setRefreshing(false);
     }
   }, [queryClient, reloadBundles, reloadSkills, reloadRequests]);
+  useTabDoubleTap('(home)', () => { onRefresh(); });
 
   const handleScroll = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
     handleTabBarScroll(event.nativeEvent.contentOffset.y);
