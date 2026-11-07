@@ -9,6 +9,7 @@
  */
 import { NativeModules } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { closeChannel } from '@/lib/realtimeChannels';
 import { CALL_RING_MS, claimCall, isCallUiActive, declineCall, markCallNotificationRead } from '@/lib/calls';
 import type { CallKitHandlers } from './callkit';
 
@@ -29,7 +30,7 @@ type Ringing = {
   uuid: string;
   data: Record<string, any>;
   answered: boolean;
-  stop: () => void;
+  stop: () => Promise<void>;
 };
 
 const calls = new Map<string, Ringing>(); // by uuid
@@ -126,10 +127,11 @@ export function startCallKit(h: CallKitHandlers): () => void {
       uuid,
       data,
       answered: false,
-      stop: () => {
+      stop: async () => {
         clearTimeout(timer);
-        if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
+        const c = ch;
         ch = null;
+        await closeChannel(c);
       },
     });
     if (roomId) roomToUuid.set(roomId, uuid);
@@ -141,8 +143,8 @@ export function startCallKit(h: CallKitHandlers): () => void {
     const c = calls.get(uuid);
     if (!c || c.answered) return;
     c.answered = true;
-    c.stop(); // the call screen takes over from here
-    h.onAnswer(c.data);
+    // Close our listener first so the call screen gets its own channel.
+    c.stop().finally(() => h.onAnswer(c.data));
   };
 
   const end = ({ callUUID }: { callUUID: string }) => {

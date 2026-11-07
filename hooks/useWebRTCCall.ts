@@ -18,6 +18,7 @@ import { Platform } from 'react-native';
 import { setAudioModeAsync } from 'expo-audio';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { closeChannel, openFreshChannel } from '@/lib/realtimeChannels';
 import { getWebRTC } from '@/lib/webrtc';
 import { CALL_RING_MS } from '@/lib/calls';
 import { ICE_SERVERS } from '@/lib/ice';
@@ -113,7 +114,7 @@ export function useWebRTCCall() {
     pendingIce.current = [];
     const ch = channelRef.current;
     channelRef.current = null;
-    if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
+    if (ch) closeChannel(ch);
     setLocalStream(null);
     setRemoteStream(null);
     if (error) setCallError(error);
@@ -171,9 +172,16 @@ export function useWebRTCCall() {
         video: cfg.video ? { facingMode: 'user', width: 640, height: 480, frameRate: 24 } : false,
       });
     } catch {
-      throw new Error(cfg.video
-        ? 'Allow camera and microphone access for Apparently in Settings, then try again.'
-        : 'Allow microphone access for Apparently in Settings, then try again.');
+      // A video call answered on the lock screen can't open the camera yet:
+      // join with voice so the call still connects.
+      try {
+        if (!cfg.video) throw new Error('no mic');
+        stream = await rtc.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch {
+        throw new Error(cfg.video
+          ? 'Allow camera and microphone access for Apparently in Settings, then try again.'
+          : 'Allow microphone access for Apparently in Settings, then try again.');
+      }
     }
     if (endedRef.current) {
       stream.getTracks().forEach((t: any) => t.stop());
@@ -218,8 +226,10 @@ export function useWebRTCCall() {
     await sendSignal('offer', { sdp: { type: d.type, sdp: d.sdp } });
   }, [sendSignal]);
 
-  const connectSignaling = useCallback((cfg: CallConfig) => new Promise<void>((resolve, reject) => {
-    const ch = supabase.channel(`call:${cfg.roomId}`, { config: { broadcast: { self: false } } });
+  const connectSignaling = useCallback(async (cfg: CallConfig) => {
+    // Our own channel: never the ringing screen's (which closes when it goes away).
+    const ch = await openFreshChannel(`call:${cfg.roomId}`, { config: { broadcast: { self: false } } });
+    return new Promise<void>((resolve, reject) => {
     const forMe = (p: any) => !p?.targetPeerId || p.targetPeerId === configRef.current?.peerId;
 
     ch.on('broadcast', { event: 'join' }, async ({ payload }: any) => {
@@ -284,7 +294,8 @@ export function useWebRTCCall() {
       }
     });
     channelRef.current = ch;
-  }), [addRemoteIce, finish, flushIce, sendOffer, sendSignal]);
+    });
+  }, [addRemoteIce, finish, flushIce, sendOffer, sendSignal]);
 
   const reset = useCallback((cfg: CallConfig) => {
     configRef.current = cfg;
@@ -376,7 +387,7 @@ export function useWebRTCCall() {
       channelRef.current = null;
       ch.send({ type: 'broadcast', event: 'call_ended', payload: { roomId: cfg.roomId, peerId: cfg.peerId, targetPeerId: cfg.targetPeerId } })
         .then(() => {}, () => {})
-        .finally(() => { supabase.removeChannel(ch).then(() => {}, () => {}); });
+        .finally(() => { closeChannel(ch); });
     }
     finish();
   }, [finish]);

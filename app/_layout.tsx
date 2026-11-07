@@ -120,7 +120,13 @@ function RootLayoutNav() {
         claimCall(params.roomId);
         markCallNotificationRead(data.notificationId);
         dismissCallNotifications();
-        router.push({ pathname: '/call/[roomId]', params } as never);
+        // Answered from the lock screen right after the app woke up: the
+        // screens may not be ready yet, so keep trying for a few seconds.
+        const go = (tries: number) => {
+          try { router.push({ pathname: '/call/[roomId]', params } as never); }
+          catch { if (tries > 0) setTimeout(() => go(tries - 1), 300); }
+        };
+        go(20);
       },
       onDecline: (data) => {
         const params = paramsFromPushData(data, me);

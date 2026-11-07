@@ -3,6 +3,7 @@
  * incoming-call popup: start a call, answer one, or decline one.
  */
 import { supabase } from '@/lib/supabase';
+import { closeChannel, openFreshChannel, subscribed } from '@/lib/realtimeChannels';
 
 export interface CallScreenParams {
   roomId: string;
@@ -22,20 +23,19 @@ export const CALL_RING_MS = 45_000;
 
 /** Send one message on a call's signalling channel (used to decline). */
 export async function sendCallSignal(roomId: string, event: string, payload: Record<string, unknown>): Promise<void> {
-  const ch = supabase.channel(`call:${roomId}`, { config: { broadcast: { self: false } } });
-  await new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, 5000);
-    ch.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        clearTimeout(t);
-        resolve();
-      }
-    });
-  });
+  const topic = `call:${roomId}`;
+  // Already listening on this call (e.g. the ringing screen): send on that one.
+  const live = supabase.getChannels().find((c) => c.topic === `realtime:${topic}`);
+  if (live && (live as any).state === 'joined') {
+    try { await live.send({ type: 'broadcast', event, payload }); } catch {}
+    return;
+  }
+  const ch = await openFreshChannel(topic, { config: { broadcast: { self: false } } });
+  await subscribed(ch, 5000);
   try {
     await ch.send({ type: 'broadcast', event, payload });
   } catch {}
-  supabase.removeChannel(ch).then(() => {}, () => {});
+  closeChannel(ch);
 }
 
 /** Tell the caller we're not picking up, so their screen stops ringing. */

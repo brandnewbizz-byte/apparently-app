@@ -1,0 +1,45 @@
+# Over-the-air update from GitHub (no Expo CI minutes needed).
+# Sends the latest JavaScript to every installed build with the same app
+# version (runtime) on the "production" channel — no store update needed.
+#
+# Needs one GitHub secret: EXPO_TOKEN (an Expo access token:
+# expo.dev → Account settings → Access tokens → Create).
+name: OTA update (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: What changed
+        required: false
+        default: Fixes
+  push:
+    branches: [master]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'contexts/**'
+      - 'hooks/**'
+      - 'lib/**'
+      - 'constants/**'
+
+concurrency:
+  group: ota-production
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: bun install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Publish update
+        run: eas update --channel production --environment production --non-interactive --message "${{ github.event.inputs.message || github.event.head_commit.message }}"

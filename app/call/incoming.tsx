@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Phone, PhoneOff, Video, User } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
+import { closeChannel } from '@/lib/realtimeChannels';
 import { playTone, stopTone } from '@/lib/callTones';
 import { CALL_RING_MS, declineCall, markCallNotificationRead, setCallUiActive } from '@/lib/calls';
 import { dismissCallNotifications } from '@/lib/notifications';
@@ -23,6 +24,7 @@ export default function IncomingCallScreen() {
   const insets = useSafeAreaInsets();
   const [gone, setGone] = useState<null | 'missed'>(null);
   const done = useRef(false);
+  const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const roomId = p.roomId || '';
   const callerName = p.callerName || 'Someone';
@@ -46,7 +48,12 @@ export default function IncomingCallScreen() {
     markCallNotificationRead(p.notificationId);
     if (how === 'answer') {
       const { ringStartedAt, notificationId, ...params } = p;
-      router.replace({ pathname: '/call/[roomId]' as any, params: params as any } as any);
+      // Close our listener first so the call screen gets its own channel.
+      const ch = chRef.current;
+      chRef.current = null;
+      closeChannel(ch).finally(() => {
+        router.replace({ pathname: '/call/[roomId]' as any, params: params as any } as any);
+      });
       return;
     }
     if (how === 'decline') {
@@ -71,6 +78,7 @@ export default function IncomingCallScreen() {
     let ch: ReturnType<typeof supabase.channel> | null = null;
     if (roomId) {
       ch = supabase.channel(`call:${roomId}`, { config: { broadcast: { self: false } } });
+      chRef.current = ch;
       ch.on('broadcast', { event: 'call_ended' }, ({ payload }: any) => {
         if (!payload?.peerId || payload.peerId === callerId) finish('missed');
       });
@@ -81,7 +89,8 @@ export default function IncomingCallScreen() {
       ringStop();
       stopTone();
       setCallUiActive(false, `ring:${roomId}`);
-      if (ch) supabase.removeChannel(ch).then(() => {}, () => {});
+      if (chRef.current) closeChannel(chRef.current);
+      chRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
