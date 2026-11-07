@@ -1,7 +1,8 @@
 import React, { memo, useMemo, useRef } from 'react';
 import { Image, PanResponder, StyleSheet, Text, View } from 'react-native';
 import Svg, { ClipPath, Defs, G, Image as SvgImage, Polygon } from 'react-native-svg';
-import type { SpotItem, SpotPoint } from '@/lib/spot';
+import type { SpotItem, SpotPoint, SpotVideo } from '@/lib/spot';
+import SpotTV, { CONTROLS_H } from '@/components/spot/SpotTV';
 
 /** Bounding box (0–1, image space) of a cut-out outline. */
 export function cutoutBox(pts: SpotPoint[]) {
@@ -15,6 +16,7 @@ const fitLongest = (ratio: number, longest: number) => (ratio >= 1 ? { w: longes
 /** Box size (pt) of an item before scaling. */
 export function baseSize(it: SpotItem): { w: number; h: number } {
   if (it.kind === 'note') return { w: 132, h: 120 };
+  if (it.kind === 'video') return { w: 240, h: 135 + CONTROLS_H };
   if (it.kind === 'photo') {
     const aspect = it.aspect || 1;
     if (it.cutout) {
@@ -71,9 +73,11 @@ interface Props {
   onDoubleTap: (id: string) => void;
   onTap: (id: string) => void;
   onLongPress: (id: string) => void;
+  /** Shared TV: play / pause / jump for everyone */
+  onVideo?: (id: string, video: SpotVideo) => void;
 }
 
-function SpotItemView({ item, live, canvasW, canvasH, zoom = 1, enabled, topZ, myId, selected, onDrag, onDrop, onDoubleTap, onTap, onLongPress }: Props) {
+function SpotItemView({ item, live, canvasW, canvasH, zoom = 1, enabled, topZ, myId, selected, onDrag, onDrop, onDoubleTap, onTap, onLongPress, onVideo }: Props) {
   const x = live?.x ?? item.x;
   const y = live?.y ?? item.y;
   const z = live?.z ?? item.z;
@@ -155,9 +159,11 @@ function SpotItemView({ item, live, canvasW, canvasH, zoom = 1, enabled, topZ, m
         },
       ]}
       pointerEvents={enabled ? 'auto' : 'none'}
-      accessibilityLabel={item.kind === 'note' ? `Note: ${item.text}` : item.kind === 'sticker' ? `${item.emoji} sticker` : item.cutout ? 'Cut-out photo' : 'Photo'}
+      accessibilityLabel={item.kind === 'video' ? 'Shared video' : item.kind === 'note' ? `Note: ${item.text}` : item.kind === 'sticker' ? `${item.emoji} sticker` : item.cutout ? 'Cut-out photo' : 'Photo'}
     >
-      {item.kind === 'sticker' ? (
+      {item.kind === 'video' && item.video ? (
+        <SpotTV video={item.video} width={sw} height={sh} myId={myId} onChange={(v) => onVideo?.(item.id, v)} />
+      ) : item.kind === 'sticker' ? (
         <Text style={{ fontSize: 46 * k, lineHeight: 56 * k, textAlign: 'center' }}>{item.emoji}</Text>
       ) : item.kind === 'note' ? (
         <View style={[styles.note, { backgroundColor: item.color || '#FEF08A', padding: 10 * k }]}>

@@ -6,6 +6,7 @@ import {
   addItem as dbAdd, listItems, mapItem, moveItem as dbMove, removeItem as dbRemove,
   updateItemMeta, toggleReaction, clamp01,
   type SpotItem, type SpotItemKind, type SpotPoint,
+  type SpotVideo,
 } from '@/lib/spot';
 
 export interface SpotMember { id: string; name: string; avatar: string }
@@ -142,7 +143,7 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
   const add = useCallback(async (input: {
     kind: SpotItemKind; x?: number; y?: number; emoji?: string; text?: string; color?: string;
     imageUrl?: string; points?: SpotPoint[]; width?: number;
-    cutout?: SpotPoint[]; aspect?: number; bare?: boolean;
+    cutout?: SpotPoint[]; aspect?: number; bare?: boolean; video?: SpotVideo;
   }) => {
     if (!roomId || !me) return null;
     // Doodles stay underneath everything else.
@@ -214,6 +215,16 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
     try { await updateItemMeta(it, { text }); } catch { upsert(it); }
   }, [items, upsert, send]);
 
+  /** Shared YouTube TV: play / pause / jump for everyone in the room. */
+  const setVideo = useCallback(async (id: string, video: SpotVideo) => {
+    const it = items[id];
+    if (!it) return;
+    const next = { ...it, video };
+    upsert(next);
+    send('item', { item: next });
+    try { await updateItemMeta(it, { video }); } catch { /* the live broadcast already reached everyone here */ }
+  }, [items, upsert, send]);
+
   const bringToFront = useCallback((id: string) => {
     const it = items[id];
     if (!it) return;
@@ -243,7 +254,7 @@ export function useSpotRoom(roomId: string | undefined, me: Me | null) {
 
   return {
     items: sorted, loading, error, members, remoteDrag, liveStrokes, bursts, topZ,
-    add, dragTo, dropAt, remove, react, resize, editText, bringToFront, burst, strokeProgress, strokeDone,
+    add, dragTo, dropAt, remove, react, resize, editText, setVideo, bringToFront, burst, strokeProgress, strokeDone,
     send, on, connected,
   };
 }

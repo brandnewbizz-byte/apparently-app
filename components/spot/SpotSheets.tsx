@@ -4,8 +4,8 @@ import {
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image as ImageIcon, StickyNote, Smile, Trash2, ArrowUpToLine, Minus, Plus, Pencil, X } from 'lucide-react-native';
-import { NOTE_COLORS, REACTIONS, STICKER_GROUPS, type SpotItem } from '@/lib/spot';
+import { Image as ImageIcon, StickyNote, Smile, Trash2, ArrowUpToLine, Minus, Plus, Pencil, X, Tv, EyeOff } from 'lucide-react-native';
+import { NOTE_COLORS, REACTIONS, STICKER_GROUPS, parseYouTubeId, type SpotItem } from '@/lib/spot';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bottom sheet shell
@@ -28,21 +28,23 @@ function Sheet({ visible, onClose, children }: { visible: boolean; onClose: () =
 // ─────────────────────────────────────────────────────────────────────────────
 // Add: stickers / note / photo
 // ─────────────────────────────────────────────────────────────────────────────
-type AddTab = 'stickers' | 'note' | 'photo';
+type AddTab = 'stickers' | 'note' | 'photo' | 'tv';
 
-export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploading }: {
+export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, onVideo, uploading }: {
   visible: boolean;
   onClose: () => void;
   onSticker: (emoji: string) => void;
   onNote: (text: string, color: string) => void;
   onPhoto: (source: 'camera' | 'library') => void;
+  onVideo?: (link: string) => void;
   uploading: boolean;
 }) {
   const [tab, setTab] = useState<AddTab>('stickers');
+  const [link, setLink] = useState('');
   const [text, setText] = useState('');
   const [color, setColor] = useState(NOTE_COLORS[0]);
 
-  useEffect(() => { if (visible) { setText(''); } }, [visible]);
+  useEffect(() => { if (visible) { setText(''); setLink(''); } }, [visible]);
 
   return (
     <Sheet visible={visible} onClose={onClose}>
@@ -51,6 +53,7 @@ export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploadi
           { key: 'stickers', label: 'Items', icon: Smile },
           { key: 'note', label: 'Note', icon: StickyNote },
           { key: 'photo', label: 'Photo', icon: ImageIcon },
+          ...(onVideo ? [{ key: 'tv', label: 'TV', icon: Tv }] as const : []),
         ] as const).map((t) => {
           const on = tab === t.key;
           const Icon = t.icon;
@@ -105,6 +108,28 @@ export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploadi
             <Text style={styles.primaryText}>Stick it in the room</Text>
           </TouchableOpacity>
         </View>
+      ) : tab === 'tv' ? (
+        <View style={{ gap: 12, paddingVertical: 6 }}>
+          <View style={[styles.photoIcon, { alignSelf: 'center' }]}><Tv size={30} color="#7C3AED" /></View>
+          <Text style={styles.photoText}>Paste a YouTube link (or its embed code). A little TV appears in the room — anyone can press play and everyone watches together. 📺</Text>
+          <TextInput
+            value={link}
+            onChangeText={setLink}
+            placeholder="https://youtu.be/…"
+            placeholderTextColor="#9CA3AF"
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.editInput}
+            testID="spot-tv-link"
+          />
+          <TouchableOpacity
+            style={[styles.primary, !parseYouTubeId(link) && { opacity: 0.4 }]}
+            disabled={!parseYouTubeId(link)}
+            onPress={() => onVideo?.(link)}
+          >
+            <Text style={styles.primaryText}>Put it on the TV</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <View style={{ alignItems: 'center', gap: 12, paddingVertical: 14 }}>
           <View style={styles.photoIcon}><ImageIcon size={30} color="#7C3AED" /></View>
@@ -124,7 +149,7 @@ export function AddSheet({ visible, onClose, onSticker, onNote, onPhoto, uploadi
 // ─────────────────────────────────────────────────────────────────────────────
 // Item menu (long-press)
 // ─────────────────────────────────────────────────────────────────────────────
-export function ItemMenu({ item, myId, canRemove, onClose, onReact, onResize, onFront, onEdit, onRemove }: {
+export function ItemMenu({ item, myId, canRemove, onClose, onReact, onResize, onFront, onEdit, onRemove, onHide }: {
   item: SpotItem | null;
   myId: string;
   canRemove: boolean;
@@ -134,13 +159,15 @@ export function ItemMenu({ item, myId, canRemove, onClose, onReact, onResize, on
   onFront: () => void;
   onEdit: (text: string) => void;
   onRemove: () => void;
+  /** Hide it on this phone only */
+  onHide?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   useEffect(() => { setEditing(false); setText(item?.text || ''); }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!item) return null;
-  const label = item.kind === 'sticker' ? `${item.emoji} added by` : item.kind === 'note' ? 'Note by' : 'Photo by';
+  const label = item.kind === 'sticker' ? `${item.emoji} added by` : item.kind === 'note' ? 'Note by' : item.kind === 'video' ? 'TV added by' : item.kind === 'doodle' ? 'Drawing by' : 'Photo by';
   return (
     <Sheet visible={!!item} onClose={onClose}>
       <View style={styles.menuHead}>
@@ -174,6 +201,9 @@ export function ItemMenu({ item, myId, canRemove, onClose, onReact, onResize, on
           <TouchableOpacity style={styles.action} onPress={onFront}><ArrowUpToLine size={18} color="#111" /><Text style={styles.actionText}>To front</Text></TouchableOpacity>
           {item.kind === 'note' && item.ownerId === myId ? (
             <TouchableOpacity style={styles.action} onPress={() => setEditing(true)}><Pencil size={18} color="#111" /><Text style={styles.actionText}>Edit</Text></TouchableOpacity>
+          ) : null}
+          {onHide ? (
+            <TouchableOpacity style={styles.action} onPress={onHide}><EyeOff size={18} color="#111" /><Text style={styles.actionText}>Hide for me</Text></TouchableOpacity>
           ) : null}
           {canRemove ? (
             <TouchableOpacity style={styles.action} onPress={onRemove}><Trash2 size={18} color="#EF4444" /><Text style={[styles.actionText, { color: '#EF4444' }]}>Remove</Text></TouchableOpacity>

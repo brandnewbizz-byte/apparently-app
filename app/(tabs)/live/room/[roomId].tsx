@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, Redo2, UserPlus, Palette, Mic, Video, VideoOff, Trash2, Lock, LockOpen, X, Crown } from 'lucide-react-native';
+import { Eraser, EyeOff, ChevronLeft, Hand, PenLine, Plus, Smile, Undo2, Redo2, UserPlus, Palette, Mic, Video, VideoOff, Trash2, Lock, LockOpen, X, Crown } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTabBar } from '@/contexts/TabBarContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -22,18 +22,19 @@ import { useCameraPermissions } from '@/lib/safe-camera';
 import {
   deleteRoom, getRoom, listInvites, themeFor, touchRoom, updateRoom, roomLink, PEN_COLORS, REACTIONS, SPOT_THEMES,
   type SpotPoint, type SpotRoom,
+  parseYouTubeId,
 } from '@/lib/spot';
 import { uploadImageToStorage } from '@/lib/storage';
 import { roomUrl, shareLink } from '@/lib/share';
 import DoodleLayer from '@/components/spot/DoodleLayer';
 import BurstLayer from '@/components/spot/BurstLayer';
-import SpotItemView from '@/components/spot/SpotItemView';
+import SpotItemView, { baseSize } from '@/components/spot/SpotItemView';
 import { AddSheet, ItemMenu } from '@/components/spot/SpotSheets';
 import { MyCameraBubble, MyLiveCameraBubble, RemoteCameraBubbles, type RemoteCam } from '@/components/spot/CameraBubbles';
 import CutoutSheet, { type PhotoStyle, type PickedPhoto } from '@/components/spot/CutoutSheet';
 import InviteSheet from '@/components/spot/InviteSheet';
 
-type Mode = 'move' | 'draw';
+type Mode = 'move' | 'draw' | 'erase';
 const PEN_WIDTHS = [3, 6, 12];
 
 const tap = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
@@ -252,8 +253,11 @@ function SpotRoomInner() {
 
   const theme = themeFor(info?.theme);
   const isHost = !!me && info?.creatorId === me.id;
-  const things = room.items.filter((i) => i.kind !== 'doodle');
-  const doodles = room.items.filter((i) => i.kind === 'doodle');
+  // Things you've hidden just for yourself (long-press → Hide for me).
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const visibleItems = room.items.filter((i) => !hiddenIds.has(i.id));
+  const things = visibleItems.filter((i) => i.kind !== 'doodle');
+  const doodles = visibleItems.filter((i) => i.kind === 'doodle');
   const menuItem = menuId ? room.items.find((i) => i.id === menuId) || null : null;
 
   // ── Drawing ───────────────────────────────────────────────────────────────
@@ -265,19 +269,53 @@ function SpotRoomInner() {
   const strokeFns = useRef({ progress: room.strokeProgress, done: room.strokeDone, rec: history.recordAdd });
   strokeFns.current = { progress: room.strokeProgress, done: room.strokeDone, rec: history.recordAdd };
 
+  // ── Eraser: wipe over anything you're allowed to remove ───────────────────
+  const eraseRef = useRef({ items: visibleItems, myId: me?.id || '', isHost: false, gone: new Set<string>() });
+  eraseRef.current.items = visibleItems;
+  eraseRef.current.myId = me?.id || '';
+  eraseRef.current.isHost = isHost;
+  const eraseAt = (px: number, py: number) => {
+    const { w, h } = drawRef.current.size;
+    if (!w || !h) return;
+    const R = 16;
+    const er = eraseRef.current;
+    for (const it of er.items) {
+      if (er.gone.has(it.id)) continue;
+      if (it.ownerId !== er.myId && !er.isHost) continue;
+      let hit = false;
+      if (it.kind === 'doodle') {
+        hit = (it.points || []).some((p) => Math.hypot(p.x * w - px, p.y * h - py) < R + 4);
+      } else {
+        const b = baseSize(it);
+        const hw = (b.w * it.scale) / 2 + 4;
+        const hh = (b.h * it.scale) / 2 + 4;
+        hit = Math.abs(it.x * w - px) < hw && Math.abs(it.y * h - py) < hh;
+      }
+      if (hit) {
+        er.gone.add(it.id);
+        tap(Haptics.ImpactFeedbackStyle.Light);
+        eraseFns.current.remove(it.id).then((ok) => { if (ok) eraseFns.current.rec(it); });
+      }
+    }
+  };
+  const eraseFns = useRef({ remove: room.remove, rec: history.recordRemove });
+  eraseFns.current = { remove: room.remove, rec: history.recordRemove };
+
   const canvasPan = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => drawRef.current.mode === 'draw',
-    onMoveShouldSetPanResponder: () => drawRef.current.mode === 'draw',
+    onStartShouldSetPanResponder: () => drawRef.current.mode !== 'move',
+    onMoveShouldSetPanResponder: () => drawRef.current.mode !== 'move',
     onPanResponderTerminationRequest: () => true,
     onPanResponderGrant: (e) => {
       const { w, h } = drawRef.current.size;
       const { locationX, locationY } = e.nativeEvent;
+      if (drawRef.current.mode === 'erase') { eraseRef.current.gone = new Set(); eraseAt(locationX, locationY); return; }
       drawRef.current.points = [{ x: locationX / w, y: locationY / h }];
       setMyStroke(drawRef.current.points);
     },
     onPanResponderMove: (e) => {
       const { w, h } = drawRef.current.size;
       const { locationX, locationY } = e.nativeEvent;
+      if (drawRef.current.mode === 'erase') { eraseAt(locationX, locationY); return; }
       const p = { x: Math.min(1, Math.max(0, locationX / w)), y: Math.min(1, Math.max(0, locationY / h)) };
       const pts = drawRef.current.points;
       const last = pts[pts.length - 1];
@@ -288,6 +326,7 @@ function SpotRoomInner() {
       strokeFns.current.progress(next, drawRef.current.penColor, drawRef.current.penWidth);
     },
     onPanResponderRelease: () => {
+      if (drawRef.current.mode === 'erase') return;
       const pts = drawRef.current.points;
       drawRef.current.points = [];
       // Keep showing it until the saved version arrives.
@@ -297,6 +336,7 @@ function SpotRoomInner() {
     },
     // A second finger means "zoom", so drop the half-drawn stroke.
     onPanResponderTerminate: () => {
+      if (drawRef.current.mode === 'erase') return;
       drawRef.current.points = [];
       strokeFns.current.done([], drawRef.current.penColor, drawRef.current.penWidth).finally(() => setMyStroke([]));
     },
@@ -369,6 +409,16 @@ function SpotRoomInner() {
     tap(Haptics.ImpactFeedbackStyle.Medium);
     setMode('move');
     const it = await room.add({ kind: 'note', text, color, x: nearCenter(), y: nearCenter() });
+    history.recordAdd(it);
+    if (!it) Alert.alert('Not added', 'Check your connection and try again.');
+  };
+  const addVideo = async (link: string) => {
+    const vid = parseYouTubeId(link);
+    if (!vid) { Alert.alert('Not a YouTube link', 'Paste a YouTube link (or the embed code) to put it on the room TV.'); return; }
+    setShowAdd(false);
+    tap(Haptics.ImpactFeedbackStyle.Medium);
+    setMode('move');
+    const it = await room.add({ kind: 'video', x: 0.5, y: 0.35, video: { id: vid, playing: false, pos: 0, at: Date.now(), by: me?.id } });
     history.recordAdd(it);
     if (!it) Alert.alert('Not added', 'Check your connection and try again.');
   };
@@ -538,7 +588,7 @@ function SpotRoomInner() {
         onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
         {...canvasPan.panHandlers}
       >
-        <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setSelectedId(null)} disabled={mode === 'draw'} />
+        <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setSelectedId(null)} disabled={mode !== 'move'} />
         <DoodleLayer width={size.w} height={size.h} ink={theme.ink} doodles={doodles} live={liveStrokes} />
         {size.w > 0 ? things.map((it) => (
           <SpotItemView
@@ -557,6 +607,7 @@ function SpotRoomInner() {
             onTap={onTap}
             onDoubleTap={onDoubleTap}
             onLongPress={onLongPress}
+            onVideo={(id, v) => room.setVideo(id, v)}
           />
         )) : null}
       </View>
@@ -566,6 +617,12 @@ function SpotRoomInner() {
       {zoomed ? (
         <TouchableOpacity onPress={() => setView({ s: 1, tx: 0, ty: 0 })} style={[styles.zoomPill, { top: insets.top + 56 }]} accessibilityLabel="Reset zoom">
           <Text style={styles.zoomText}>{Math.round(view.s * 100)}% · Reset</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {hiddenIds.size > 0 ? (
+        <TouchableOpacity onPress={() => setHiddenIds(new Set())} style={[styles.zoomPill, { top: insets.top + (zoomed ? 92 : 56) }]} accessibilityLabel="Show hidden things">
+          <Text style={styles.zoomText}>{hiddenIds.size} hidden · Show</Text>
         </TouchableOpacity>
       ) : null}
 
@@ -683,7 +740,7 @@ function SpotRoomInner() {
       ) : null}
 
       {/* ── Mic + camera ── */}
-      <View style={[styles.sideCol, { bottom: insets.bottom + (mode === 'draw' || showReact ? 152 : 100) }]} pointerEvents="box-none">
+      <View style={[styles.sideCol, { bottom: insets.bottom + (mode !== 'move' || showReact ? 152 : 100) }]} pointerEvents="box-none">
         <TouchableOpacity onPress={toggleCamera} style={[styles.sideBtn, camOn && styles.sideBtnOn]} accessibilityLabel={camOn ? 'Turn camera off' : 'Turn camera on'}>
           {camOn ? <VideoOff size={20} color="#FFF" /> : <Video size={20} color="#111" />}
         </TouchableOpacity>
@@ -710,10 +767,20 @@ function SpotRoomInner() {
       </View>
 
       {/* ── Draw options ── */}
-      {mode === 'draw' ? (
+      {mode === 'draw' || mode === 'erase' ? (
         <View style={[styles.penBar, { bottom: insets.bottom + 92 }]}>
+          <TouchableOpacity
+            onPress={() => { tap(); setMode(mode === 'erase' ? 'draw' : 'erase'); }}
+            style={[styles.penWidth, mode === 'erase' && { backgroundColor: '#111', borderRadius: 14 }]}
+            accessibilityLabel={mode === 'erase' ? 'Stop erasing' : 'Eraser'}
+            accessibilityState={{ selected: mode === 'erase' }}
+            testID="spot-eraser"
+          >
+            <Eraser size={18} color={mode === 'erase' ? '#FFF' : '#111'} />
+          </TouchableOpacity>
+          <View style={styles.sep} />
           {PEN_COLORS.map((c) => (
-            <TouchableOpacity key={c} onPress={() => setPenColor(c)} style={[styles.penColor, { backgroundColor: c }, penColor === c && styles.penColorOn]} accessibilityLabel="Pen colour" />
+            <TouchableOpacity key={c} onPress={() => { setPenColor(c); if (mode === 'erase') setMode('draw'); }} style={[styles.penColor, { backgroundColor: c }, penColor === c && styles.penColorOn]} accessibilityLabel="Pen colour" />
           ))}
           <View style={styles.sep} />
           {PEN_WIDTHS.map((w) => (
@@ -754,11 +821,11 @@ function SpotRoomInner() {
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => { tap(); setMode('draw'); setShowReact(false); setSelectedId(null); }}
-          style={[styles.tool, mode === 'draw' && styles.toolOn]}
+          style={[styles.tool, mode !== 'move' && styles.toolOn]}
           accessibilityLabel="Doodle"
-          accessibilityState={{ selected: mode === 'draw' }}
+          accessibilityState={{ selected: mode !== 'move' }}
         >
-          <PenLine size={22} color={mode === 'draw' ? '#FFF' : '#111'} />
+          <PenLine size={22} color={mode !== 'move' ? '#FFF' : '#111'} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { tap(); setShowAdd(true); setShowReact(false); }} style={styles.addBtn} accessibilityLabel="Add to the room">
           <Plus size={28} color="#FFF" strokeWidth={2.6} />
@@ -778,6 +845,7 @@ function SpotRoomInner() {
         onSticker={addSticker}
         onNote={addNote}
         onPhoto={addPhoto}
+        onVideo={addVideo}
         uploading={uploading}
       />
       {preparing ? (
@@ -853,6 +921,13 @@ function SpotRoomInner() {
           if (!menuItem || !t) return;
           history.recordEdit(menuItem.id, menuItem.text || '', t);
           room.editText(menuItem.id, t);
+        }}
+        onHide={() => {
+          if (!menuItem) return;
+          const id = menuItem.id;
+          setMenuId(null);
+          setSelectedId(null);
+          setHiddenIds((prev) => new Set(prev).add(id));
         }}
         onRemove={async () => {
           if (!menuItem) return;

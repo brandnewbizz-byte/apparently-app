@@ -49,7 +49,39 @@ export const PEN_COLORS = ['#111827', '#FFFFFF', '#EF4444', '#F59E0B', '#22C55E'
 export const REACTIONS = ['❤️', '😂', '🔥', '👏', '😍', '🎉'];
 
 // ── Types ─────────────────────────────────────────────────────────────────
-export type SpotItemKind = 'sticker' | 'note' | 'photo' | 'doodle';
+export type SpotItemKind = 'sticker' | 'note' | 'photo' | 'doodle' | 'video';
+
+/**
+ * A shared YouTube "TV" in a room. Everyone plays from the same clock:
+ * at time `at` (ms since 1970) the video was at `pos` seconds, playing or not.
+ */
+export interface SpotVideo {
+  /** YouTube video id */
+  id: string;
+  playing: boolean;
+  pos: number;
+  at: number;
+  /** who pressed play/pause last */
+  by?: string;
+}
+
+/** Where a shared video should be right now, in seconds. */
+export function spotVideoPosition(v: SpotVideo, now = Date.now()): number {
+  return Math.max(0, v.pos + (v.playing ? (now - v.at) / 1000 : 0));
+}
+
+/** The YouTube video id from a link, a share link, Shorts, or an embed code. */
+export function parseYouTubeId(input: string): string | null {
+  const s = (input || '').trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  const pats = [
+    /youtu\.be\/([A-Za-z0-9_-]{11})/,
+    /youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/,
+    /youtube\.com\/(?:watch|.*[?&])[^#]*?[?&]?v=([A-Za-z0-9_-]{11})/,
+  ];
+  for (const re of pats) { const m = s.match(re); if (m) return m[1]; }
+  return null;
+}
 
 export interface SpotPoint { x: number; y: number }
 
@@ -79,6 +111,8 @@ export interface SpotItem {
   aspect?: number;
   /** Photo shown without a frame (e.g. an already cut-out PNG sticker). */
   bare?: boolean;
+  /** Shared YouTube TV (kind 'video') */
+  video?: SpotVideo;
   /** emoji → user ids who reacted with it */
   reactions: Record<string, string[]>;
 }
@@ -112,7 +146,7 @@ function mapRoom(r: any): SpotRoom {
 
 export function mapItem(r: any): SpotItem {
   const m = r.metadata || {};
-  const kind: SpotItemKind = (['sticker', 'note', 'photo', 'doodle'].includes(r.object_type) ? r.object_type : 'sticker') as SpotItemKind;
+  const kind: SpotItemKind = (['sticker', 'note', 'photo', 'doodle', 'video'].includes(r.object_type) ? r.object_type : 'sticker') as SpotItemKind;
   return {
     id: r.id,
     roomId: r.room_id,
@@ -134,6 +168,7 @@ export function mapItem(r: any): SpotItem {
     cutout: Array.isArray(m.cutout) && m.cutout.length > 2 ? m.cutout : undefined,
     aspect: Number(m.aspect) || undefined,
     bare: !!m.bare,
+    video: m.video && typeof m.video === 'object' && m.video.id ? m.video : undefined,
     reactions: (m.reactions && typeof m.reactions === 'object') ? m.reactions : {},
   };
 }
@@ -229,7 +264,7 @@ export async function listItems(roomId: string): Promise<SpotItem[]> {
 export async function addItem(roomId: string, me: { id: string; name: string }, item: {
   kind: SpotItemKind; x?: number; y?: number; z: number; scale?: number; rotation?: number;
   emoji?: string; text?: string; color?: string; imageUrl?: string; points?: SpotPoint[]; width?: number;
-  cutout?: SpotPoint[]; aspect?: number; bare?: boolean;
+  cutout?: SpotPoint[]; aspect?: number; bare?: boolean; video?: SpotVideo;
 }): Promise<SpotItem> {
   const { data, error } = await supabase
     .from('virtual_room_objects')
@@ -250,7 +285,7 @@ export async function addItem(roomId: string, me: { id: string; name: string }, 
       owner_name: me.name,
       metadata: {
         emoji: item.emoji, text: item.text, color: item.color,
-        points: item.points, width: item.width, cutout: item.cutout, aspect: item.aspect, bare: item.bare || undefined, reactions: {},
+        points: item.points, width: item.width, cutout: item.cutout, aspect: item.aspect, bare: item.bare || undefined, video: item.video, reactions: {},
       },
     })
     .select('*')
@@ -267,7 +302,7 @@ export async function moveItem(id: string, x: number, y: number, z: number) {
   if (error) throw error;
 }
 
-export async function updateItemMeta(item: SpotItem, patch: Partial<Pick<SpotItem, 'reactions' | 'scale' | 'rotation' | 'text'>>) {
+export async function updateItemMeta(item: SpotItem, patch: Partial<Pick<SpotItem, 'reactions' | 'scale' | 'rotation' | 'text' | 'video'>>) {
   const row: any = { updated_at: new Date().toISOString() };
   if (patch.scale !== undefined) row.scale = patch.scale;
   if (patch.rotation !== undefined) row.rotation = patch.rotation;
@@ -275,6 +310,7 @@ export async function updateItemMeta(item: SpotItem, patch: Partial<Pick<SpotIte
   row.metadata = {
     emoji: item.emoji, text: patch.text ?? item.text, color: item.color,
     points: item.points, width: item.width, cutout: item.cutout, aspect: item.aspect, bare: item.bare || undefined,
+    video: patch.video ?? item.video,
     reactions: patch.reactions ?? item.reactions,
   };
   const { error } = await supabase.from('virtual_room_objects').update(row).eq('id', item.id);
