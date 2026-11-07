@@ -109,7 +109,9 @@ Deno.serve(async (req) => {
   if (!/^[0-9a-f-]{36}$/i.test(notificationId)) return json({ error: 'notificationId required' }, 400);
 
   const { data: n } = await admin.from('notifications').select('*').eq('id', notificationId).maybeSingle();
-  if (!n || !CALL_TYPES.includes(n.type) || n.read) return json({ skipped: 'not a ringing call' });
+  // (Call notifications for iPhones with CallKit are saved as already read, so
+  // the app's own ringing screen stays out of the way — see migration 038.)
+  if (!n || !CALL_TYPES.includes(n.type)) return json({ skipped: 'not a ringing call' });
   if (Date.now() - new Date(n.created_at).getTime() > RING_MS) return json({ skipped: 'too old' });
 
   // Once per call.
@@ -124,7 +126,9 @@ Deno.serve(async (req) => {
     callerId: d.caller_id || n.actor_id || '',
     callerName: d.caller_name || n.actor_name || 'Someone',
     video: !!d.video,
-    roomId: d.room_id || '',
+    // No "roomId" key on purpose: in app 1.1.2 the ringing listener it starts
+    // shares (and then closes) the call screen's channel, so answered calls
+    // never connected. The call screen joins with room_id instead.
     room_id: d.room_id || '',
     caller_id: d.caller_id || n.actor_id || '',
     caller_name: d.caller_name || n.actor_name || 'Someone',
