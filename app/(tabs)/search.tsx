@@ -1,5 +1,5 @@
 import {
-  Search as SearchIcon, X, UserPlus, UserCheck, AtSign, Hash, Clock, Zap,
+  Search as SearchIcon, X, ChevronLeft, UserPlus, UserCheck, AtSign, Hash, Clock, Zap,
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
@@ -8,7 +8,8 @@ import {
 } from 'react-native';
 import type { TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useTabBar } from '@/contexts/TabBarContext';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -70,6 +71,13 @@ function timeAgo(dateStr: string): string {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { showTabBar } = useTabBar();
+  // Never strand people here: the bottom bar always shows on Search.
+  useFocusEffect(useCallback(() => { showTabBar(); }, [showTabBar]));
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/feed' as any);
+  };
   const { colors } = useTheme();
   const { user: currentUser } = useAuth();
   const inputRef = useRef<TextInputInstance>(null);
@@ -371,6 +379,9 @@ export default function SearchScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Search Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity onPress={goBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel="Back" testID="search-back">
+          <ChevronLeft size={26} color={colors.text} />
+        </TouchableOpacity>
         <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SearchIcon size={18} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput
@@ -459,9 +470,10 @@ export default function SearchScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 12 },
+  header: { paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  backBtn: { width: 32, height: 42, alignItems: 'center', justifyContent: 'center', marginLeft: -6 },
   searchBar: {
-    flexDirection: 'row', alignItems: 'center', borderRadius: 12,
+    flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 12,
     borderWidth: 1, paddingHorizontal: 12, height: 42,
   },
   searchIcon: { marginRight: 8 },
