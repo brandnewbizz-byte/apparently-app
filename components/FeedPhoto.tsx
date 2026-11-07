@@ -12,7 +12,9 @@ import { Image as RNImage, Platform, StyleSheet, View, type LayoutChangeEvent, t
 import { LinearGradient } from 'expo-linear-gradient';
 
 /** Photos at least this close to the screen's shape fill it completely. */
-const FILL_RATIO = 0.8;
+// Only photos (almost) as tall as the screen fill it; a 9:16 card on a modern
+// phone (about 9:19.5) would lose ~18% of its sides, so it's shown whole instead.
+const FILL_RATIO = 0.95;
 
 export default function FeedPhoto({ uri, width, height, style }: {
   uri: string;
