@@ -1343,7 +1343,10 @@ export default function FeedScreen() {
         {/* Mount the list only once the page height is known, so every post
             is one exact page from the first frame (mixing measured and fixed
             heights left the list unable to render posts further down). */}
-        {gridMode && filteredPosts.length > 0 ? (
+        {/* The grid stays mounted (hidden) while a post is open, so going back
+            returns to the same spot, like Pinterest. */}
+        {filteredPosts.length > 0 ? (
+          <View style={{ flex: 1, display: gridMode ? 'flex' : 'none' }}>
           <FeedGrid
             scrollRef={gridRef}
             posts={filteredPosts}
@@ -1354,7 +1357,9 @@ export default function FeedScreen() {
             onScroll={(e) => handleTabBarScroll(e.nativeEvent.contentOffset.y)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} progressViewOffset={floatBarSpace} />}
           />
-        ) : contentHeight > 0 ? (
+          </View>
+        ) : null}
+        {gridMode && filteredPosts.length > 0 ? null : contentHeight > 0 ? (
         <FlatList
           initialScrollIndex={Math.min(openIndex, Math.max(0, filteredPosts.length - 1))}
           ref={listRef}
